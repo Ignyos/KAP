@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kitchen & Pantry</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app-root" class="app-root">
+    <header class="app-header">
+      <h1 class="app-title">Kitchen & Pantry</h1>
+    </header>
+
+    <nav class="tab-nav" aria-label="Primary">
+      <div id="main-tabs" class="tab-list" role="tablist" aria-label="Kitchen and Pantry Sections"></div>
+    </nav>
+
+    <main class="page-main" id="page-main">
+      <section id="main-content" class="main-content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <template id="main-tab-template">
+    <button type="button" class="tab-button" role="tab" aria-selected="false">
+      <span class="tab-label"></span>
+      <span class="tab-inline-action" aria-hidden="true"></span>
+    </button>
+  </template>
+
+  <template id="main-content-shell-template">
+    <section class="content-shell" role="region">
+      <div class="empty-state-card">
+        <p class="empty-state-text"></p>
+      </div>
+      <div class="record-list" data-record-list></div>
+    </section>
+  </template>
+
+  <template id="list-record-row-template">
+    <div class="record-row">
+      <span class="record-name"></span>
+      <div class="record-actions">
+        <button type="button" class="record-action-button" data-action="rename">Rename</button>
+        <button type="button" class="record-action-button" data-action="delete">Delete</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="modal-template">
+    <div class="modal-overlay">
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <h2 class="modal-title"></h2>
+        <div class="modal-body"></div>
+        <div class="modal-footer">
+          <button type="button" class="modal-button modal-button--secondary modal-cancel-button">Cancel</button>
+          <button type="button" class="modal-button modal-confirm-button"></button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script src="./shared/ids.js"></script>
+  <script src="./data/stores.js"></script>
+  <script src="./data/db.js"></script>
+  <script src="./ui/ui.js"></script>
+  <script src="./features/lists/lists-service.js"></script>
+  <script src="./features/lists/lists-page.js"></script>
+  <script src="./features/templates/templates-service.js"></script>
+  <script src="./features/templates/templates-page.js"></script>
+  <script src="./features/main/main-page.js"></script>
+  <script src="./app-init.js"></script>
+  <script src="./main.js"></script>
+</body>
+</html>

@@ -30,7 +30,7 @@
 ## Folder Structure (Vanilla JS)
 
 ```text
-/public
+/src
   index.html                      — Single HTML page with global templates
   styles.css                      — Global stylesheet
   /templates
@@ -38,7 +38,6 @@
     templates.templates.html
     recipes.templates.html
 
-/src
   main.js                         — App entry point
   app-init.js                     — Bootstrap and wiring
   
@@ -170,6 +169,7 @@ async function initListsPage() {
 - Runtime: Browser only
 - Database: IndexedDB with a centralized DB wrapper module
 - No build step, no bundler, no module syntax — all scripts loaded via `<script>` tags in order
+- Repository layout rule: All application source files are under `/src`; deployment pipeline outputs static site artifacts to `/docs`
 
 ### UI Architecture
 - Three-layer approach: Templates + `ui.js` interface + Feature scripts
