@@ -115,6 +115,26 @@ function Update-AssetVersionReferences {
   }
 }
 
+function Invoke-BuildScript {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RootPath,
+    [switch]$WhatIfMode
+  )
+
+  $buildScriptPath = Join-Path $RootPath "build.ps1"
+  if (-not (Test-Path -LiteralPath $buildScriptPath)) {
+    throw "Required file not found: $buildScriptPath"
+  }
+
+  Write-Host "Running build script..." -ForegroundColor Cyan
+  & $buildScriptPath -WhatIfMode:$WhatIfMode
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Build script failed: $buildScriptPath"
+  }
+}
+
 $scriptDir = Split-Path -Parent $PSCommandPath
 Push-Location $scriptDir
 try {
@@ -158,6 +178,7 @@ try {
   $tagName = $timestamp
 
   Update-AssetVersionReferences -RootPath $repoRoot -Version $timestamp -WhatIfMode:$WhatIfMode
+  Invoke-BuildScript -RootPath $repoRoot -WhatIfMode:$WhatIfMode
 
   $releaseDir = Join-Path $repoRoot "release"
   if (-not (Test-Path -LiteralPath $releaseDir)) {
