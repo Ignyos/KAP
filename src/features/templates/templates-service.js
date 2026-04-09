@@ -14,6 +14,72 @@
     return trimmed;
   }
 
+  function ensureValidItemEntryName(name) {
+    var trimmed = (name || '').trim();
+    if (!trimmed) {
+      throw new Error('Item name is required.');
+    }
+
+    return trimmed;
+  }
+
+  function normalizeDescription(description) {
+    return (description || '').trim();
+  }
+
+  function normalizeOptionalIntegerQuantity(quantity) {
+    var raw = String(quantity == null ? '' : quantity).trim();
+    if (!raw) {
+      return null;
+    }
+
+    if (!/^-?\d+$/.test(raw)) {
+      throw new Error('Quantity must be an integer.');
+    }
+
+    return Number(raw);
+  }
+
+  async function requireTemplateById(templateId) {
+    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, templateId);
+    if (!record || record.type !== TEMPLATE_TYPE) {
+      throw new Error('Template not found.');
+    }
+
+    return record;
+  }
+
+  async function requireItemById(itemId) {
+    var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
+    if (!item) {
+      throw new Error('Item not found.');
+    }
+
+    return item;
+  }
+
+  async function readJoinRecordsByTemplateId(templateId) {
+    return window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS,
+      window.KaPStores.INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID,
+      templateId
+    );
+  }
+
+  async function findJoinRecord(templateId, itemId) {
+    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+    return joinRecords.find(function (record) {
+      return record.itemId === itemId;
+    }) || null;
+  }
+
+  async function findJoinRecordById(templateId, templateItemId) {
+    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+    return joinRecords.find(function (record) {
+      return record.id === templateItemId;
+    }) || null;
+  }
+
   function sortByUpdatedDateDescending(records) {
     return records.sort(function (a, b) {
       return String(b.updatedDate).localeCompare(String(a.updatedDate));
@@ -66,10 +132,93 @@
     await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
   }
 
+  async function getTemplateItems(templateId) {
+    await requireTemplateById(templateId);
+    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+    return Promise.all(
+      joinRecords.map(async function (joinRecord) {
+        var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId);
+        if (!joinRecord.name && item && item.name) {
+          joinRecord.name = item.name;
+          await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+        }
+
+        return {
+          id: joinRecord.id,
+          listRecordId: joinRecord.listRecordId,
+          itemId: joinRecord.itemId,
+          name: joinRecord.name || (item && item.name) || 'Unknown Item',
+          quantity: joinRecord.quantity,
+          description: joinRecord.description,
+          item: item || null
+        };
+      })
+    );
+  }
+
+  async function addItemToTemplate(templateId, itemId, name, quantity, description) {
+    await requireTemplateById(templateId);
+    var safeName = ensureValidItemEntryName(name);
+    var normalizedName = safeName.toLowerCase();
+
+    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+    var existingByName = joinRecords.find(function (r) {
+      return String(r.name || '').trim().toLowerCase() === normalizedName;
+    });
+
+    if (existingByName) {
+      existingByName.quantity = existingByName.quantity == null ? 1 : existingByName.quantity + 1;
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+      return existingByName;
+    }
+
+    await requireItemById(itemId);
+    var joinRecord = {
+      id: window.KaPIds.NewId(),
+      listRecordId: templateId,
+      itemId: itemId,
+      name: safeName,
+      quantity: normalizeOptionalIntegerQuantity(quantity),
+      description: normalizeDescription(description)
+    };
+
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+    return joinRecord;
+  }
+
+  async function updateTemplateItem(templateId, templateItemId, name, quantity, description) {
+    await requireTemplateById(templateId);
+    var existing = await findJoinRecordById(templateId, templateItemId);
+    if (!existing) {
+      throw new Error('Template item not found.');
+    }
+
+    existing.name = ensureValidItemEntryName(name);
+    existing.quantity = normalizeOptionalIntegerQuantity(quantity);
+    existing.description = normalizeDescription(description);
+
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+    return existing;
+  }
+
+  async function removeItemFromTemplate(templateId, templateItemId) {
+    await requireTemplateById(templateId);
+    var existing = await findJoinRecordById(templateId, templateItemId);
+    if (!existing) {
+      return;
+    }
+
+    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
+  }
+
   window.KaPTemplatesService = {
     getAllTemplates: getAllTemplates,
     createTemplate: createTemplate,
     renameTemplate: renameTemplate,
-    deleteTemplate: deleteTemplate
+    deleteTemplate: deleteTemplate,
+    getTemplateItems: getTemplateItems,
+    addItemToTemplate: addItemToTemplate,
+    updateTemplateItem: updateTemplateItem,
+    removeItemFromTemplate: removeItemFromTemplate
   };
 })();

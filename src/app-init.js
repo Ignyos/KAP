@@ -1,6 +1,6 @@
 var AppInit = {
   initialize: async function () {
     await window.KaPDB.open();
-    window.KaPMainPage.initialize();
+    await window.KaPMainPage.initialize();
   }
 };

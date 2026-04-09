@@ -1,6 +1,5 @@
 ---
 description: "Use when defining what the application is for without speculation, then convert confirmed answers into requirements-ready language."
-mode: ask
 ---
 
 # Purpose Definition Prompt
@@ -44,9 +43,6 @@ Use exactly these sections:
 
 ### Open Questions
 - Bullet list of unresolved items
-
-### Requirements Draft Text
-- Short, neutral text ready to place in `requirements.md`
 
 ## Guardrails
 

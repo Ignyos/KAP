@@ -9,12 +9,6 @@ Use these rules for work in this repository.
 - Prefer asking for clarification over filling gaps with assumptions.
 - Keep new documentation neutral until details are confirmed.
 
-## Source Of Truth
-
-- Treat `requirements.md` as the source of truth for confirmed requirements.
-- Only add requirements to `requirements.md` after the user explicitly confirms them.
-- If a prompt conflicts with `requirements.md`, ask which source should win before changing direction.
-
 ## Editing Expectations
 
 - Make minimal, focused changes.

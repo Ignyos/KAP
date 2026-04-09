@@ -46,6 +46,7 @@ The primary user is anyone who wants to manage shopping lists and/or create and 
 - As a user, I can add a new list by providing a list name with no items.
 - As a user, I can edit an existing list name.
 - As a user, I can add and remove items in an existing list.
+- As a user, I can set an optional integer quantity when adding or editing a list item.
 - As a user, I can delete an existing list.
 
 ### Shopping List Templates
@@ -53,7 +54,7 @@ The primary user is anyone who wants to manage shopping lists and/or create and 
 - As a user, I can add a new list template by providing a template name with no items.
 - As a user, I can edit an existing list template name.
 - As a user, I can add and remove items in an existing list template.
-- As a user, I can update item quantities in an existing list template.
+- As a user, I can update item quantities in an existing list template using optional integer values.
 - As a user, I can delete an existing list template.
 
 ### Shared Data Model
@@ -62,8 +63,10 @@ The primary user is anyone who wants to manage shopping lists and/or create and 
 - The Item record set must function as a shared catalog that is reused across List, Template, and Recipe records.
 - Item definition updates must propagate to lists and templates that reference the updated item.
 - Quantity must be stored on the relationship record (ListRecord-Item), not on Item.
+- Quantity for list/template items is optional; when provided it must be an integer.
 - The shared entity type discriminator must include List, Template, and Recipe.
 - Description must be supported on ListRecord, Item, and ListRecord-Item.
+- UnitOfMeasure is deferred for the current list/template milestone and is not required for item records in this phase.
 
 ### Item Discovery and Reuse
 
@@ -102,9 +105,8 @@ The primary user is anyone who wants to manage shopping lists and/or create and 
 #### Data Model (Confirmed)
 
 - ListRecord: Id<guid>, Name<string>, Description<string>, Type<enum: List|Template|Recipe>, CreatedDate<dateTime>, UpdatedDate<dateTime>
-- Item: Id<guid>, Name<string>, Description<string>, UnitOfMeasure<enum>
-- UnitOfMeasure: Enum of different units of measure (for example: Ounces, Size, Kilograms)
-- ListRecord-Item: ListRecordId<guid>, ItemId<guid>, Quantity<string>, Description<string>
+- Item: Id<guid>, Name<string>, Description<string>
+- ListRecord-Item: ListRecordId<guid>, ItemId<guid>, Quantity<int nullable>, Description<string>
 
 ### Shopping List Templates
 
@@ -125,14 +127,14 @@ The primary user is anyone who wants to manage shopping lists and/or create and 
 Option B: Shared item catalog with join table
 
 - ListRecord: Id<guid>, Name<string>, Description<string>, Type<enum: List|Template|Recipe>, CreatedDate<dateTime>, UpdatedDate<dateTime>
-- Item: Id<guid>, Name<string>, Description<string>, UnitOfMeasure<enum>
-- ListRecord-Item: ListRecordId<guid>, ItemId<guid>, Quantity<string>, Description<string>
+- Item: Id<guid>, Name<string>, Description<string>
+- ListRecord-Item: ListRecordId<guid>, ItemId<guid>, Quantity<int nullable>, Description<string>
 
 #### Data Mapping (Confirmed)
 
 - Use one shared entity for both list and template records, distinguished by a type field.
 - Entity: ListRecord Id<guid>, Name<string>, Description<string>, Type<enum: List|Template|Recipe>, CreatedDate<dateTime>, UpdatedDate<dateTime>
-- Relationship: ListRecord-Item ListRecordId<guid>, ItemId<guid>, Quantity<string>, Description<string>
+- Relationship: ListRecord-Item ListRecordId<guid>, ItemId<guid>, Quantity<int nullable>, Description<string>
 
 ### Food Recipes
 
@@ -186,6 +188,8 @@ None recorded.
 - The Item record set is a shared catalog that supports type-ahead discovery, reuse, and growth over time.
 - Item definition updates will propagate across lists and templates that reference the same item.
 - Quantity values are relationship-specific and will be stored on ListRecord-Item records.
+- Quantity values for list/template items are optional integers on ListRecord-Item records.
+- UnitOfMeasure is deferred for list/template item management and will be revisited during recipe-phase requirements.
 - Lists and templates will use one shared entity model with a type discriminator.
 - Recipe is a supported ListRecord type.
 - Recipe versioning uses a diff-style inheritance model.
@@ -211,3 +215,4 @@ None recorded.
 - 2026-04-02: Restructured functional requirements into categories and converted user-facing statements to As a user phrasing.
 - 2026-04-02: Standardized Feature Definitions minimum user actions to As a user phrasing.
 - 2026-04-02: Added confirmed Item catalog discovery, select-existing, and create-new item reuse requirements.
+- 2026-04-08: Confirmed list/template item quantities are optional integers and deferred UnitOfMeasure to recipe-phase requirements.

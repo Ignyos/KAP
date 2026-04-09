@@ -9,7 +9,10 @@
 <body>
   <div id="app-root" class="app-root">
     <header class="app-header">
-      <h1 class="app-title">Kitchen & Pantry</h1>
+      <div class="header-container">
+        <h1 class="app-title">Kitchen & Pantry</h1>
+        <button type="button" class="settings-button" id="settings-button" title="Settings">⚙</button>
+      </div>
     </header>
 
     <nav class="tab-nav" aria-label="Primary">
@@ -18,6 +21,7 @@
 
     <main class="page-main" id="page-main">
       <section id="main-content" class="main-content" aria-live="polite"></section>
+      <section id="settings-content" class="settings-content" aria-live="polite"></section>
     </main>
   </div>
 
@@ -38,12 +42,42 @@
   </template>
 
   <template id="list-record-row-template">
-    <div class="record-row">
+    <button type="button" class="record-row">
       <span class="record-name"></span>
-      <div class="record-actions">
-        <button type="button" class="record-action-button" data-action="rename">Rename</button>
-        <button type="button" class="record-action-button" data-action="delete">Delete</button>
+    </button>
+  </template>
+
+  <template id="detail-shell-template">
+    <section class="detail-shell" role="region">
+      <div class="detail-header">
+        <button type="button" class="detail-back-button">&#8592; Back</button>
+        <h2 class="detail-title"></h2>
+        <div class="detail-actions"></div>
       </div>
+      <div class="detail-item-list" data-detail-item-list></div>
+      <div class="empty-state-card">
+        <p class="empty-state-text"></p>
+      </div>
+    </section>
+  </template>
+
+  <template id="detail-item-row-template">
+    <div class="detail-item-row">
+      <div class="detail-item-content">
+        <div class="detail-item-name"></div>
+        <div class="detail-item-meta"></div>
+      </div>
+      <div class="detail-item-actions">
+        <button type="button" class="record-action-button" data-action="edit">Edit</button>
+        <button type="button" class="record-action-button record-action-button--danger" data-action="remove">Remove</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="settings-toggle-template">
+    <div class="settings-toggle-row">
+      <label class="settings-toggle-label"></label>
+      <button type="button" class="settings-toggle-switch settings-toggle-switch--off" role="switch" aria-checked="false"></button>
     </div>
   </template>
 
@@ -61,13 +95,16 @@
   </template>
 
   <script src="./shared/ids.js"></script>
+  <script src="./shared/settings.js"></script>
   <script src="./data/stores.js"></script>
   <script src="./data/db.js"></script>
   <script src="./ui/ui.js"></script>
+  <script src="./features/items/items-service.js"></script>
   <script src="./features/lists/lists-service.js"></script>
   <script src="./features/lists/lists-page.js"></script>
   <script src="./features/templates/templates-service.js"></script>
   <script src="./features/templates/templates-page.js"></script>
+  <script src="./features/settings/settings-page.js"></script>
   <script src="./features/main/main-page.js"></script>
   <script src="./app-init.js"></script>
   <script src="./main.js"></script>
