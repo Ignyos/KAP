@@ -1,0 +1,111 @@
+Release timestamp: 2026-04-11-16-33
+Diff source: initial repository state to HEAD
+Generated at: 2026-04-11 16:33:23Z
+diff --git a/docs/index.html b/docs/index.html
+index 393acfa..85a2161 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -4,7 +4,7 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Kitchen & Pantry</title>
+-  <link rel="stylesheet" href="./styles.css" />
++  <link rel="stylesheet" href="./styles.css?v=2026-04-11-16-33" />
+ </head>
+ <body>
+   <div id="app-root" class="app-root">
+@@ -91,22 +91,23 @@
+     </div>
+   </template>
+ 
+-  <script src="./shared/ids.js"></script>
+-  <script src="./shared/settings.js"></script>
+-  <script src="./data/stores.js"></script>
+-  <script src="./data/db.js"></script>
+-  <script src="./ui/ui.js"></script>
+-  <script src="./features/items/items-service.js"></script>
+-  <script src="./shared/item-discovery.js"></script>
+-  <script src="./shared/item-entry-rules.js"></script>
+-  <script src="./features/lists/lists-service.js"></script>
+-  <script src="./features/lists/lists-page.js"></script>
+-  <script src="./features/templates/templates-service.js"></script>
+-  <script src="./features/templates/templates-page.js"></script>
+-  <script src="./features/settings/settings-page.js"></script>
+-  <script src="./features/main/main-page.js"></script>
+-  <script src="./app-router.js"></script>
+-  <script src="./app-init.js"></script>
+-  <script src="./main.js"></script>
++  <script src="./shared/ids.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/settings.js?v=2026-04-11-16-33"></script>
++  <script src="./data/stores.js?v=2026-04-11-16-33"></script>
++  <script src="./data/db.js?v=2026-04-11-16-33"></script>
++  <script src="./ui/ui.js?v=2026-04-11-16-33"></script>
++  <script src="./features/items/items-service.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/item-discovery.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/item-entry-rules.js?v=2026-04-11-16-33"></script>
++  <script src="./features/lists/lists-service.js?v=2026-04-11-16-33"></script>
++  <script src="./features/lists/lists-page.js?v=2026-04-11-16-33"></script>
++  <script src="./features/templates/templates-service.js?v=2026-04-11-16-33"></script>
++  <script src="./features/templates/templates-page.js?v=2026-04-11-16-33"></script>
++  <script src="./features/settings/settings-page.js?v=2026-04-11-16-33"></script>
++  <script src="./features/main/main-page.js?v=2026-04-11-16-33"></script>
++  <script src="./app-router.js?v=2026-04-11-16-33"></script>
++  <script src="./app-init.js?v=2026-04-11-16-33"></script>
++  <script src="./main.js?v=2026-04-11-16-33"></script>
+ </body>
+ </html>
++
+diff --git a/src/index.html b/src/index.html
+index 393acfa..85a2161 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -4,7 +4,7 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Kitchen & Pantry</title>
+-  <link rel="stylesheet" href="./styles.css" />
++  <link rel="stylesheet" href="./styles.css?v=2026-04-11-16-33" />
+ </head>
+ <body>
+   <div id="app-root" class="app-root">
+@@ -91,22 +91,23 @@
+     </div>
+   </template>
+ 
+-  <script src="./shared/ids.js"></script>
+-  <script src="./shared/settings.js"></script>
+-  <script src="./data/stores.js"></script>
+-  <script src="./data/db.js"></script>
+-  <script src="./ui/ui.js"></script>
+-  <script src="./features/items/items-service.js"></script>
+-  <script src="./shared/item-discovery.js"></script>
+-  <script src="./shared/item-entry-rules.js"></script>
+-  <script src="./features/lists/lists-service.js"></script>
+-  <script src="./features/lists/lists-page.js"></script>
+-  <script src="./features/templates/templates-service.js"></script>
+-  <script src="./features/templates/templates-page.js"></script>
+-  <script src="./features/settings/settings-page.js"></script>
+-  <script src="./features/main/main-page.js"></script>
+-  <script src="./app-router.js"></script>
+-  <script src="./app-init.js"></script>
+-  <script src="./main.js"></script>
++  <script src="./shared/ids.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/settings.js?v=2026-04-11-16-33"></script>
++  <script src="./data/stores.js?v=2026-04-11-16-33"></script>
++  <script src="./data/db.js?v=2026-04-11-16-33"></script>
++  <script src="./ui/ui.js?v=2026-04-11-16-33"></script>
++  <script src="./features/items/items-service.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/item-discovery.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/item-entry-rules.js?v=2026-04-11-16-33"></script>
++  <script src="./features/lists/lists-service.js?v=2026-04-11-16-33"></script>
++  <script src="./features/lists/lists-page.js?v=2026-04-11-16-33"></script>
++  <script src="./features/templates/templates-service.js?v=2026-04-11-16-33"></script>
++  <script src="./features/templates/templates-page.js?v=2026-04-11-16-33"></script>
++  <script src="./features/settings/settings-page.js?v=2026-04-11-16-33"></script>
++  <script src="./features/main/main-page.js?v=2026-04-11-16-33"></script>
++  <script src="./app-router.js?v=2026-04-11-16-33"></script>
++  <script src="./app-init.js?v=2026-04-11-16-33"></script>
++  <script src="./main.js?v=2026-04-11-16-33"></script>
+ </body>
+ </html>
++
