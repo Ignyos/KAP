@@ -31,7 +31,7 @@
 
     var toggleRow = window.KaPUI.NewSettingsToggle({
       label: 'Remember position when switching views',
-      description: 'On: each tab remembers the last opened List, Template, or Recipe view. Off: opening Lists, Templates, or Recipes always starts from that tab\'s main list.',
+      description: 'On: each section remembers the last opened Grocery List, Pantry entry, or Recipe view. Off: opening Grocery Lists, Pantry, or Recipes always starts from that section\'s main list.',
       checked: rememberPosition,
       onChange: function (checked) {
         window.KaPSettings.set(window.KaPSettings.KEYS.REMEMBER_POSITION, checked);

@@ -5,8 +5,8 @@
 
   async function createTemplate() {
     var name = await window.KaPUI.ShowPrompt({
-      title: 'New Template',
-      placeholder: 'Template name',
+      title: 'New Pantry Entry',
+      placeholder: 'e.g. Pantry staples, or Fridge essentials',
       confirmLabel: 'Create'
     });
     if (name === null) {
@@ -16,16 +16,16 @@
     try {
       await window.KaPTemplatesService.createTemplate(name);
     } catch (error) {
-      await showError(error.message || 'Unable to create template.');
+      await showError(error.message || 'Unable to create pantry entry.');
     }
   }
 
   async function renameTemplate(record) {
     var nextName = await window.KaPUI.ShowPrompt({
-      title: 'Rename Template',
-      placeholder: 'Template name',
+      title: 'Edit Pantry Entry',
+      placeholder: 'Pantry entry name',
       value: record.name,
-      confirmLabel: 'Rename'
+      confirmLabel: 'Save'
     });
     if (nextName === null) {
       return null;
@@ -34,14 +34,14 @@
     try {
       return await window.KaPTemplatesService.renameTemplate(record.id, nextName);
     } catch (error) {
-      await showError(error.message || 'Unable to rename template.');
+      await showError(error.message || 'Unable to update pantry entry.');
       return null;
     }
   }
 
   async function deleteTemplate(record) {
     var confirmed = await window.KaPUI.ShowConfirm({
-      title: 'Delete Template',
+      title: 'Delete Pantry Entry',
       message: 'Delete "' + record.name + '"?',
       confirmLabel: 'Delete',
       isDanger: true
@@ -54,14 +54,14 @@
       await window.KaPTemplatesService.deleteTemplate(record.id);
       return true;
     } catch (error) {
-      await showError(error.message || 'Unable to delete template.');
+      await showError(error.message || 'Unable to delete pantry entry.');
       return false;
     }
   }
 
   async function addTemplateItemWithDiscoveryModal(templateRecord, detailItems) {
     var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
-      title: 'Add Item to Template',
+      title: 'Add Item to Pantry Entry',
       currentContextLabel: 'template',
       detailItems: detailItems
     }));
@@ -118,7 +118,7 @@
     var itemName = detailItem.name || 'this item';
     var confirmed = await window.KaPUI.ShowConfirm({
       title: 'Remove Item',
-      message: 'Remove "' + itemName + '" from this template?',
+      message: 'Remove "' + itemName + '" from this pantry entry?',
       confirmLabel: 'Remove',
       isDanger: true
     });
@@ -138,7 +138,7 @@
     var records = await window.KaPTemplatesService.getAllTemplates();
 
     window.KaPUI.ReplaceMainContent(container, {
-      emptyStateText: 'No templates yet.',
+      emptyStateText: 'No pantry entries yet.',
       records: records,
       rowBuilder: function (record) {
         return window.KaPUI.NewListRecordRow(record, function () {

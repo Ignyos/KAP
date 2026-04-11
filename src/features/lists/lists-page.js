@@ -5,8 +5,8 @@
 
   async function createList() {
     var name = await window.KaPUI.ShowPrompt({
-      title: 'New List',
-      placeholder: 'List name',
+      title: 'New Grocery List',
+      placeholder: 'Grocery list name',
       confirmLabel: 'Create'
     });
     if (name === null) {
@@ -16,16 +16,16 @@
     try {
       await window.KaPListsService.createList(name);
     } catch (error) {
-      await showError(error.message || 'Unable to create list.');
+      await showError(error.message || 'Unable to create grocery list.');
     }
   }
 
   async function renameList(record) {
     var nextName = await window.KaPUI.ShowPrompt({
-      title: 'Rename List',
-      placeholder: 'List name',
+      title: 'Edit Grocery List',
+      placeholder: 'Grocery list name',
       value: record.name,
-      confirmLabel: 'Rename'
+      confirmLabel: 'Save'
     });
     if (nextName === null) {
       return null;
@@ -34,14 +34,14 @@
     try {
       return await window.KaPListsService.renameList(record.id, nextName);
     } catch (error) {
-      await showError(error.message || 'Unable to rename list.');
+      await showError(error.message || 'Unable to update grocery list.');
       return null;
     }
   }
 
   async function deleteList(record) {
     var confirmed = await window.KaPUI.ShowConfirm({
-      title: 'Delete List',
+      title: 'Delete Grocery List',
       message: 'Delete "' + record.name + '"?',
       confirmLabel: 'Delete',
       isDanger: true
@@ -54,14 +54,14 @@
       await window.KaPListsService.deleteList(record.id);
       return true;
     } catch (error) {
-      await showError(error.message || 'Unable to delete list.');
+      await showError(error.message || 'Unable to delete grocery list.');
       return false;
     }
   }
 
   async function addListItemWithDiscoveryModal(listRecord, detailItems) {
     var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
-      title: 'Add Item to List',
+      title: 'Add Item to Grocery List',
       currentContextLabel: 'list',
       detailItems: detailItems
     }));
@@ -118,7 +118,7 @@
     var itemName = detailItem.name || 'this item';
     var confirmed = await window.KaPUI.ShowConfirm({
       title: 'Remove Item',
-      message: 'Remove "' + itemName + '" from this list?',
+      message: 'Remove "' + itemName + '" from this grocery list?',
       confirmLabel: 'Remove',
       isDanger: true
     });
@@ -138,7 +138,7 @@
     var records = await window.KaPListsService.getAllLists();
 
     window.KaPUI.ReplaceMainContent(container, {
-      emptyStateText: 'No lists yet.',
+      emptyStateText: 'No grocery lists yet.',
       records: records,
       rowBuilder: function (record) {
         return window.KaPUI.NewListRecordRow(record, function () {

@@ -2,14 +2,14 @@
   var sectionDefinitions = [
     {
       id: 'lists',
-      label: 'Lists',
+      label: 'Grocery Lists',
       getAllFn: function () { return window.KaPListsService.getAllLists(); },
       renderDetailFn: function (container, record, hooks) { return window.KaPListsPage.renderDetailInto(container, record, hooks); },
       createFn: function () { return window.KaPListsPage.createList(); }
     },
     {
-      id: 'templates',
-      label: 'Templates',
+      label: 'Pantry & Fridge',
+      label: 'Pantry / Fridge',
       getAllFn: function () { return window.KaPTemplatesService.getAllTemplates(); },
       renderDetailFn: function (container, record, hooks) { return window.KaPTemplatesPage.renderDetailInto(container, record, hooks); },
       createFn: function () { return window.KaPTemplatesPage.createTemplate(); }
@@ -158,8 +158,16 @@
 
     var headerLabel = document.createElement('span');
     headerLabel.className = 'accordion-label';
-    var countText = count === 1 ? '1 item' : count + ' items';
-    headerLabel.textContent = section.label + ' (' + count + ')';
+
+    var headerLabelText = document.createElement('span');
+    headerLabelText.textContent = section.label;
+
+    var countBadge = document.createElement('span');
+    countBadge.className = 'accordion-count-badge';
+    countBadge.textContent = String(count);
+
+    headerLabel.appendChild(headerLabelText);
+    headerLabel.appendChild(countBadge);
 
     var headerActions = document.createElement('div');
     headerActions.className = 'accordion-actions';
