@@ -30,10 +30,20 @@
   ];
 
   var state = {
-    expandedSectionId: null
+    expandedSectionId: getSavedExpandedSection(),
+    settingsReturnPath: '/'
   };
 
   var currentRoute = null;
+  var requestedDetailRecord = null;
+
+  function getSavedExpandedSection() {
+    return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
+  }
+
+  function saveExpandedSection(sectionId) {
+    window.KaPSettings.set(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION, sectionId);
+  }
 
   function findSection(id) {
     return sectionDefinitions.find(function (section) {
@@ -41,12 +51,36 @@
     });
   }
 
+  function getPathForRoute(route) {
+    if (!route) {
+      return '/';
+    }
+
+    if (route.view === 'list' && route.id) {
+      return '/list/' + route.id;
+    }
+
+    if (route.view === 'template' && route.id) {
+      return '/template/' + route.id;
+    }
+
+    return '/';
+  }
+
   function onRouteChange(route) {
     currentRoute = route;
+
+    if (route.view !== 'settings') {
+      state.settingsReturnPath = getPathForRoute(route);
+    }
     
     if (route.view === 'home') {
       renderHome().catch(function (error) {
         console.error('Error rendering home:', error);
+      });
+    } else if (route.view === 'settings') {
+      renderSettingsPage().catch(function (error) {
+        console.error('Error rendering settings:', error);
       });
     } else if (route.view === 'list' && route.id) {
       renderListDetail(route.id).catch(function (error) {
@@ -124,6 +158,7 @@
 
     var headerLabel = document.createElement('span');
     headerLabel.className = 'accordion-label';
+    var countText = count === 1 ? '1 item' : count + ' items';
     headerLabel.textContent = section.label + ' (' + count + ')';
 
     var headerActions = document.createElement('div');
@@ -163,6 +198,7 @@
   async function renderSectionContent(contentElement, section) {
     try {
       var records = await section.getAllFn();
+      var listItemCountsById = {};
 
       if (section.isComingSoon) {
         contentElement.innerHTML = '<div class="empty-state-message">Recipes are coming soon.</div>';
@@ -174,11 +210,26 @@
         return;
       }
 
+      if (section.id === 'lists') {
+        var countPairs = await Promise.all(records.map(async function (record) {
+          try {
+            var itemCount = await window.KaPListsService.getListItemCount(record.id);
+            return { id: record.id, count: itemCount };
+          } catch (error) {
+            return { id: record.id, count: 0 };
+          }
+        }));
+
+        countPairs.forEach(function (pair) {
+          listItemCountsById[pair.id] = pair.count;
+        });
+      }
+
       var recordList = document.createElement('div');
       recordList.className = 'record-list';
 
       records.forEach(function (record) {
-        var row = createRecordRow(record, section);
+        var row = createRecordRow(record, section, listItemCountsById[record.id]);
         recordList.appendChild(row);
       });
 
@@ -190,7 +241,7 @@
     }
   }
 
-  function createRecordRow(record, section) {
+  function createRecordRow(record, section, listItemCount) {
     var row = document.createElement('div');
     row.className = 'accordion-record-row';
 
@@ -199,6 +250,14 @@
     nameSpan.textContent = record.name;
 
     row.appendChild(nameSpan);
+
+    if (section.id === 'lists') {
+      var countPill = document.createElement('span');
+      countPill.className = 'list-item-count-pill';
+      countPill.textContent = String(listItemCount || 0);
+      countPill.setAttribute('aria-label', String(listItemCount || 0) + ' items');
+      row.appendChild(countPill);
+    }
 
     row.addEventListener('click', function () {
       handleRecordOpen(record, section);
@@ -213,6 +272,7 @@
     } else {
       state.expandedSectionId = sectionId;
     }
+    saveExpandedSection(state.expandedSectionId);
     renderHome();
   }
 
@@ -283,7 +343,41 @@
     }
   }
 
+  async function renderSettingsPage() {
+    var contentContainer = document.getElementById('main-content');
+    if (!contentContainer) {
+      return;
+    }
+
+    await window.KaPSettingsPage.renderInto(contentContainer, {
+      onBack: function () {
+        window.KaPRouter.navigate(state.settingsReturnPath || '/');
+      }
+    });
+  }
+
+  function openSettings() {
+    if (currentRoute && currentRoute.view !== 'settings') {
+      state.settingsReturnPath = getPathForRoute(currentRoute);
+    }
+
+    window.KaPRouter.navigate('/settings');
+  }
+
+  function attachEventListeners() {
+    var settingsButton = document.getElementById('settings-button');
+    if (settingsButton) {
+      settingsButton.addEventListener('click', openSettings);
+    }
+  }
+
   async function initialize() {
+    attachEventListeners();
+    var mainContainer = document.getElementById('main-content');
+    if (mainContainer) {
+      mainContainer.classList.add('active');
+    }
+    
     // Hide the old tab navigation
     var tabNav = document.querySelector('.tab-nav');
     if (tabNav) {
