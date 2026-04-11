@@ -1,4 +1,44 @@
 (function () {
+  var activeOverflowMenu = null;
+
+  document.addEventListener('click', function (event) {
+    if (!activeOverflowMenu) {
+      return;
+    }
+
+    if (!activeOverflowMenu.wrap.contains(event.target)) {
+      activeOverflowMenu.setOpen(false);
+      activeOverflowMenu = null;
+    }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !activeOverflowMenu) {
+      return;
+    }
+
+    activeOverflowMenu.setOpen(false);
+    activeOverflowMenu = null;
+  });
+
+  function setActiveOverflowMenu(wrap, setOpen, isOpen) {
+    if (!isOpen) {
+      if (activeOverflowMenu && activeOverflowMenu.wrap === wrap) {
+        activeOverflowMenu = null;
+      }
+      return;
+    }
+
+    if (activeOverflowMenu && activeOverflowMenu.wrap !== wrap) {
+      activeOverflowMenu.setOpen(false);
+    }
+
+    activeOverflowMenu = {
+      wrap: wrap,
+      setOpen: setOpen
+    };
+  }
+
   function newFromTemplate(templateId) {
     var template = document.getElementById(templateId);
     if (!template) {
@@ -104,6 +144,39 @@
     AddMainContentShell(container, config);
   }
 
+  function getClipBounds(element) {
+    var ancestor = element && element.parentElement;
+
+    while (ancestor && ancestor !== document.body) {
+      var style = window.getComputedStyle(ancestor);
+      var overflowX = style.overflowX || '';
+      var overflowY = style.overflowY || '';
+      var isClippingAncestor = /(auto|scroll|hidden|clip)/.test(overflowX + overflowY);
+
+      if (isClippingAncestor) {
+        return ancestor.getBoundingClientRect();
+      }
+
+      ancestor = ancestor.parentElement;
+    }
+
+    return {
+      top: 0,
+      bottom: window.innerHeight
+    };
+  }
+
+  function shouldOpenOverflowUp(trigger, menu) {
+    var triggerRect = trigger.getBoundingClientRect();
+    var menuHeight = menu.offsetHeight;
+    var gap = 6;
+    var clipBounds = getClipBounds(trigger);
+    var spaceBelow = clipBounds.bottom - triggerRect.bottom;
+    var spaceAbove = triggerRect.top - clipBounds.top;
+
+    return spaceBelow < menuHeight + gap && spaceAbove > spaceBelow;
+  }
+
   function NewDetailShell(config) {
     var node = newFromTemplate('detail-shell-template');
     var titleNode = node.querySelector('.detail-title');
@@ -116,26 +189,83 @@
 
     titleNode.textContent = config.title;
     emptyStateText.textContent = config.emptyStateText || '';
+    backButton.textContent = config.backLabel || '\u2190 Home';
 
     backButton.addEventListener('click', config.onBack);
 
     if (typeof config.onAddItem === 'function') {
       var addItemButton = document.createElement('button');
       addItemButton.type = 'button';
-      addItemButton.className = 'record-action-button';
-      addItemButton.textContent = config.addItemLabel || 'Add Item';
+      addItemButton.className = 'accordion-new-button detail-add-button';
+      addItemButton.textContent = config.addItemLabel || '+ Add Item';
       addItemButton.addEventListener('click', config.onAddItem);
       actionsNode.appendChild(addItemButton);
     }
 
-    (config.actions || []).forEach(function (action) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'record-action-button' + (action.isDanger ? ' record-action-button--danger' : '');
-      btn.textContent = action.label;
-      btn.addEventListener('click', action.onClick);
-      actionsNode.appendChild(btn);
-    });
+    if ((config.actions || []).length > 0) {
+      var overflowWrap = document.createElement('div');
+      overflowWrap.className = 'detail-overflow-menu';
+
+      var overflowTrigger = document.createElement('button');
+      overflowTrigger.type = 'button';
+      overflowTrigger.className = 'record-action-button detail-overflow-trigger';
+
+      var overflowDots = document.createElement('span');
+      overflowDots.className = 'detail-overflow-dots';
+      overflowDots.textContent = '\u2026';
+      overflowTrigger.appendChild(overflowDots);
+
+      overflowTrigger.setAttribute('aria-haspopup', 'menu');
+      overflowTrigger.setAttribute('aria-expanded', 'false');
+      overflowTrigger.setAttribute('aria-label', 'More actions');
+
+      var overflowList = document.createElement('div');
+      overflowList.className = 'detail-overflow-list';
+      overflowList.setAttribute('role', 'menu');
+
+      function updateOverflowDirection() {
+        overflowList.classList.remove('detail-overflow-list--up');
+
+        if (shouldOpenOverflowUp(overflowTrigger, overflowList)) {
+          overflowList.classList.add('detail-overflow-list--up');
+        }
+      }
+
+      function setOverflowOpen(isOpen) {
+        overflowList.style.display = isOpen ? 'grid' : 'none';
+        overflowTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        setActiveOverflowMenu(overflowWrap, setOverflowOpen, isOpen);
+
+        if (isOpen) {
+          updateOverflowDirection();
+        }
+      }
+
+      setOverflowOpen(false);
+
+      (config.actions || []).forEach(function (action) {
+        var menuItem = document.createElement('button');
+        menuItem.type = 'button';
+        menuItem.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
+        menuItem.textContent = action.label;
+        menuItem.setAttribute('role', 'menuitem');
+        menuItem.addEventListener('click', function () {
+          setOverflowOpen(false);
+          action.onClick();
+        });
+        overflowList.appendChild(menuItem);
+      });
+
+      overflowTrigger.addEventListener('click', function (event) {
+        event.stopPropagation();
+        var isOpen = overflowList.style.display !== 'none';
+        setOverflowOpen(!isOpen);
+      });
+
+      overflowWrap.appendChild(overflowTrigger);
+      overflowWrap.appendChild(overflowList);
+      actionsNode.appendChild(overflowWrap);
+    }
 
     if (detailItems.length > 0 && typeof config.itemRowBuilder === 'function') {
       emptyStateCard.hidden = true;
@@ -152,8 +282,7 @@
     var node = newFromTemplate('detail-item-row-template');
     var nameNode = node.querySelector('.detail-item-name');
     var metaNode = node.querySelector('.detail-item-meta');
-    var editButton = node.querySelector('[data-action="edit"]');
-    var removeButton = node.querySelector('[data-action="remove"]');
+    var actionsNode = node.querySelector('.detail-item-actions');
     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
     var quantityText = detailItem.quantity == null ? 'Qty: -' : 'Qty: ' + String(detailItem.quantity);
     var descriptionText = detailItem.description ? ' | ' + detailItem.description : '';
@@ -161,12 +290,81 @@
     nameNode.textContent = itemName;
     metaNode.textContent = quantityText + descriptionText;
 
-    if (callbacks && typeof callbacks.onEdit === 'function') {
-      editButton.addEventListener('click', callbacks.onEdit);
-    }
+    if (actionsNode) {
+      var overflowWrap = document.createElement('div');
+      overflowWrap.className = 'detail-item-overflow-menu';
 
-    if (callbacks && typeof callbacks.onRemove === 'function') {
-      removeButton.addEventListener('click', callbacks.onRemove);
+      var overflowTrigger = document.createElement('button');
+      overflowTrigger.type = 'button';
+      overflowTrigger.className = 'record-action-button detail-item-overflow-trigger';
+      overflowTrigger.setAttribute('aria-haspopup', 'menu');
+      overflowTrigger.setAttribute('aria-expanded', 'false');
+      overflowTrigger.setAttribute('aria-label', 'Item actions');
+
+      var overflowDots = document.createElement('span');
+      overflowDots.className = 'detail-item-overflow-dots';
+      overflowDots.textContent = '\u22EE';
+      overflowTrigger.appendChild(overflowDots);
+
+      var overflowList = document.createElement('div');
+      overflowList.className = 'detail-overflow-list';
+      overflowList.setAttribute('role', 'menu');
+
+      function updateOverflowDirection() {
+        overflowList.classList.remove('detail-overflow-list--up');
+
+        if (shouldOpenOverflowUp(overflowTrigger, overflowList)) {
+          overflowList.classList.add('detail-overflow-list--up');
+        }
+      }
+
+      function setOverflowOpen(isOpen) {
+        overflowList.style.display = isOpen ? 'grid' : 'none';
+        overflowTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        setActiveOverflowMenu(overflowWrap, setOverflowOpen, isOpen);
+
+        if (isOpen) {
+          updateOverflowDirection();
+        }
+      }
+
+      setOverflowOpen(false);
+
+      if (callbacks && typeof callbacks.onEdit === 'function') {
+        var editItem = document.createElement('button');
+        editItem.type = 'button';
+        editItem.className = 'detail-overflow-item';
+        editItem.textContent = 'Edit';
+        editItem.setAttribute('role', 'menuitem');
+        editItem.addEventListener('click', function () {
+          setOverflowOpen(false);
+          callbacks.onEdit();
+        });
+        overflowList.appendChild(editItem);
+      }
+
+      if (callbacks && typeof callbacks.onRemove === 'function') {
+        var removeItem = document.createElement('button');
+        removeItem.type = 'button';
+        removeItem.className = 'detail-overflow-item detail-overflow-item--danger';
+        removeItem.textContent = 'Remove';
+        removeItem.setAttribute('role', 'menuitem');
+        removeItem.addEventListener('click', function () {
+          setOverflowOpen(false);
+          callbacks.onRemove();
+        });
+        overflowList.appendChild(removeItem);
+      }
+
+      overflowTrigger.addEventListener('click', function (event) {
+        event.stopPropagation();
+        var isOpen = overflowList.style.display !== 'none';
+        setOverflowOpen(!isOpen);
+      });
+
+      overflowWrap.appendChild(overflowTrigger);
+      overflowWrap.appendChild(overflowList);
+      actionsNode.appendChild(overflowWrap);
     }
 
     return node;
@@ -237,6 +435,11 @@
       titleNode.textContent = config.title;
       confirmButton.textContent = config.confirmLabel || 'OK';
       card.setAttribute('aria-label', config.title);
+
+      if (config.compact) {
+        overlay.classList.add('modal-overlay--compact');
+        card.classList.add('modal-card--compact');
+      }
 
       cancelButton.classList.add('modal-button--secondary');
 
@@ -687,7 +890,8 @@
       title: config.title,
       confirmLabel: config.confirmLabel || 'Confirm',
       cancelValue: false,
-      isDanger: config.isDanger || false
+      isDanger: config.isDanger || false,
+      compact: true
     });
   }
 

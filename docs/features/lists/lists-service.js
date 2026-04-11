@@ -14,9 +14,11 @@
     return trimmed;
   }
 
-  function sortByUpdatedDateDescending(records) {
+  function sortByNameAscending(records) {
     return records.sort(function (a, b) {
-      return String(b.updatedDate).localeCompare(String(a.updatedDate));
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        sensitivity: 'base'
+      });
     });
   }
 
@@ -27,7 +29,7 @@
       LIST_TYPE
     );
 
-    return sortByUpdatedDateDescending(records);
+    return sortByNameAscending(records);
   }
 
   async function createList(name) {

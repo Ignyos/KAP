@@ -50,7 +50,7 @@
   <template id="detail-shell-template">
     <section class="detail-shell" role="region">
       <div class="detail-header">
-        <button type="button" class="detail-back-button">&#8592; Back</button>
+        <button type="button" class="detail-back-button">&#8592; Home</button>
         <h2 class="detail-title"></h2>
         <div class="detail-actions"></div>
       </div>
@@ -67,10 +67,7 @@
         <div class="detail-item-name"></div>
         <div class="detail-item-meta"></div>
       </div>
-      <div class="detail-item-actions">
-        <button type="button" class="record-action-button" data-action="edit">Edit</button>
-        <button type="button" class="record-action-button record-action-button--danger" data-action="remove">Remove</button>
-      </div>
+      <div class="detail-item-actions"></div>
     </div>
   </template>
 
@@ -84,12 +81,12 @@
   <template id="modal-template">
     <div class="modal-overlay">
       <div class="modal-card" role="dialog" aria-modal="true">
-        <h2 class="modal-title"></h2>
-        <div class="modal-body"></div>
         <div class="modal-footer">
           <button type="button" class="modal-button modal-button--secondary modal-cancel-button">Cancel</button>
+          <h2 class="modal-title"></h2>
           <button type="button" class="modal-button modal-confirm-button"></button>
         </div>
+        <div class="modal-body"></div>
       </div>
     </div>
   </template>
@@ -100,12 +97,15 @@
   <script src="./data/db.js"></script>
   <script src="./ui/ui.js"></script>
   <script src="./features/items/items-service.js"></script>
+  <script src="./shared/item-discovery.js"></script>
+  <script src="./shared/item-entry-rules.js"></script>
   <script src="./features/lists/lists-service.js"></script>
   <script src="./features/lists/lists-page.js"></script>
   <script src="./features/templates/templates-service.js"></script>
   <script src="./features/templates/templates-page.js"></script>
   <script src="./features/settings/settings-page.js"></script>
   <script src="./features/main/main-page.js"></script>
+  <script src="./app-router.js"></script>
   <script src="./app-init.js"></script>
   <script src="./main.js"></script>
 </body>

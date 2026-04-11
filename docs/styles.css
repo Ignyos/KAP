@@ -1,6 +1,9 @@
 :root {
   --color-bg: #0f131a;
   --color-surface: #171d26;
+  --color-surface-hover: #1e2736;
+  --color-surface-light: #1e2736;
+  --color-surface-light-hover: #2b374d;
   --color-border: #2b3442;
   --color-text: #e6edf3;
   --color-muted: #4f545b;
@@ -132,7 +135,6 @@ body {
 
 .record-list {
   display: grid;
-  gap: 10px;
 }
 
 .record-row {
@@ -193,14 +195,20 @@ body {
 }
 
 .modal-title {
-  margin: 0 0 16px 0;
+  margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--color-text);
+  text-align: center;
+  line-height: 1.2;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modal-body {
-  margin-bottom: 20px;
+  margin-top: 12px;
 }
 
 .modal-input {
@@ -226,12 +234,20 @@ body {
 }
 
 .modal-footer {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
   gap: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-surface);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .modal-button {
+  white-space: nowrap;
   border-radius: 8px;
   padding: 8px 16px;
   font-size: 0.9rem;
@@ -298,4 +314,100 @@ body {
   .tab-inline-action {
     font-size: 0.82rem;
   }
+}
+
+/* Accordion Layout Styles */
+.accordion-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accordion-section {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--color-surface-light);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background-color 0.2s ease;
+}
+
+.accordion-header:hover {
+  background: #1e2736;
+}
+
+.accordion-header:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -2px;
+}
+
+.accordion-label {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.accordion-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.accordion-new-button {
+  background: var(--color-brand);
+  border: 1px solid var(--color-brand);
+  color: #000;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s ease;
+}
+
+.accordion-new-button:hover {
+  background: var(--color-brand-strong);
+  border-color: var(--color-brand-strong);
+}
+
+.accordion-new-button:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+.accordion-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.accordion-content.expanded {
+  max-height: 2000px;
+}
+
+.accordion-record-row {
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.accordion-record-row:hover {
+  background: rgba(77, 159, 255, 0.08);
+}
+
+.empty-state-message {
+  padding: 16px 20px;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  text-align: center;
 }

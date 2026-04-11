@@ -4,7 +4,8 @@
   var KEYS = {
     REMEMBER_POSITION: 'rememberPosition',
     ACTIVE_TAB: 'activeTab',
-    ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab'
+    ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
+    EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection'
   };
 
   var defaults = {
@@ -14,7 +15,8 @@
       lists: null,
       templates: null,
       recipes: null
-    }
+    },
+    expandedAccordionSection: null
   };
 
   function getKey(name) {

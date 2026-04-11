@@ -14,32 +14,6 @@
     return trimmed;
   }
 
-  function ensureValidItemEntryName(name) {
-    var trimmed = (name || '').trim();
-    if (!trimmed) {
-      throw new Error('Item name is required.');
-    }
-
-    return trimmed;
-  }
-
-  function normalizeDescription(description) {
-    return (description || '').trim();
-  }
-
-  function normalizeOptionalIntegerQuantity(quantity) {
-    var raw = String(quantity == null ? '' : quantity).trim();
-    if (!raw) {
-      return null;
-    }
-
-    if (!/^-?\d+$/.test(raw)) {
-      throw new Error('Quantity must be an integer.');
-    }
-
-    return Number(raw);
-  }
-
   async function requireListById(listId) {
     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, listId);
     if (!record || record.type !== LIST_TYPE) {
@@ -66,13 +40,6 @@
     );
   }
 
-  async function findJoinRecord(listId, itemId) {
-    var joinRecords = await readJoinRecordsByListId(listId);
-    return joinRecords.find(function (record) {
-      return record.itemId === itemId;
-    }) || null;
-  }
-
   async function findJoinRecordById(listId, listItemId) {
     var joinRecords = await readJoinRecordsByListId(listId);
     return joinRecords.find(function (record) {
@@ -80,9 +47,11 @@
     }) || null;
   }
 
-  function sortByUpdatedDateDescending(records) {
+  function sortByNameAscending(records) {
     return records.sort(function (a, b) {
-      return String(b.updatedDate).localeCompare(String(a.updatedDate));
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        sensitivity: 'base'
+      });
     });
   }
 
@@ -93,7 +62,7 @@
       LIST_TYPE
     );
 
-    return sortByUpdatedDateDescending(records);
+    return sortByNameAscending(records);
   }
 
   async function createList(name) {
@@ -135,7 +104,7 @@
   async function getListItems(listId) {
     await requireListById(listId);
     var joinRecords = await readJoinRecordsByListId(listId);
-    return Promise.all(
+    var detailItems = await Promise.all(
       joinRecords.map(async function (joinRecord) {
         var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId);
         if (!joinRecord.name && item && item.name) {
@@ -154,20 +123,25 @@
         };
       })
     );
+
+    return sortByNameAscending(detailItems);
+  }
+
+  async function getListItemCount(listId) {
+    await requireListById(listId);
+    var joinRecords = await readJoinRecordsByListId(listId);
+    return joinRecords.length;
   }
 
   async function addItemToList(listId, itemId, name, quantity, description) {
     await requireListById(listId);
-    var safeName = ensureValidItemEntryName(name);
-    var normalizedName = safeName.toLowerCase();
+    var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
 
     var joinRecords = await readJoinRecordsByListId(listId);
-    var existingByName = joinRecords.find(function (r) {
-      return String(r.name || '').trim().toLowerCase() === normalizedName;
-    });
+    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
 
     if (existingByName) {
-      existingByName.quantity = existingByName.quantity == null ? 1 : existingByName.quantity + 1;
+      existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
       return existingByName;
     }
@@ -178,8 +152,8 @@
       listRecordId: listId,
       itemId: itemId,
       name: safeName,
-      quantity: normalizeOptionalIntegerQuantity(quantity),
-      description: normalizeDescription(description)
+      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
+      description: window.KaPItemEntryRules.normalizeDescription(description)
     };
 
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
@@ -193,9 +167,9 @@
       throw new Error('List item not found.');
     }
 
-    existing.name = ensureValidItemEntryName(name);
-    existing.quantity = normalizeOptionalIntegerQuantity(quantity);
-    existing.description = normalizeDescription(description);
+    existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+    existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+    existing.description = window.KaPItemEntryRules.normalizeDescription(description);
 
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
     return existing;
@@ -216,6 +190,7 @@
     createList: createList,
     renameList: renameList,
     deleteList: deleteList,
+    getListItemCount: getListItemCount,
     getListItems: getListItems,
     addItemToList: addItemToList,
     updateListItem: updateListItem,
