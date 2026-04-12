@@ -36,6 +36,7 @@
 
   var currentRoute = null;
   var requestedDetailRecord = null;
+  var pantryInfoText = 'Pantry & Fridge lists save staples and keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
 
   function getSavedExpandedSection() {
     return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
@@ -162,12 +163,38 @@
     var headerLabelText = document.createElement('span');
     headerLabelText.textContent = section.label;
 
+    var infoButton = document.createElement('button');
+    infoButton.type = 'button';
+    infoButton.className = 'accordion-info-icon';
+    infoButton.textContent = '?';
+    infoButton.setAttribute('aria-label', 'About Pantry & Fridge');
+    infoButton.addEventListener('click', function (e) {
+      e.stopPropagation();
+    });
+    infoButton.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+    });
+
+    var infoTooltip = document.createElement('span');
+    infoTooltip.className = 'accordion-info-tooltip';
+    infoTooltip.textContent = pantryInfoText;
+
+    var infoWrap = document.createElement('span');
+    infoWrap.className = 'accordion-info-wrap';
+    infoWrap.appendChild(infoButton);
+    infoWrap.appendChild(infoTooltip);
+
     var countBadge = document.createElement('span');
     countBadge.className = 'accordion-count-badge';
     countBadge.textContent = String(count);
 
     headerLabel.appendChild(headerLabelText);
-    headerLabel.appendChild(countBadge);
+    if (section.id === 'templates') {
+      headerLabel.appendChild(infoWrap);
+    }
+    if (section.id === 'recipes') {
+      headerLabel.appendChild(countBadge);
+    }
 
     var headerActions = document.createElement('div');
     headerActions.className = 'accordion-actions';
@@ -214,7 +241,11 @@
       }
       
       if (records.length === 0) {
-        contentElement.innerHTML = '<div class="empty-state-message">No ' + section.label.toLowerCase() + ' yet.</div>';
+        if (section.id === 'templates') {
+          contentElement.innerHTML = '<div class="empty-state-message">' + pantryInfoText + '</div>';
+        } else {
+          contentElement.innerHTML = '<div class="empty-state-message">No ' + section.label.toLowerCase() + ' yet.</div>';
+        }
         return;
       }
 

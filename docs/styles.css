@@ -814,7 +814,7 @@ body {
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .accordion-header {
@@ -827,6 +827,7 @@ body {
   -webkit-user-select: none;
   user-select: none;
   transition: background-color 0.2s ease;
+  border-radius: 10px;
 }
 
 .accordion-header:hover {
@@ -861,6 +862,79 @@ body {
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1;
+}
+
+.accordion-info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.accordion-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-brand);
+  border-radius: 999px;
+  background: rgba(77, 159, 255, 0.12);
+  color: var(--color-brand);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  padding: 0;
+}
+
+.accordion-info-icon:hover,
+.accordion-info-icon:focus-visible {
+  background: rgba(77, 159, 255, 0.2);
+  border-color: var(--color-brand-strong);
+  color: var(--color-brand-strong);
+}
+
+.accordion-info-icon:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+.accordion-info-tooltip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 10px);
+  transform: translateX(-50%);
+  width: min(320px, 72vw);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-light);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+  z-index: 60;
+}
+
+.accordion-info-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid var(--color-surface-light);
+}
+
+.accordion-info-wrap:hover .accordion-info-tooltip,
+.accordion-info-wrap:focus-within .accordion-info-tooltip {
+  opacity: 1;
+  visibility: visible;
 }
 
 .accordion-actions {
@@ -909,6 +983,10 @@ body {
   border-top: 1px solid var(--color-border);
   cursor: pointer;
   transition: background-color 0.15s ease;
+}
+
+.accordion-record-row:first-child {
+  border-top: none;
 }
 
 .accordion-record-row:hover {
