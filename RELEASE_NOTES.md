@@ -1,13 +1,16 @@
 # Kitchen & Pantry Release Notes
 
 ## Overview
-This release improves label consistency in the main navigation and refreshes asset versioning so users reliably load the latest build.
+This release improves the Pantry & Fridge section with clearer guidance and a new inline help tooltip, while refining accordion presentation for a cleaner experience.
 
 ## Improvements
-- **Navigation Labeling**: Updated the main section label from "Pantry / Fridge" to "Pantry & Fridge" for clearer, more consistent naming.
+- **Pantry & Fridge Guidance**: Added contextual helper text that explains what Pantry & Fridge lists are for and how they can be used as checklist-driven starters for shopping lists.
+- **Header Help Icon**: Added a blue `?` info icon in the Pantry & Fridge accordion header with a styled tooltip that matches the site theme.
+- **Accordion Header Simplification**: Removed list-count badges from Grocery Lists and Pantry & Fridge headers so attention stays on section actions and content.
+- **Accordion Visual Polish**: Updated accordion section/header styling to improve rounded-corner presentation and first-row border behavior.
 
 ## Technical Changes
-- **Asset Cache Busting**: Updated stylesheet and script asset query parameters to `v=2026-04-11-20-36`, helping browsers fetch the latest files instead of stale cached versions.
+- **Tooltip Rendering Behavior**: Updated accordion overflow and tooltip layering rules so the Pantry & Fridge tooltip can render outside collapsed headers without clipping.
 
 ## Installation
 1. Clone or pull the latest code from the repository
