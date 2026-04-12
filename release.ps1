@@ -188,10 +188,11 @@ try {
   $diffFilePath = Join-Path $releaseDir $diffFileName
 
   $lastTag = Invoke-Git -Args @("describe", "--tags", "--abbrev=0") -CaptureOutput -AllowFailure
+  $isFirstRelease = [string]::IsNullOrWhiteSpace($lastTag)
   $diffBody = ""
   $diffSource = ""
 
-  if ([string]::IsNullOrWhiteSpace($lastTag)) {
+  if ($isFirstRelease) {
     $diffSource = "initial repository state to HEAD"
     $diffBody = Invoke-Git -Args @("diff", "--root", "HEAD") -CaptureOutput
   }
@@ -257,8 +258,13 @@ Return only the updated RELEASE_NOTES.md content.
   $statusAfterNotes = Invoke-Git -Args @("status", "--porcelain") -CaptureOutput
   if ([string]::IsNullOrWhiteSpace($statusAfterNotes)) {
     Write-Warning "No file changes detected after release-notes step."
-    if (-not (Confirm-YesNo -Prompt "Continue with tag/push anyway?" -DefaultNo)) {
-      throw "Release cancelled by user."
+    if ($isFirstRelease) {
+      Write-Host "No previous release tag detected; continuing with first-release tag/push." -ForegroundColor Cyan
+    }
+    else {
+      if (-not (Confirm-YesNo -Prompt "Continue with tag/push anyway?" -DefaultNo)) {
+        throw "Release cancelled by user."
+      }
     }
   }
   else {
