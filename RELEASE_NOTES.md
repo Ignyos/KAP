@@ -1,10 +1,13 @@
 # Kitchen & Pantry Release Notes
 
 ## Overview
-This release implements cache busting for all assets to ensure users always receive the latest version of the application without stale file caching.
+This release improves label consistency in the main navigation and refreshes asset versioning so users reliably load the latest build.
+
+## Improvements
+- **Navigation Labeling**: Updated the main section label from "Pantry / Fridge" to "Pantry & Fridge" for clearer, more consistent naming.
 
 ## Technical Changes
-- **Asset Cache Busting**: All stylesheets and scripts now include version query parameters (`v=2026-04-11-16-33`), preventing browsers from serving outdated cached files and ensuring users always load the latest application build.
+- **Asset Cache Busting**: Updated stylesheet and script asset query parameters to `v=2026-04-11-20-36`, helping browsers fetch the latest files instead of stale cached versions.
 
 ## Installation
 1. Clone or pull the latest code from the repository

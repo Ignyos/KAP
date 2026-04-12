@@ -1,0 +1,127 @@
+Release timestamp: 2026-04-11-20-36
+Diff source: initial repository state to HEAD
+Generated at: 2026-04-11 20:36:56Z
+diff --git a/docs/features/main/main-page.js b/docs/features/main/main-page.js
+index a9a69a2..df2f8ba 100644
+--- a/docs/features/main/main-page.js
++++ b/docs/features/main/main-page.js
+@@ -8,8 +8,8 @@
+       createFn: function () { return window.KaPListsPage.createList(); }
+     },
+     {
++      id: 'templates',
+       label: 'Pantry & Fridge',
+-      label: 'Pantry / Fridge',
+       getAllFn: function () { return window.KaPTemplatesService.getAllTemplates(); },
+       renderDetailFn: function (container, record, hooks) { return window.KaPTemplatesPage.renderDetailInto(container, record, hooks); },
+       createFn: function () { return window.KaPTemplatesPage.createTemplate(); }
+diff --git a/docs/index.html b/docs/index.html
+index 85a2161..5b79d50 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -4,7 +4,7 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Kitchen & Pantry</title>
+-  <link rel="stylesheet" href="./styles.css?v=2026-04-11-16-33" />
++  <link rel="stylesheet" href="./styles.css?v=2026-04-11-20-36" />
+ </head>
+ <body>
+   <div id="app-root" class="app-root">
+@@ -91,23 +91,24 @@
+     </div>
+   </template>
+ 
+-  <script src="./shared/ids.js?v=2026-04-11-16-33"></script>
+-  <script src="./shared/settings.js?v=2026-04-11-16-33"></script>
+-  <script src="./data/stores.js?v=2026-04-11-16-33"></script>
+-  <script src="./data/db.js?v=2026-04-11-16-33"></script>
+-  <script src="./ui/ui.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/items/items-service.js?v=2026-04-11-16-33"></script>
+-  <script src="./shared/item-discovery.js?v=2026-04-11-16-33"></script>
+-  <script src="./shared/item-entry-rules.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/lists/lists-service.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/lists/lists-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/templates/templates-service.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/templates/templates-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/settings/settings-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/main/main-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./app-router.js?v=2026-04-11-16-33"></script>
+-  <script src="./app-init.js?v=2026-04-11-16-33"></script>
+-  <script src="./main.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/ids.js?v=2026-04-11-20-36"></script>
++  <script src="./shared/settings.js?v=2026-04-11-20-36"></script>
++  <script src="./data/stores.js?v=2026-04-11-20-36"></script>
++  <script src="./data/db.js?v=2026-04-11-20-36"></script>
++  <script src="./ui/ui.js?v=2026-04-11-20-36"></script>
++  <script src="./features/items/items-service.js?v=2026-04-11-20-36"></script>
++  <script src="./shared/item-discovery.js?v=2026-04-11-20-36"></script>
++  <script src="./shared/item-entry-rules.js?v=2026-04-11-20-36"></script>
++  <script src="./features/lists/lists-service.js?v=2026-04-11-20-36"></script>
++  <script src="./features/lists/lists-page.js?v=2026-04-11-20-36"></script>
++  <script src="./features/templates/templates-service.js?v=2026-04-11-20-36"></script>
++  <script src="./features/templates/templates-page.js?v=2026-04-11-20-36"></script>
++  <script src="./features/settings/settings-page.js?v=2026-04-11-20-36"></script>
++  <script src="./features/main/main-page.js?v=2026-04-11-20-36"></script>
++  <script src="./app-router.js?v=2026-04-11-20-36"></script>
++  <script src="./app-init.js?v=2026-04-11-20-36"></script>
++  <script src="./main.js?v=2026-04-11-20-36"></script>
+ </body>
+ </html>
+ 
++
+diff --git a/src/index.html b/src/index.html
+index 85a2161..5b79d50 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -4,7 +4,7 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Kitchen & Pantry</title>
+-  <link rel="stylesheet" href="./styles.css?v=2026-04-11-16-33" />
++  <link rel="stylesheet" href="./styles.css?v=2026-04-11-20-36" />
+ </head>
+ <body>
+   <div id="app-root" class="app-root">
+@@ -91,23 +91,24 @@
+     </div>
+   </template>
+ 
+-  <script src="./shared/ids.js?v=2026-04-11-16-33"></script>
+-  <script src="./shared/settings.js?v=2026-04-11-16-33"></script>
+-  <script src="./data/stores.js?v=2026-04-11-16-33"></script>
+-  <script src="./data/db.js?v=2026-04-11-16-33"></script>
+-  <script src="./ui/ui.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/items/items-service.js?v=2026-04-11-16-33"></script>
+-  <script src="./shared/item-discovery.js?v=2026-04-11-16-33"></script>
+-  <script src="./shared/item-entry-rules.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/lists/lists-service.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/lists/lists-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/templates/templates-service.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/templates/templates-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/settings/settings-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./features/main/main-page.js?v=2026-04-11-16-33"></script>
+-  <script src="./app-router.js?v=2026-04-11-16-33"></script>
+-  <script src="./app-init.js?v=2026-04-11-16-33"></script>
+-  <script src="./main.js?v=2026-04-11-16-33"></script>
++  <script src="./shared/ids.js?v=2026-04-11-20-36"></script>
++  <script src="./shared/settings.js?v=2026-04-11-20-36"></script>
++  <script src="./data/stores.js?v=2026-04-11-20-36"></script>
++  <script src="./data/db.js?v=2026-04-11-20-36"></script>
++  <script src="./ui/ui.js?v=2026-04-11-20-36"></script>
++  <script src="./features/items/items-service.js?v=2026-04-11-20-36"></script>
++  <script src="./shared/item-discovery.js?v=2026-04-11-20-36"></script>
++  <script src="./shared/item-entry-rules.js?v=2026-04-11-20-36"></script>
++  <script src="./features/lists/lists-service.js?v=2026-04-11-20-36"></script>
++  <script src="./features/lists/lists-page.js?v=2026-04-11-20-36"></script>
++  <script src="./features/templates/templates-service.js?v=2026-04-11-20-36"></script>
++  <script src="./features/templates/templates-page.js?v=2026-04-11-20-36"></script>
++  <script src="./features/settings/settings-page.js?v=2026-04-11-20-36"></script>
++  <script src="./features/main/main-page.js?v=2026-04-11-20-36"></script>
++  <script src="./app-router.js?v=2026-04-11-20-36"></script>
++  <script src="./app-init.js?v=2026-04-11-20-36"></script>
++  <script src="./main.js?v=2026-04-11-20-36"></script>
+ </body>
+ </html>
+ 
++

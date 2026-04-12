@@ -8,8 +8,8 @@
       createFn: function () { return window.KaPListsPage.createList(); }
     },
     {
+      id: 'templates',
       label: 'Pantry & Fridge',
-      label: 'Pantry / Fridge',
       getAllFn: function () { return window.KaPTemplatesService.getAllTemplates(); },
       renderDetailFn: function (container, record, hooks) { return window.KaPTemplatesPage.renderDetailInto(container, record, hooks); },
       createFn: function () { return window.KaPTemplatesPage.createTemplate(); }
