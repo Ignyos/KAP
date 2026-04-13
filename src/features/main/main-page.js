@@ -36,7 +36,7 @@
 
   var currentRoute = null;
   var requestedDetailRecord = null;
-  var pantryInfoText = 'Pantry & Fridge lists save staples and keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
+  var pantryInfoText = 'Pantry & Fridge lists keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
 
   function getSavedExpandedSection() {
     return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
