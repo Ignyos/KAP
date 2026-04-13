@@ -162,6 +162,16 @@
       detailItems: detailItems,
       itemRowBuilder: function (detailItem) {
         return window.KaPUI.NewDetailItemRow(detailItem, {
+          onIncrement: async function () {
+            var updated = await window.KaPListsService.incrementListItemQuantity(record.id, detailItem.id);
+            detailItem.quantity = updated.quantity;
+            return updated.quantity;
+          },
+          onDecrement: async function () {
+            var updated = await window.KaPListsService.decrementListItemQuantity(record.id, detailItem.id);
+            detailItem.quantity = updated.quantity;
+            return updated.quantity;
+          },
           onEdit: async function () {
             await editListItemWithPrompt(record, detailItem);
             await renderDetailInto(container, record, hooks);

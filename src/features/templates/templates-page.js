@@ -88,12 +88,10 @@
       title: 'Edit Item',
       confirmLabel: 'Save',
       itemNamePlaceholder: 'Item name',
-      quantityPlaceholder: 'e.g. 2',
       descriptionPlaceholder: 'Item notes',
       initialName: detailItem.name,
-      initialQuantity: detailItem.quantity,
       initialDescription: detailItem.description,
-      validateQuantity: window.KaPItemDiscovery.validateOptionalInteger,
+      showQuantityField: false,
       enableSuggestions: false
     });
 
@@ -106,7 +104,7 @@
         templateRecord.id,
         detailItem.id,
         result.name,
-        result.quantity,
+        detailItem.quantity,
         result.description
       );
     } catch (error) {
@@ -162,6 +160,16 @@
       detailItems: detailItems,
       itemRowBuilder: function (detailItem) {
         return window.KaPUI.NewDetailItemRow(detailItem, {
+          onIncrement: async function () {
+            var updated = await window.KaPTemplatesService.incrementTemplateItemQuantity(record.id, detailItem.id);
+            detailItem.quantity = updated.quantity;
+            return updated.quantity;
+          },
+          onDecrement: async function () {
+            var updated = await window.KaPTemplatesService.decrementTemplateItemQuantity(record.id, detailItem.id);
+            detailItem.quantity = updated.quantity;
+            return updated.quantity;
+          },
           onEdit: async function () {
             await editTemplateItemWithPrompt(record, detailItem);
             await renderDetailInto(container, record, hooks);

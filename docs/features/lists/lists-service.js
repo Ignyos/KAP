@@ -185,6 +185,32 @@
     await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
   }
 
+  async function incrementListItemQuantity(listId, listItemId) {
+    await requireListById(listId);
+    var existing = await findJoinRecordById(listId, listItemId);
+    if (!existing) {
+      throw new Error('List item not found.');
+    }
+
+    var current = existing.quantity == null ? 1 : existing.quantity;
+    existing.quantity = current + 1;
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+    return existing;
+  }
+
+  async function decrementListItemQuantity(listId, listItemId) {
+    await requireListById(listId);
+    var existing = await findJoinRecordById(listId, listItemId);
+    if (!existing) {
+      throw new Error('List item not found.');
+    }
+
+    var current = existing.quantity == null ? 1 : existing.quantity;
+    existing.quantity = Math.max(1, current - 1);
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+    return existing;
+  }
+
   window.KaPListsService = {
     getAllLists: getAllLists,
     createList: createList,
@@ -194,6 +220,8 @@
     getListItems: getListItems,
     addItemToList: addItemToList,
     updateListItem: updateListItem,
-    removeItemFromList: removeItemFromList
+    removeItemFromList: removeItemFromList,
+    incrementListItemQuantity: incrementListItemQuantity,
+    decrementListItemQuantity: decrementListItemQuantity
   };
 })();

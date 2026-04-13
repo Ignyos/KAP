@@ -2,14 +2,12 @@
   var STORAGE_PREFIX = 'kap.settings.';
 
   var KEYS = {
-    REMEMBER_POSITION: 'rememberPosition',
     ACTIVE_TAB: 'activeTab',
     ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
     EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection'
   };
 
   var defaults = {
-    rememberPosition: true,
     activeTab: 'lists',
     activeDetailIdsByTab: {
       lists: null,

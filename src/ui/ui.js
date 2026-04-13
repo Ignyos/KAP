@@ -283,12 +283,40 @@
     var nameNode = node.querySelector('.detail-item-name');
     var metaNode = node.querySelector('.detail-item-meta');
     var actionsNode = node.querySelector('.detail-item-actions');
+    var qtyPillNode = node.querySelector('.detail-item-qty-pill');
     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
-    var quantityText = detailItem.quantity == null ? 'Qty: -' : 'Qty: ' + String(detailItem.quantity);
-    var descriptionText = detailItem.description ? ' | ' + detailItem.description : '';
+    var descriptionText = detailItem.description || '';
+    var currentQuantity = detailItem.quantity;
+    var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
 
     nameNode.textContent = itemName;
-    metaNode.textContent = quantityText + descriptionText;
+
+    function updateQtyPill(qty) {
+      if (!qtyPillNode) {
+        return;
+      }
+
+      var numericQty = Number(qty);
+      var showPill = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && numericQty !== 1;
+
+      if (showPill) {
+        qtyPillNode.textContent = String(qty);
+        qtyPillNode.style.display = '';
+      } else if (hasQtyControls) {
+        qtyPillNode.style.display = 'none';
+      } else {
+        qtyPillNode.remove();
+        qtyPillNode = null;
+      }
+    }
+
+    updateQtyPill(currentQuantity);
+
+    if (descriptionText) {
+      metaNode.textContent = descriptionText;
+    } else {
+      metaNode.hidden = true;
+    }
 
     if (actionsNode) {
       var overflowWrap = document.createElement('div');
@@ -303,7 +331,7 @@
 
       var overflowDots = document.createElement('span');
       overflowDots.className = 'detail-item-overflow-dots';
-      overflowDots.textContent = '\u22EE';
+      overflowDots.textContent = '\u2026';
       overflowTrigger.appendChild(overflowDots);
 
       var overflowList = document.createElement('div');
@@ -329,6 +357,58 @@
       }
 
       setOverflowOpen(false);
+
+      if (hasQtyControls) {
+        var qtyRow = document.createElement('div');
+        qtyRow.className = 'detail-overflow-qty-row';
+        qtyRow.setAttribute('role', 'group');
+        qtyRow.setAttribute('aria-label', 'Quantity');
+
+        var qtyDecrBtn = document.createElement('button');
+        qtyDecrBtn.type = 'button';
+        qtyDecrBtn.className = 'detail-overflow-qty-btn';
+        qtyDecrBtn.setAttribute('aria-label', 'Decrease quantity of ' + itemName);
+        qtyDecrBtn.textContent = '\u2212';
+
+        var qtyDisplay = document.createElement('span');
+        qtyDisplay.className = 'detail-overflow-qty-display';
+        qtyDisplay.textContent = currentQuantity == null ? '1' : String(currentQuantity);
+
+        var qtyIncrBtn = document.createElement('button');
+        qtyIncrBtn.type = 'button';
+        qtyIncrBtn.className = 'detail-overflow-qty-btn';
+        qtyIncrBtn.setAttribute('aria-label', 'Increase quantity of ' + itemName);
+        qtyIncrBtn.textContent = '+';
+
+        if (typeof callbacks.onDecrement === 'function') {
+          qtyDecrBtn.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            var newQty = await callbacks.onDecrement();
+            if (newQty != null) {
+              currentQuantity = newQty;
+              qtyDisplay.textContent = String(newQty);
+              updateQtyPill(newQty);
+            }
+          });
+        }
+
+        if (typeof callbacks.onIncrement === 'function') {
+          qtyIncrBtn.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            var newQty = await callbacks.onIncrement();
+            if (newQty != null) {
+              currentQuantity = newQty;
+              qtyDisplay.textContent = String(newQty);
+              updateQtyPill(newQty);
+            }
+          });
+        }
+
+        qtyRow.appendChild(qtyDecrBtn);
+        qtyRow.appendChild(qtyDisplay);
+        qtyRow.appendChild(qtyIncrBtn);
+        overflowList.appendChild(qtyRow);
+      }
 
       if (callbacks && typeof callbacks.onEdit === 'function') {
         var editItem = document.createElement('button');
@@ -489,6 +569,7 @@
   function ShowDiscoveryItemModal(options) {
     return new Promise(function (resolve) {
       var suggestionsEnabled = options.enableSuggestions !== false;
+      var showQuantityField = options.showQuantityField !== false;
       var currentContextItemIds = (options.currentContextItemIds || []).filter(function (itemId) {
         return itemId != null;
       });
@@ -536,17 +617,20 @@
 
       form.appendChild(nameInputWrapper);
 
-      var quantityLabel = document.createElement('label');
-      quantityLabel.className = 'modal-field-label';
-      quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
-      form.appendChild(quantityLabel);
+      var quantityInput = null;
+      if (showQuantityField) {
+        var quantityLabel = document.createElement('label');
+        quantityLabel.className = 'modal-field-label';
+        quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
+        form.appendChild(quantityLabel);
 
-      var quantityInput = document.createElement('input');
-      quantityInput.type = 'text';
-      quantityInput.className = 'modal-input';
-      quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
-      quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
-      form.appendChild(quantityInput);
+        quantityInput = document.createElement('input');
+        quantityInput.type = 'text';
+        quantityInput.className = 'modal-input';
+        quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
+        quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
+        form.appendChild(quantityInput);
+      }
 
       var descriptionLabel = document.createElement('label');
       descriptionLabel.className = 'modal-field-label';
@@ -672,7 +756,11 @@
             showError('');
             currentSuggestions = [];
             renderSuggestions();
-            quantityInput.focus();
+            if (quantityInput) {
+              quantityInput.focus();
+            } else {
+              descriptionInput.focus();
+            }
           });
 
           row.appendChild(selectButton);
@@ -734,12 +822,14 @@
           }
 
           var quantityResult = options.validateQuantity
-            ? options.validateQuantity(quantityInput.value)
-            : { ok: true, value: quantityInput.value };
+            ? options.validateQuantity(quantityInput ? quantityInput.value : options.initialQuantity)
+            : { ok: true, value: quantityInput ? quantityInput.value : options.initialQuantity };
 
           if (!quantityResult.ok) {
             showError(quantityResult.message || 'Quantity is invalid.');
-            quantityInput.focus();
+            if (quantityInput) {
+              quantityInput.focus();
+            }
             return;
           }
 
@@ -796,16 +886,22 @@
             currentSuggestions = [];
             renderSuggestions();
           }
-          quantityInput.focus();
+          if (quantityInput) {
+            quantityInput.focus();
+          } else {
+            descriptionInput.focus();
+          }
         }
       });
 
-      quantityInput.addEventListener('keydown', function (event) {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          handleSubmit();
-        }
-      });
+      if (quantityInput) {
+        quantityInput.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            handleSubmit();
+          }
+        });
+      }
 
       descriptionInput.addEventListener('keydown', function (event) {
         if (event.key === 'Enter') {

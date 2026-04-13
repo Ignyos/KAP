@@ -1,7 +1,5 @@
 (function () {
   async function renderInto(container, hooks) {
-    var rememberPosition = window.KaPSettings.get(window.KaPSettings.KEYS.REMEMBER_POSITION);
-
     var section = document.createElement('section');
     section.className = 'settings-shell';
 
@@ -28,16 +26,6 @@
     header.appendChild(rightSpacer);
 
     section.appendChild(header);
-
-    var toggleRow = window.KaPUI.NewSettingsToggle({
-      label: 'Remember position when switching views',
-      description: 'On: each section remembers the last opened Grocery List, Pantry entry, or Recipe view. Off: opening Grocery Lists, Pantry, or Recipes always starts from that section\'s main list.',
-      checked: rememberPosition,
-      onChange: function (checked) {
-        window.KaPSettings.set(window.KaPSettings.KEYS.REMEMBER_POSITION, checked);
-      }
-    });
-    section.appendChild(toggleRow);
 
     container.replaceChildren(section);
   }

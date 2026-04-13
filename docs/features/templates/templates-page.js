@@ -162,6 +162,16 @@
       detailItems: detailItems,
       itemRowBuilder: function (detailItem) {
         return window.KaPUI.NewDetailItemRow(detailItem, {
+          onIncrement: async function () {
+            var updated = await window.KaPTemplatesService.incrementTemplateItemQuantity(record.id, detailItem.id);
+            detailItem.quantity = updated.quantity;
+            return updated.quantity;
+          },
+          onDecrement: async function () {
+            var updated = await window.KaPTemplatesService.decrementTemplateItemQuantity(record.id, detailItem.id);
+            detailItem.quantity = updated.quantity;
+            return updated.quantity;
+          },
           onEdit: async function () {
             await editTemplateItemWithPrompt(record, detailItem);
             await renderDetailInto(container, record, hooks);

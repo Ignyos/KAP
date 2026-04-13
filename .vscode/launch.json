@@ -2,6 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Clean",
+      "type": "PowerShell",
+      "request": "launch",
+      "script": "${workspaceFolder}/clean.ps1",
+      "args": []
+    },
+    {
       "name": "Build",
       "type": "PowerShell",
       "request": "launch",

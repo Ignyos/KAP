@@ -30,6 +30,7 @@
       confirmLabel: 'Add Item',
       itemNamePlaceholder: 'Search or type item name',
       quantityPlaceholder: 'e.g. 2',
+      initialQuantity: 1,
       descriptionPlaceholder: 'Item notes',
       currentContextItemIds: currentContextItemIds,
       currentContextLabel: config.currentContextLabel,

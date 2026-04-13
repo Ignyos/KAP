@@ -11,7 +11,21 @@
     <header class="app-header">
       <div class="header-container">
         <h1 class="app-title">Kitchen & Pantry</h1>
-        <button type="button" class="settings-button" id="settings-button" title="Settings">⚙</button>
+        <div class="header-menu">
+          <button
+            type="button"
+            class="header-menu-button"
+            id="menu-button"
+            title="Menu"
+            aria-label="Open menu"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="header-menu-list"
+          >&#9776;</button>
+          <div class="header-menu-list" id="header-menu-list" role="menu" hidden>
+            <button type="button" class="header-menu-item" id="menu-settings-button" role="menuitem">Settings</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -63,6 +77,7 @@
 
   <template id="detail-item-row-template">
     <div class="detail-item-row">
+      <span class="detail-item-qty-pill"></span>
       <div class="detail-item-content">
         <div class="detail-item-name"></div>
         <div class="detail-item-meta"></div>

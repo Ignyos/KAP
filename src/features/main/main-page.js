@@ -404,10 +404,69 @@
   }
 
   function attachEventListeners() {
-    var settingsButton = document.getElementById('settings-button');
-    if (settingsButton) {
-      settingsButton.addEventListener('click', openSettings);
+    var menuContainer = document.querySelector('.header-menu');
+    var menuButton = document.getElementById('menu-button');
+    var menuList = document.getElementById('header-menu-list');
+    var menuSettingsButton = document.getElementById('menu-settings-button');
+
+    function closeMenu() {
+      if (!menuList || !menuButton) {
+        return;
+      }
+
+      menuList.hidden = true;
+      menuButton.setAttribute('aria-expanded', 'false');
     }
+
+    function openMenu() {
+      if (!menuList || !menuButton) {
+        return;
+      }
+
+      menuList.hidden = false;
+      menuButton.setAttribute('aria-expanded', 'true');
+    }
+
+    if (menuButton && menuList) {
+      menuButton.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (menuList.hidden) {
+          openMenu();
+        } else {
+          closeMenu();
+        }
+      });
+
+      menuButton.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          openMenu();
+          if (menuSettingsButton) {
+            menuSettingsButton.focus();
+          }
+        }
+      });
+    }
+
+    if (menuSettingsButton) {
+      menuSettingsButton.addEventListener('click', function (e) {
+        e.stopPropagation();
+        closeMenu();
+        openSettings();
+      });
+    }
+
+    document.addEventListener('click', function (e) {
+      if (menuContainer && !menuContainer.contains(e.target)) {
+        closeMenu();
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        closeMenu();
+      }
+    });
   }
 
   async function initialize() {
