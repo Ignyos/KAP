@@ -1,0 +1,4885 @@
+Release timestamp: 2026-04-12-22-39
+Diff source: 2026-04-12-16-26..HEAD
+Generated at: 2026-04-12 22:39:14Z
+diff --git a/.vscode/launch.json b/.vscode/launch.json
+index 9b45280..ab9d3de 100644
+--- a/.vscode/launch.json
++++ b/.vscode/launch.json
+@@ -1,6 +1,13 @@
+ {
+   "version": "0.2.0",
+   "configurations": [
++    {
++      "name": "Clean",
++      "type": "PowerShell",
++      "request": "launch",
++      "script": "${workspaceFolder}/clean.ps1",
++      "args": []
++    },
+     {
+       "name": "Build",
+       "type": "PowerShell",
+diff --git a/clean.ps1 b/clean.ps1
+new file mode 100644
+index 0000000..fdf0a6f
+--- /dev/null
++++ b/clean.ps1
+@@ -0,0 +1,37 @@
++[CmdletBinding()]
++param(
++  [switch]$WhatIfMode
++)
++
++Set-StrictMode -Version Latest
++$ErrorActionPreference = 'Stop'
++
++$scriptDir = Split-Path -Parent $PSCommandPath
++$docsDir = Join-Path $scriptDir 'docs'
++
++if (-not (Test-Path -LiteralPath $docsDir)) {
++  Write-Host "docs/ directory does not exist. Nothing to clean." -ForegroundColor Yellow
++  return
++}
++
++$children = Get-ChildItem -LiteralPath $docsDir -Force
++if ($children.Count -eq 0) {
++  Write-Host "docs/ directory is already empty." -ForegroundColor Yellow
++  return
++}
++
++foreach ($child in $children) {
++  if ($WhatIfMode) {
++    Write-Host "[WhatIf] Would remove $($child.FullName)" -ForegroundColor Yellow
++  }
++  else {
++    Remove-Item -LiteralPath $child.FullName -Recurse -Force
++  }
++}
++
++if ($WhatIfMode) {
++  Write-Host '[WhatIf] Clean completed.' -ForegroundColor Yellow
++}
++else {
++  Write-Host 'Clean completed. docs/ directory is now empty.' -ForegroundColor Green
++}
+diff --git a/docs/CNAME b/docs/CNAME
+deleted file mode 100644
+index fbaaa1f..0000000
+--- a/docs/CNAME
++++ /dev/null
+@@ -1 +0,0 @@
+-kap.ignyos.com
+\ No newline at end of file
+diff --git a/docs/app-init.js b/docs/app-init.js
+deleted file mode 100644
+index 8de9467..0000000
+--- a/docs/app-init.js
++++ /dev/null
+@@ -1,6 +0,0 @@
+-var AppInit = {
+-  initialize: async function () {
+-    await window.KaPDB.open();
+-    await window.KaPMainPage.initialize();
+-  }
+-};
+diff --git a/docs/app-router.js b/docs/app-router.js
+deleted file mode 100644
+index 6abf1d2..0000000
+--- a/docs/app-router.js
++++ /dev/null
+@@ -1,98 +0,0 @@
+-(function () {
+-  var routeChangeListeners = [];
+-  var HASH_PREFIX = 'kap';
+-
+-  function normalizeRoutePath(path) {
+-    return path && path.startsWith('/') ? path : '/' + (path || '');
+-  }
+-
+-  function getHashRoutePath() {
+-    var rawHash = String(window.location.hash || '').replace(/^#/, '');
+-
+-    // Preferred format: #kap/list/:id, #kap/template/:id, #kap/
+-    if (rawHash.indexOf(HASH_PREFIX + '/') === 0) {
+-      return '/' + rawHash.slice(HASH_PREFIX.length + 1);
+-    }
+-
+-    // Backward compatibility for older hashes like #/list/:id
+-    if (rawHash.startsWith('/')) {
+-      return rawHash;
+-    }
+-
+-    return '/';
+-  }
+-
+-  function parseRoute() {
+-    var hash = getHashRoutePath();
+-    var match;
+-
+-    // Match routes: /, /list/:id, /template/:id
+-    if (hash === '/' || hash === '') {
+-      return { view: 'home', id: null };
+-    }
+-
+-    // /list/:id
+-    match = hash.match(/^\/list\/(.+)$/);
+-    if (match) {
+-      return { view: 'list', id: match[1] };
+-    }
+-
+-    // /template/:id
+-    match = hash.match(/^\/template\/(.+)$/);
+-    if (match) {
+-      return { view: 'template', id: match[1] };
+-    }
+-
+-    // /settings
+-    if (hash === '/settings') {
+-      return { view: 'settings', id: null };
+-    }
+-
+-    // Default to home for unknown routes
+-    return { view: 'home', id: null };
+-  }
+-
+-  function navigate(path) {
+-    var normalizedPath = normalizeRoutePath(path);
+-    window.location.hash = HASH_PREFIX + normalizedPath;
+-  }
+-
+-  function onRouteChange(callback) {
+-    if (typeof callback === 'function') {
+-      routeChangeListeners.push(callback);
+-    }
+-  }
+-
+-  function removeRouteChangeListener(callback) {
+-    var index = routeChangeListeners.indexOf(callback);
+-    if (index > -1) {
+-      routeChangeListeners.splice(index, 1);
+-    }
+-  }
+-
+-  function emitRouteChange() {
+-    var route = parseRoute();
+-    routeChangeListeners.forEach(function (callback) {
+-      try {
+-        callback(route);
+-      } catch (error) {
+-        console.error('Error in route change listener:', error);
+-      }
+-    });
+-  }
+-
+-  function init() {
+-    // Listen to hash changes
+-    window.addEventListener('hashchange', emitRouteChange);
+-    // Emit initial route
+-    emitRouteChange();
+-  }
+-
+-  window.KaPRouter = {
+-    navigate: navigate,
+-    getCurrentRoute: parseRoute,
+-    onRouteChange: onRouteChange,
+-    removeRouteChangeListener: removeRouteChangeListener,
+-    init: init
+-  };
+-})();
+diff --git a/docs/data/db.js b/docs/data/db.js
+deleted file mode 100644
+index 66a42f5..0000000
+--- a/docs/data/db.js
++++ /dev/null
+@@ -1,118 +0,0 @@
+-(function () {
+-  var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 2;
+-
+-  var state = {
+-    db: null
+-  };
+-
+-  function ensureOpen() {
+-    if (!state.db) {
+-      throw new Error('Database is not open. Call KaPDB.open() before performing operations.');
+-    }
+-
+-    return state.db;
+-  }
+-
+-  function requestToPromise(request) {
+-    return new Promise(function (resolve, reject) {
+-      request.onsuccess = function () {
+-        resolve(request.result);
+-      };
+-      request.onerror = function () {
+-        reject(request.error);
+-      };
+-    });
+-  }
+-
+-  function transactionDone(transaction) {
+-    return new Promise(function (resolve, reject) {
+-      transaction.oncomplete = function () {
+-        resolve();
+-      };
+-      transaction.onabort = function () {
+-        reject(transaction.error || new Error('Transaction aborted.'));
+-      };
+-      transaction.onerror = function () {
+-        reject(transaction.error || new Error('Transaction failed.'));
+-      };
+-    });
+-  }
+-
+-  async function readAll(storeName) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var records = await requestToPromise(store.getAll());
+-    await transactionDone(tx);
+-    return records;
+-  }
+-
+-  async function readAllFromIndex(storeName, indexName, indexKey) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var index = store.index(indexName);
+-    var records = await requestToPromise(index.getAll(indexKey));
+-    await transactionDone(tx);
+-    return records;
+-  }
+-
+-  async function readByKey(storeName, key) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var record = await requestToPromise(store.get(key));
+-    await transactionDone(tx);
+-    return record;
+-  }
+-
+-  async function upsert(storeName, value) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
+-    var store = tx.objectStore(storeName);
+-    await requestToPromise(store.put(value));
+-    await transactionDone(tx);
+-    return value;
+-  }
+-
+-  async function remove(storeName, key) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
+-    var store = tx.objectStore(storeName);
+-    await requestToPromise(store.delete(key));
+-    await transactionDone(tx);
+-  }
+-
+-  function open() {
+-    if (state.db) {
+-      return Promise.resolve(state.db);
+-    }
+-
+-    return new Promise(function (resolve, reject) {
+-      var request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+-
+-      request.onerror = function () {
+-        reject(request.error);
+-      };
+-
+-      request.onupgradeneeded = function (event) {
+-        window.KaPStores.upgrade(event.target.result);
+-      };
+-
+-      request.onsuccess = function () {
+-        state.db = request.result;
+-        resolve(state.db);
+-      };
+-    });
+-  }
+-
+-  window.KaPDB = {
+-    open: open,
+-    readAll: readAll,
+-    readAllFromIndex: readAllFromIndex,
+-    readByKey: readByKey,
+-    upsert: upsert,
+-    remove: remove
+-  };
+-})();
+diff --git a/docs/data/stores.js b/docs/data/stores.js
+deleted file mode 100644
+index 77a2ba3..0000000
+--- a/docs/data/stores.js
++++ /dev/null
+@@ -1,34 +0,0 @@
+-(function () {
+-  var STORE_NAMES = {
+-    LIST_RECORDS: 'listRecords',
+-    ITEMS: 'items',
+-    LIST_RECORD_ITEMS: 'listRecordItems'
+-  };
+-
+-  var INDEX_NAMES = {
+-    LIST_RECORDS_BY_TYPE: 'by_type',
+-    LIST_RECORDS_BY_UPDATED_DATE: 'by_updated_date',
+-    ITEMS_BY_NAME: 'by_name',
+-    LIST_RECORD_ITEMS_BY_LIST_RECORD_ID: 'by_list_record_id',
+-    LIST_RECORD_ITEMS_BY_ITEM_ID: 'by_item_id'
+-  };
+-
+-  function upgrade(db) {
+-    var listRecordsStore = db.createObjectStore(STORE_NAMES.LIST_RECORDS, { keyPath: 'id' });
+-    listRecordsStore.createIndex(INDEX_NAMES.LIST_RECORDS_BY_TYPE, 'type', { unique: false });
+-    listRecordsStore.createIndex(INDEX_NAMES.LIST_RECORDS_BY_UPDATED_DATE, 'updatedDate', { unique: false });
+-
+-    var itemsStore = db.createObjectStore(STORE_NAMES.ITEMS, { keyPath: 'id' });
+-    itemsStore.createIndex(INDEX_NAMES.ITEMS_BY_NAME, 'name', { unique: false });
+-
+-    var joinStore = db.createObjectStore(STORE_NAMES.LIST_RECORD_ITEMS, { keyPath: 'id' });
+-    joinStore.createIndex(INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID, 'listRecordId', { unique: false });
+-    joinStore.createIndex(INDEX_NAMES.LIST_RECORD_ITEMS_BY_ITEM_ID, 'itemId', { unique: false });
+-  }
+-
+-  window.KaPStores = {
+-    STORE_NAMES: STORE_NAMES,
+-    INDEX_NAMES: INDEX_NAMES,
+-    upgrade: upgrade
+-  };
+-})();
+diff --git a/docs/features/items/items-service.js b/docs/features/items/items-service.js
+deleted file mode 100644
+index 379d150..0000000
+--- a/docs/features/items/items-service.js
++++ /dev/null
+@@ -1,95 +0,0 @@
+-(function () {
+-  function ensureValidItemName(name) {
+-    var trimmed = (name || '').trim();
+-    if (!trimmed) {
+-      throw new Error('Item name is required.');
+-    }
+-
+-    return trimmed;
+-  }
+-
+-  function normalizeDescription(description) {
+-    return (description || '').trim();
+-  }
+-
+-  function sortByNameAscending(items) {
+-    return items.sort(function (a, b) {
+-      return String(a.name).localeCompare(String(b.name));
+-    });
+-  }
+-
+-  async function getAllItems() {
+-    var items = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.ITEMS);
+-    return sortByNameAscending(items);
+-  }
+-
+-  async function getItemById(id) {
+-    return window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, id);
+-  }
+-
+-  async function searchItems(query) {
+-    var normalizedQuery = String(query || '').trim().toLowerCase();
+-    if (!normalizedQuery) {
+-      return [];
+-    }
+-
+-    var items = await getAllItems();
+-    return items.filter(function (item) {
+-      return String(item.name).toLowerCase().indexOf(normalizedQuery) >= 0;
+-    });
+-  }
+-
+-  async function createItem(name, description) {
+-    var safeName = ensureValidItemName(name);
+-    var safeDescription = normalizeDescription(description);
+-    var existingItems = await getAllItems();
+-    var existing = existingItems.find(function (item) {
+-      return String(item.name).toLowerCase() === safeName.toLowerCase();
+-    });
+-
+-    if (existing) {
+-      return existing;
+-    }
+-
+-    var item = {
+-      id: window.KaPIds.NewId(),
+-      name: safeName,
+-      description: safeDescription
+-    };
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, item);
+-    return item;
+-  }
+-
+-  async function updateItem(id, nextName, nextDescription) {
+-    var item = await getItemById(id);
+-    if (!item) {
+-      throw new Error('Item not found.');
+-    }
+-
+-    item.name = ensureValidItemName(nextName);
+-    item.description = normalizeDescription(nextDescription);
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, item);
+-    return item;
+-  }
+-
+-  async function deleteItem(id) {
+-    var item = await getItemById(id);
+-    if (!item) {
+-      return false;
+-    }
+-
+-    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.ITEMS, id);
+-    return true;
+-  }
+-
+-  window.KaPItemsService = {
+-    getAllItems: getAllItems,
+-    getItemById: getItemById,
+-    searchItems: searchItems,
+-    createItem: createItem,
+-    updateItem: updateItem,
+-    deleteItem: deleteItem
+-  };
+-})();
+\ No newline at end of file
+diff --git a/docs/features/lists/lists-page.js b/docs/features/lists/lists-page.js
+deleted file mode 100644
+index a28b455..0000000
+--- a/docs/features/lists/lists-page.js
++++ /dev/null
+@@ -1,204 +0,0 @@
+-(function () {
+-  async function showError(message) {
+-    await window.KaPUI.ShowAlert({ title: 'Error', message: message });
+-  }
+-
+-  async function createList() {
+-    var name = await window.KaPUI.ShowPrompt({
+-      title: 'New Grocery List',
+-      placeholder: 'Grocery list name',
+-      confirmLabel: 'Create'
+-    });
+-    if (name === null) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPListsService.createList(name);
+-    } catch (error) {
+-      await showError(error.message || 'Unable to create grocery list.');
+-    }
+-  }
+-
+-  async function renameList(record) {
+-    var nextName = await window.KaPUI.ShowPrompt({
+-      title: 'Edit Grocery List',
+-      placeholder: 'Grocery list name',
+-      value: record.name,
+-      confirmLabel: 'Save'
+-    });
+-    if (nextName === null) {
+-      return null;
+-    }
+-
+-    try {
+-      return await window.KaPListsService.renameList(record.id, nextName);
+-    } catch (error) {
+-      await showError(error.message || 'Unable to update grocery list.');
+-      return null;
+-    }
+-  }
+-
+-  async function deleteList(record) {
+-    var confirmed = await window.KaPUI.ShowConfirm({
+-      title: 'Delete Grocery List',
+-      message: 'Delete "' + record.name + '"?',
+-      confirmLabel: 'Delete',
+-      isDanger: true
+-    });
+-    if (!confirmed) {
+-      return false;
+-    }
+-
+-    try {
+-      await window.KaPListsService.deleteList(record.id);
+-      return true;
+-    } catch (error) {
+-      await showError(error.message || 'Unable to delete grocery list.');
+-      return false;
+-    }
+-  }
+-
+-  async function addListItemWithDiscoveryModal(listRecord, detailItems) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
+-      title: 'Add Item to Grocery List',
+-      currentContextLabel: 'list',
+-      detailItems: detailItems
+-    }));
+-
+-    if (result === null) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPListsService.addItemToList(
+-        listRecord.id,
+-        result.item.id,
+-        result.name,
+-        result.quantity,
+-        result.description
+-      );
+-    } catch (error) {
+-      await showError(error.message || 'Unable to add item.');
+-    }
+-  }
+-
+-  async function editListItemWithPrompt(listRecord, detailItem) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal({
+-      title: 'Edit Item',
+-      confirmLabel: 'Save',
+-      itemNamePlaceholder: 'Item name',
+-      quantityPlaceholder: 'e.g. 2',
+-      descriptionPlaceholder: 'Item notes',
+-      initialName: detailItem.name,
+-      initialQuantity: detailItem.quantity,
+-      initialDescription: detailItem.description,
+-      validateQuantity: window.KaPItemDiscovery.validateOptionalInteger,
+-      enableSuggestions: false
+-    });
+-
+-    if (result === null) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPListsService.updateListItem(
+-        listRecord.id,
+-        detailItem.id,
+-        result.name,
+-        result.quantity,
+-        result.description
+-      );
+-    } catch (error) {
+-      await showError(error.message || 'Unable to update item.');
+-    }
+-  }
+-
+-  async function removeListItemWithConfirm(listRecord, detailItem) {
+-    var itemName = detailItem.name || 'this item';
+-    var confirmed = await window.KaPUI.ShowConfirm({
+-      title: 'Remove Item',
+-      message: 'Remove "' + itemName + '" from this grocery list?',
+-      confirmLabel: 'Remove',
+-      isDanger: true
+-    });
+-
+-    if (!confirmed) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPListsService.removeItemFromList(listRecord.id, detailItem.id);
+-    } catch (error) {
+-      await showError(error.message || 'Unable to remove item.');
+-    }
+-  }
+-
+-  async function renderInto(container, hooks) {
+-    var records = await window.KaPListsService.getAllLists();
+-
+-    window.KaPUI.ReplaceMainContent(container, {
+-      emptyStateText: 'No grocery lists yet.',
+-      records: records,
+-      rowBuilder: function (record) {
+-        return window.KaPUI.NewListRecordRow(record, function () {
+-          hooks.onOpen(record);
+-        });
+-      }
+-    });
+-  }
+-
+-  async function renderDetailInto(container, record, hooks) {
+-    var detailItems = await window.KaPListsService.getListItems(record.id);
+-
+-    window.KaPUI.ReplaceDetailContent(container, {
+-      title: record.name,
+-      emptyStateText: 'No items yet.',
+-      onBack: hooks.onBack,
+-      onAddItem: async function () {
+-        await addListItemWithDiscoveryModal(record, detailItems);
+-        await renderDetailInto(container, record, hooks);
+-      },
+-      detailItems: detailItems,
+-      itemRowBuilder: function (detailItem) {
+-        return window.KaPUI.NewDetailItemRow(detailItem, {
+-          onEdit: async function () {
+-            await editListItemWithPrompt(record, detailItem);
+-            await renderDetailInto(container, record, hooks);
+-          },
+-          onRemove: async function () {
+-            await removeListItemWithConfirm(record, detailItem);
+-            await renderDetailInto(container, record, hooks);
+-          }
+-        });
+-      },
+-      actions: [
+-        {
+-          label: 'Edit',
+-          onClick: async function () {
+-            var updated = await renameList(record);
+-            if (updated) {
+-              hooks.onAfterChange(updated);
+-            }
+-          }
+-        },
+-        {
+-          label: 'Delete',
+-          isDanger: true,
+-          onClick: async function () {
+-            var deleted = await deleteList(record);
+-            if (deleted) {
+-              hooks.onDeleted();
+-            }
+-          }
+-        }
+-      ]
+-    });
+-  }
+-
+-  window.KaPListsPage = {
+-    createList: createList,
+-    renderInto: renderInto,
+-    renderDetailInto: renderDetailInto
+-  };
+-})();
+diff --git a/docs/features/lists/lists-service.js b/docs/features/lists/lists-service.js
+deleted file mode 100644
+index 5b0818e..0000000
+--- a/docs/features/lists/lists-service.js
++++ /dev/null
+@@ -1,199 +0,0 @@
+-(function () {
+-  var LIST_TYPE = 'List';
+-
+-  function nowIso() {
+-    return new Date().toISOString();
+-  }
+-
+-  function ensureValidListName(name) {
+-    var trimmed = (name || '').trim();
+-    if (!trimmed) {
+-      throw new Error('List name is required.');
+-    }
+-
+-    return trimmed;
+-  }
+-
+-  async function requireListById(listId) {
+-    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, listId);
+-    if (!record || record.type !== LIST_TYPE) {
+-      throw new Error('List not found.');
+-    }
+-
+-    return record;
+-  }
+-
+-  async function requireItemById(itemId) {
+-    var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
+-    if (!item) {
+-      throw new Error('Item not found.');
+-    }
+-
+-    return item;
+-  }
+-
+-  async function readJoinRecordsByListId(listId) {
+-    return window.KaPDB.readAllFromIndex(
+-      window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS,
+-      window.KaPStores.INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID,
+-      listId
+-    );
+-  }
+-
+-  async function findJoinRecordById(listId, listItemId) {
+-    var joinRecords = await readJoinRecordsByListId(listId);
+-    return joinRecords.find(function (record) {
+-      return record.id === listItemId;
+-    }) || null;
+-  }
+-
+-  function sortByNameAscending(records) {
+-    return records.sort(function (a, b) {
+-      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+-        sensitivity: 'base'
+-      });
+-    });
+-  }
+-
+-  async function getAllLists() {
+-    var records = await window.KaPDB.readAllFromIndex(
+-      window.KaPStores.STORE_NAMES.LIST_RECORDS,
+-      window.KaPStores.INDEX_NAMES.LIST_RECORDS_BY_TYPE,
+-      LIST_TYPE
+-    );
+-
+-    return sortByNameAscending(records);
+-  }
+-
+-  async function createList(name) {
+-    var safeName = ensureValidListName(name);
+-    var timestamp = nowIso();
+-
+-    var record = {
+-      id: window.KaPIds.NewId(),
+-      name: safeName,
+-      description: '',
+-      type: LIST_TYPE,
+-      createdDate: timestamp,
+-      updatedDate: timestamp
+-    };
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
+-    return record;
+-  }
+-
+-  async function renameList(id, nextName) {
+-    var safeName = ensureValidListName(nextName);
+-    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+-
+-    if (!record || record.type !== LIST_TYPE) {
+-      throw new Error('List not found.');
+-    }
+-
+-    record.name = safeName;
+-    record.updatedDate = nowIso();
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
+-    return record;
+-  }
+-
+-  async function deleteList(id) {
+-    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+-  }
+-
+-  async function getListItems(listId) {
+-    await requireListById(listId);
+-    var joinRecords = await readJoinRecordsByListId(listId);
+-    var detailItems = await Promise.all(
+-      joinRecords.map(async function (joinRecord) {
+-        var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId);
+-        if (!joinRecord.name && item && item.name) {
+-          joinRecord.name = item.name;
+-          await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+-        }
+-
+-        return {
+-          id: joinRecord.id,
+-          listRecordId: joinRecord.listRecordId,
+-          itemId: joinRecord.itemId,
+-          name: joinRecord.name || (item && item.name) || 'Unknown Item',
+-          quantity: joinRecord.quantity,
+-          description: joinRecord.description,
+-          item: item || null
+-        };
+-      })
+-    );
+-
+-    return sortByNameAscending(detailItems);
+-  }
+-
+-  async function getListItemCount(listId) {
+-    await requireListById(listId);
+-    var joinRecords = await readJoinRecordsByListId(listId);
+-    return joinRecords.length;
+-  }
+-
+-  async function addItemToList(listId, itemId, name, quantity, description) {
+-    await requireListById(listId);
+-    var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-
+-    var joinRecords = await readJoinRecordsByListId(listId);
+-    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
+-
+-    if (existingByName) {
+-      existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
+-      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+-      return existingByName;
+-    }
+-
+-    await requireItemById(itemId);
+-    var joinRecord = {
+-      id: window.KaPIds.NewId(),
+-      listRecordId: listId,
+-      itemId: itemId,
+-      name: safeName,
+-      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
+-      description: window.KaPItemEntryRules.normalizeDescription(description)
+-    };
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+-    return joinRecord;
+-  }
+-
+-  async function updateListItem(listId, listItemId, name, quantity, description) {
+-    await requireListById(listId);
+-    var existing = await findJoinRecordById(listId, listItemId);
+-    if (!existing) {
+-      throw new Error('List item not found.');
+-    }
+-
+-    existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+-    existing.description = window.KaPItemEntryRules.normalizeDescription(description);
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+-    return existing;
+-  }
+-
+-  async function removeItemFromList(listId, listItemId) {
+-    await requireListById(listId);
+-    var existing = await findJoinRecordById(listId, listItemId);
+-    if (!existing) {
+-      return;
+-    }
+-
+-    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
+-  }
+-
+-  window.KaPListsService = {
+-    getAllLists: getAllLists,
+-    createList: createList,
+-    renameList: renameList,
+-    deleteList: deleteList,
+-    getListItemCount: getListItemCount,
+-    getListItems: getListItems,
+-    addItemToList: addItemToList,
+-    updateListItem: updateListItem,
+-    removeItemFromList: removeItemFromList
+-  };
+-})();
+diff --git a/docs/features/main/main-page.js b/docs/features/main/main-page.js
+deleted file mode 100644
+index d5be336..0000000
+--- a/docs/features/main/main-page.js
++++ /dev/null
+@@ -1,436 +0,0 @@
+-(function () {
+-  var sectionDefinitions = [
+-    {
+-      id: 'lists',
+-      label: 'Grocery Lists',
+-      getAllFn: function () { return window.KaPListsService.getAllLists(); },
+-      renderDetailFn: function (container, record, hooks) { return window.KaPListsPage.renderDetailInto(container, record, hooks); },
+-      createFn: function () { return window.KaPListsPage.createList(); }
+-    },
+-    {
+-      id: 'templates',
+-      label: 'Pantry & Fridge',
+-      getAllFn: function () { return window.KaPTemplatesService.getAllTemplates(); },
+-      renderDetailFn: function (container, record, hooks) { return window.KaPTemplatesPage.renderDetailInto(container, record, hooks); },
+-      createFn: function () { return window.KaPTemplatesPage.createTemplate(); }
+-    },
+-    {
+-      id: 'recipes',
+-      label: 'Recipes',
+-      isComingSoon: true,
+-      getAllFn: function () { return Promise.resolve([]); },
+-      renderDetailFn: function () { return Promise.resolve(); },
+-      createFn: function () {
+-        return window.KaPUI.ShowAlert({
+-          title: 'Recipes',
+-          message: 'Recipes are coming soon.'
+-        });
+-      }
+-    }
+-  ];
+-
+-  var state = {
+-    expandedSectionId: getSavedExpandedSection(),
+-    settingsReturnPath: '/'
+-  };
+-
+-  var currentRoute = null;
+-  var requestedDetailRecord = null;
+-  var pantryInfoText = 'Pantry & Fridge lists save staples and keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
+-
+-  function getSavedExpandedSection() {
+-    return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
+-  }
+-
+-  function saveExpandedSection(sectionId) {
+-    window.KaPSettings.set(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION, sectionId);
+-  }
+-
+-  function findSection(id) {
+-    return sectionDefinitions.find(function (section) {
+-      return section.id === id;
+-    });
+-  }
+-
+-  function getPathForRoute(route) {
+-    if (!route) {
+-      return '/';
+-    }
+-
+-    if (route.view === 'list' && route.id) {
+-      return '/list/' + route.id;
+-    }
+-
+-    if (route.view === 'template' && route.id) {
+-      return '/template/' + route.id;
+-    }
+-
+-    return '/';
+-  }
+-
+-  function onRouteChange(route) {
+-    currentRoute = route;
+-
+-    if (route.view !== 'settings') {
+-      state.settingsReturnPath = getPathForRoute(route);
+-    }
+-    
+-    if (route.view === 'home') {
+-      renderHome().catch(function (error) {
+-        console.error('Error rendering home:', error);
+-      });
+-    } else if (route.view === 'settings') {
+-      renderSettingsPage().catch(function (error) {
+-        console.error('Error rendering settings:', error);
+-      });
+-    } else if (route.view === 'list' && route.id) {
+-      renderListDetail(route.id).catch(function (error) {
+-        console.error('Error rendering list detail:', error);
+-      });
+-    } else if (route.view === 'template' && route.id) {
+-      renderTemplateDetail(route.id).catch(function (error) {
+-        console.error('Error rendering template detail:', error);
+-      });
+-    }
+-  }
+-
+-  async function renderHome() {
+-    var contentContainer = document.getElementById('main-content');
+-    if (!contentContainer) {
+-      console.error('Content container not found');
+-      return;
+-    }
+-    
+-    // Get counts for all sections
+-    var counts = {};
+-    for (var i = 0; i < sectionDefinitions.length; i++) {
+-      var section = sectionDefinitions[i];
+-      try {
+-        var records = await section.getAllFn();
+-        counts[section.id] = records.length;
+-      } catch (error) {
+-        console.error('Error fetching ' + section.id + ':', error);
+-        counts[section.id] = 0;
+-      }
+-    }
+-
+-    // Render accordion home view
+-    contentContainer.innerHTML = '';
+-    var homeContainer = document.createElement('div');
+-    homeContainer.className = 'accordion-container';
+-
+-    for (var j = 0; j < sectionDefinitions.length; j++) {
+-      var currentSection = sectionDefinitions[j];
+-      var isExpanded = state.expandedSectionId === currentSection.id;
+-      
+-      var accordionSection = createAccordionSection(
+-        currentSection,
+-        counts[currentSection.id],
+-        isExpanded
+-      );
+-      homeContainer.appendChild(accordionSection);
+-    }
+-
+-    contentContainer.appendChild(homeContainer);
+-  }
+-
+-  function createAccordionSection(section, count, isExpanded) {
+-    var container = document.createElement('div');
+-    container.className = 'accordion-section';
+-    container.dataset.sectionId = section.id;
+-
+-    var header = document.createElement('div');
+-    header.className = 'accordion-header';
+-    header.setAttribute('role', 'button');
+-    header.setAttribute('tabindex', '0');
+-    header.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+-    header.setAttribute('aria-controls', 'accordion-content-' + section.id);
+-
+-    header.addEventListener('click', function () {
+-      handleSectionToggle(section.id);
+-    });
+-
+-    header.addEventListener('keydown', function (e) {
+-      if (e.key === 'Enter' || e.key === ' ') {
+-        e.preventDefault();
+-        handleSectionToggle(section.id);
+-      }
+-    });
+-
+-    var headerLabel = document.createElement('span');
+-    headerLabel.className = 'accordion-label';
+-
+-    var headerLabelText = document.createElement('span');
+-    headerLabelText.textContent = section.label;
+-
+-    var infoButton = document.createElement('button');
+-    infoButton.type = 'button';
+-    infoButton.className = 'accordion-info-icon';
+-    infoButton.textContent = '?';
+-    infoButton.setAttribute('aria-label', 'About Pantry & Fridge');
+-    infoButton.addEventListener('click', function (e) {
+-      e.stopPropagation();
+-    });
+-    infoButton.addEventListener('keydown', function (e) {
+-      e.stopPropagation();
+-    });
+-
+-    var infoTooltip = document.createElement('span');
+-    infoTooltip.className = 'accordion-info-tooltip';
+-    infoTooltip.textContent = pantryInfoText;
+-
+-    var infoWrap = document.createElement('span');
+-    infoWrap.className = 'accordion-info-wrap';
+-    infoWrap.appendChild(infoButton);
+-    infoWrap.appendChild(infoTooltip);
+-
+-    var countBadge = document.createElement('span');
+-    countBadge.className = 'accordion-count-badge';
+-    countBadge.textContent = String(count);
+-
+-    headerLabel.appendChild(headerLabelText);
+-    if (section.id === 'templates') {
+-      headerLabel.appendChild(infoWrap);
+-    }
+-    if (section.id === 'recipes') {
+-      headerLabel.appendChild(countBadge);
+-    }
+-
+-    var headerActions = document.createElement('div');
+-    headerActions.className = 'accordion-actions';
+-
+-    var newButton = document.createElement('button');
+-    newButton.type = 'button';
+-    newButton.className = 'accordion-new-button';
+-    newButton.textContent = '+ New';
+-    newButton.addEventListener('click', function (e) {
+-      e.stopPropagation();
+-      handleNewSection(section.id);
+-    });
+-
+-    headerActions.appendChild(newButton);
+-
+-    header.appendChild(headerLabel);
+-    header.appendChild(headerActions);
+-
+-    var content = document.createElement('div');
+-    content.id = 'accordion-content-' + section.id;
+-    content.className = 'accordion-content';
+-    content.setAttribute('role', 'region');
+-    content.setAttribute('aria-labelledby', 'accordion-header-' + section.id);
+-
+-    if (isExpanded) {
+-      content.classList.add('expanded');
+-      renderSectionContent(content, section);
+-    }
+-
+-    container.appendChild(header);
+-    container.appendChild(content);
+-
+-    return container;
+-  }
+-
+-  async function renderSectionContent(contentElement, section) {
+-    try {
+-      var records = await section.getAllFn();
+-      var listItemCountsById = {};
+-
+-      if (section.isComingSoon) {
+-        contentElement.innerHTML = '<div class="empty-state-message">Recipes are coming soon.</div>';
+-        return;
+-      }
+-      
+-      if (records.length === 0) {
+-        if (section.id === 'templates') {
+-          contentElement.innerHTML = '<div class="empty-state-message">' + pantryInfoText + '</div>';
+-        } else {
+-          contentElement.innerHTML = '<div class="empty-state-message">No ' + section.label.toLowerCase() + ' yet.</div>';
+-        }
+-        return;
+-      }
+-
+-      if (section.id === 'lists') {
+-        var countPairs = await Promise.all(records.map(async function (record) {
+-          try {
+-            var itemCount = await window.KaPListsService.getListItemCount(record.id);
+-            return { id: record.id, count: itemCount };
+-          } catch (error) {
+-            return { id: record.id, count: 0 };
+-          }
+-        }));
+-
+-        countPairs.forEach(function (pair) {
+-          listItemCountsById[pair.id] = pair.count;
+-        });
+-      }
+-
+-      var recordList = document.createElement('div');
+-      recordList.className = 'record-list';
+-
+-      records.forEach(function (record) {
+-        var row = createRecordRow(record, section, listItemCountsById[record.id]);
+-        recordList.appendChild(row);
+-      });
+-
+-      contentElement.innerHTML = '';
+-      contentElement.appendChild(recordList);
+-    } catch (error) {
+-      console.error('Error rendering section content:', error);
+-      contentElement.innerHTML = '<div class="empty-state-message">Error loading ' + section.label.toLowerCase() + '.</div>';
+-    }
+-  }
+-
+-  function createRecordRow(record, section, listItemCount) {
+-    var row = document.createElement('div');
+-    row.className = 'accordion-record-row';
+-
+-    var nameSpan = document.createElement('span');
+-    nameSpan.className = 'record-name';
+-    nameSpan.textContent = record.name;
+-
+-    row.appendChild(nameSpan);
+-
+-    if (section.id === 'lists') {
+-      var countPill = document.createElement('span');
+-      countPill.className = 'list-item-count-pill';
+-      countPill.textContent = String(listItemCount || 0);
+-      countPill.setAttribute('aria-label', String(listItemCount || 0) + ' items');
+-      row.appendChild(countPill);
+-    }
+-
+-    row.addEventListener('click', function () {
+-      handleRecordOpen(record, section);
+-    });
+-
+-    return row;
+-  }
+-
+-  function handleSectionToggle(sectionId) {
+-    if (state.expandedSectionId === sectionId) {
+-      state.expandedSectionId = null;
+-    } else {
+-      state.expandedSectionId = sectionId;
+-    }
+-    saveExpandedSection(state.expandedSectionId);
+-    renderHome();
+-  }
+-
+-  async function handleNewSection(sectionId) {
+-    var section = findSection(sectionId);
+-    if (section) {
+-      try {
+-        await section.createFn();
+-        renderHome();
+-      } catch (error) {
+-        console.error('Error creating new item:', error);
+-      }
+-    }
+-  }
+-
+-  function handleRecordOpen(record, section) {
+-    if (section.id === 'lists') {
+-      window.KaPRouter.navigate('/list/' + record.id);
+-    } else if (section.id === 'templates') {
+-      window.KaPRouter.navigate('/template/' + record.id);
+-    }
+-  }
+-
+-  async function renderListDetail(listId) {
+-    try {
+-      var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, listId);
+-      if (!record || record.type !== 'List') {
+-        throw new Error('List not found');
+-      }
+-      renderDetailPage(record, 'lists');
+-    } catch (error) {
+-      console.error('Error loading list:', error);
+-      window.KaPRouter.navigate('/');
+-    }
+-  }
+-
+-  async function renderTemplateDetail(templateId) {
+-    try {
+-      var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, templateId);
+-      if (!record || record.type !== 'Template') {
+-        throw new Error('Template not found');
+-      }
+-      renderDetailPage(record, 'templates');
+-    } catch (error) {
+-      console.error('Error loading template:', error);
+-      window.KaPRouter.navigate('/');
+-    }
+-  }
+-
+-  async function renderDetailPage(record, sectionId) {
+-    var section = findSection(sectionId);
+-    var contentContainer = document.getElementById('main-content');
+-
+-    var detailHooks = {
+-      onBack: function () {
+-        window.KaPRouter.navigate('/');
+-      },
+-      onAfterChange: function (updatedRecord) {
+-        renderDetailPage(updatedRecord, sectionId);
+-      },
+-      onDeleted: function () {
+-        window.KaPRouter.navigate('/');
+-      }
+-    };
+-
+-    if (section) {
+-      await section.renderDetailFn(contentContainer, record, detailHooks);
+-    }
+-  }
+-
+-  async function renderSettingsPage() {
+-    var contentContainer = document.getElementById('main-content');
+-    if (!contentContainer) {
+-      return;
+-    }
+-
+-    await window.KaPSettingsPage.renderInto(contentContainer, {
+-      onBack: function () {
+-        window.KaPRouter.navigate(state.settingsReturnPath || '/');
+-      }
+-    });
+-  }
+-
+-  function openSettings() {
+-    if (currentRoute && currentRoute.view !== 'settings') {
+-      state.settingsReturnPath = getPathForRoute(currentRoute);
+-    }
+-
+-    window.KaPRouter.navigate('/settings');
+-  }
+-
+-  function attachEventListeners() {
+-    var settingsButton = document.getElementById('settings-button');
+-    if (settingsButton) {
+-      settingsButton.addEventListener('click', openSettings);
+-    }
+-  }
+-
+-  async function initialize() {
+-    attachEventListeners();
+-    var mainContainer = document.getElementById('main-content');
+-    if (mainContainer) {
+-      mainContainer.classList.add('active');
+-    }
+-    
+-    // Hide the old tab navigation
+-    var tabNav = document.querySelector('.tab-nav');
+-    if (tabNav) {
+-      tabNav.style.display = 'none';
+-    }
+-
+-    // Listen for route changes
+-    window.KaPRouter.onRouteChange(onRouteChange);
+-    
+-    // Initialize router which will trigger initial route
+-    window.KaPRouter.init();
+-  }
+-
+-  window.KaPMainPage = {
+-    initialize: initialize
+-  };
+-})();
+diff --git a/docs/features/settings/settings-page.js b/docs/features/settings/settings-page.js
+deleted file mode 100644
+index cc370f5..0000000
+--- a/docs/features/settings/settings-page.js
++++ /dev/null
+@@ -1,48 +0,0 @@
+-(function () {
+-  async function renderInto(container, hooks) {
+-    var rememberPosition = window.KaPSettings.get(window.KaPSettings.KEYS.REMEMBER_POSITION);
+-
+-    var section = document.createElement('section');
+-    section.className = 'settings-shell';
+-
+-    var header = document.createElement('div');
+-    header.className = 'detail-header settings-header';
+-
+-    if (hooks && typeof hooks.onBack === 'function') {
+-      var backButton = document.createElement('button');
+-      backButton.type = 'button';
+-      backButton.className = 'detail-back-button';
+-      backButton.textContent = '\u2190 Back';
+-      backButton.addEventListener('click', hooks.onBack);
+-      header.appendChild(backButton);
+-    }
+-
+-    var heading = document.createElement('h2');
+-    heading.className = 'detail-title';
+-    heading.textContent = 'Settings';
+-    header.appendChild(heading);
+-
+-    var rightSpacer = document.createElement('div');
+-    rightSpacer.className = 'detail-actions settings-header-spacer';
+-    rightSpacer.setAttribute('aria-hidden', 'true');
+-    header.appendChild(rightSpacer);
+-
+-    section.appendChild(header);
+-
+-    var toggleRow = window.KaPUI.NewSettingsToggle({
+-      label: 'Remember position when switching views',
+-      description: 'On: each section remembers the last opened Grocery List, Pantry entry, or Recipe view. Off: opening Grocery Lists, Pantry, or Recipes always starts from that section\'s main list.',
+-      checked: rememberPosition,
+-      onChange: function (checked) {
+-        window.KaPSettings.set(window.KaPSettings.KEYS.REMEMBER_POSITION, checked);
+-      }
+-    });
+-    section.appendChild(toggleRow);
+-
+-    container.replaceChildren(section);
+-  }
+-
+-  window.KaPSettingsPage = {
+-    renderInto: renderInto
+-  };
+-})();
+diff --git a/docs/features/templates/templates-page.js b/docs/features/templates/templates-page.js
+deleted file mode 100644
+index 2b39870..0000000
+--- a/docs/features/templates/templates-page.js
++++ /dev/null
+@@ -1,204 +0,0 @@
+-(function () {
+-  async function showError(message) {
+-    await window.KaPUI.ShowAlert({ title: 'Error', message: message });
+-  }
+-
+-  async function createTemplate() {
+-    var name = await window.KaPUI.ShowPrompt({
+-      title: 'New Pantry Entry',
+-      placeholder: 'e.g. Pantry staples, or Fridge essentials',
+-      confirmLabel: 'Create'
+-    });
+-    if (name === null) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPTemplatesService.createTemplate(name);
+-    } catch (error) {
+-      await showError(error.message || 'Unable to create pantry entry.');
+-    }
+-  }
+-
+-  async function renameTemplate(record) {
+-    var nextName = await window.KaPUI.ShowPrompt({
+-      title: 'Edit Pantry Entry',
+-      placeholder: 'Pantry entry name',
+-      value: record.name,
+-      confirmLabel: 'Save'
+-    });
+-    if (nextName === null) {
+-      return null;
+-    }
+-
+-    try {
+-      return await window.KaPTemplatesService.renameTemplate(record.id, nextName);
+-    } catch (error) {
+-      await showError(error.message || 'Unable to update pantry entry.');
+-      return null;
+-    }
+-  }
+-
+-  async function deleteTemplate(record) {
+-    var confirmed = await window.KaPUI.ShowConfirm({
+-      title: 'Delete Pantry Entry',
+-      message: 'Delete "' + record.name + '"?',
+-      confirmLabel: 'Delete',
+-      isDanger: true
+-    });
+-    if (!confirmed) {
+-      return false;
+-    }
+-
+-    try {
+-      await window.KaPTemplatesService.deleteTemplate(record.id);
+-      return true;
+-    } catch (error) {
+-      await showError(error.message || 'Unable to delete pantry entry.');
+-      return false;
+-    }
+-  }
+-
+-  async function addTemplateItemWithDiscoveryModal(templateRecord, detailItems) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
+-      title: 'Add Item to Pantry Entry',
+-      currentContextLabel: 'template',
+-      detailItems: detailItems
+-    }));
+-
+-    if (result === null) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPTemplatesService.addItemToTemplate(
+-        templateRecord.id,
+-        result.item.id,
+-        result.name,
+-        result.quantity,
+-        result.description
+-      );
+-    } catch (error) {
+-      await showError(error.message || 'Unable to add item.');
+-    }
+-  }
+-
+-  async function editTemplateItemWithPrompt(templateRecord, detailItem) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal({
+-      title: 'Edit Item',
+-      confirmLabel: 'Save',
+-      itemNamePlaceholder: 'Item name',
+-      quantityPlaceholder: 'e.g. 2',
+-      descriptionPlaceholder: 'Item notes',
+-      initialName: detailItem.name,
+-      initialQuantity: detailItem.quantity,
+-      initialDescription: detailItem.description,
+-      validateQuantity: window.KaPItemDiscovery.validateOptionalInteger,
+-      enableSuggestions: false
+-    });
+-
+-    if (result === null) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPTemplatesService.updateTemplateItem(
+-        templateRecord.id,
+-        detailItem.id,
+-        result.name,
+-        result.quantity,
+-        result.description
+-      );
+-    } catch (error) {
+-      await showError(error.message || 'Unable to update item.');
+-    }
+-  }
+-
+-  async function removeTemplateItemWithConfirm(templateRecord, detailItem) {
+-    var itemName = detailItem.name || 'this item';
+-    var confirmed = await window.KaPUI.ShowConfirm({
+-      title: 'Remove Item',
+-      message: 'Remove "' + itemName + '" from this pantry entry?',
+-      confirmLabel: 'Remove',
+-      isDanger: true
+-    });
+-
+-    if (!confirmed) {
+-      return;
+-    }
+-
+-    try {
+-      await window.KaPTemplatesService.removeItemFromTemplate(templateRecord.id, detailItem.id);
+-    } catch (error) {
+-      await showError(error.message || 'Unable to remove item.');
+-    }
+-  }
+-
+-  async function renderInto(container, hooks) {
+-    var records = await window.KaPTemplatesService.getAllTemplates();
+-
+-    window.KaPUI.ReplaceMainContent(container, {
+-      emptyStateText: 'No pantry entries yet.',
+-      records: records,
+-      rowBuilder: function (record) {
+-        return window.KaPUI.NewListRecordRow(record, function () {
+-          hooks.onOpen(record);
+-        });
+-      }
+-    });
+-  }
+-
+-  async function renderDetailInto(container, record, hooks) {
+-    var detailItems = await window.KaPTemplatesService.getTemplateItems(record.id);
+-
+-    window.KaPUI.ReplaceDetailContent(container, {
+-      title: record.name,
+-      emptyStateText: 'No items yet.',
+-      onBack: hooks.onBack,
+-      onAddItem: async function () {
+-        await addTemplateItemWithDiscoveryModal(record, detailItems);
+-        await renderDetailInto(container, record, hooks);
+-      },
+-      detailItems: detailItems,
+-      itemRowBuilder: function (detailItem) {
+-        return window.KaPUI.NewDetailItemRow(detailItem, {
+-          onEdit: async function () {
+-            await editTemplateItemWithPrompt(record, detailItem);
+-            await renderDetailInto(container, record, hooks);
+-          },
+-          onRemove: async function () {
+-            await removeTemplateItemWithConfirm(record, detailItem);
+-            await renderDetailInto(container, record, hooks);
+-          }
+-        });
+-      },
+-      actions: [
+-        {
+-          label: 'Edit',
+-          onClick: async function () {
+-            var updated = await renameTemplate(record);
+-            if (updated) {
+-              hooks.onAfterChange(updated);
+-            }
+-          }
+-        },
+-        {
+-          label: 'Delete',
+-          isDanger: true,
+-          onClick: async function () {
+-            var deleted = await deleteTemplate(record);
+-            if (deleted) {
+-              hooks.onDeleted();
+-            }
+-          }
+-        }
+-      ]
+-    });
+-  }
+-
+-  window.KaPTemplatesPage = {
+-    createTemplate: createTemplate,
+-    renderInto: renderInto,
+-    renderDetailInto: renderDetailInto
+-  };
+-})();
+diff --git a/docs/features/templates/templates-service.js b/docs/features/templates/templates-service.js
+deleted file mode 100644
+index 490790b..0000000
+--- a/docs/features/templates/templates-service.js
++++ /dev/null
+@@ -1,192 +0,0 @@
+-(function () {
+-  var TEMPLATE_TYPE = 'Template';
+-
+-  function nowIso() {
+-    return new Date().toISOString();
+-  }
+-
+-  function ensureValidTemplateName(name) {
+-    var trimmed = (name || '').trim();
+-    if (!trimmed) {
+-      throw new Error('Template name is required.');
+-    }
+-
+-    return trimmed;
+-  }
+-
+-  async function requireTemplateById(templateId) {
+-    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, templateId);
+-    if (!record || record.type !== TEMPLATE_TYPE) {
+-      throw new Error('Template not found.');
+-    }
+-
+-    return record;
+-  }
+-
+-  async function requireItemById(itemId) {
+-    var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
+-    if (!item) {
+-      throw new Error('Item not found.');
+-    }
+-
+-    return item;
+-  }
+-
+-  async function readJoinRecordsByTemplateId(templateId) {
+-    return window.KaPDB.readAllFromIndex(
+-      window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS,
+-      window.KaPStores.INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID,
+-      templateId
+-    );
+-  }
+-
+-  async function findJoinRecordById(templateId, templateItemId) {
+-    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+-    return joinRecords.find(function (record) {
+-      return record.id === templateItemId;
+-    }) || null;
+-  }
+-
+-  function sortByNameAscending(records) {
+-    return records.sort(function (a, b) {
+-      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+-        sensitivity: 'base'
+-      });
+-    });
+-  }
+-
+-  async function getAllTemplates() {
+-    var records = await window.KaPDB.readAllFromIndex(
+-      window.KaPStores.STORE_NAMES.LIST_RECORDS,
+-      window.KaPStores.INDEX_NAMES.LIST_RECORDS_BY_TYPE,
+-      TEMPLATE_TYPE
+-    );
+-
+-    return sortByNameAscending(records);
+-  }
+-
+-  async function createTemplate(name) {
+-    var safeName = ensureValidTemplateName(name);
+-    var timestamp = nowIso();
+-
+-    var record = {
+-      id: window.KaPIds.NewId(),
+-      name: safeName,
+-      description: '',
+-      type: TEMPLATE_TYPE,
+-      createdDate: timestamp,
+-      updatedDate: timestamp
+-    };
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
+-    return record;
+-  }
+-
+-  async function renameTemplate(id, nextName) {
+-    var safeName = ensureValidTemplateName(nextName);
+-    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+-
+-    if (!record || record.type !== TEMPLATE_TYPE) {
+-      throw new Error('Template not found.');
+-    }
+-
+-    record.name = safeName;
+-    record.updatedDate = nowIso();
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
+-    return record;
+-  }
+-
+-  async function deleteTemplate(id) {
+-    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+-  }
+-
+-  async function getTemplateItems(templateId) {
+-    await requireTemplateById(templateId);
+-    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+-    var detailItems = await Promise.all(
+-      joinRecords.map(async function (joinRecord) {
+-        var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId);
+-        if (!joinRecord.name && item && item.name) {
+-          joinRecord.name = item.name;
+-          await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+-        }
+-
+-        return {
+-          id: joinRecord.id,
+-          listRecordId: joinRecord.listRecordId,
+-          itemId: joinRecord.itemId,
+-          name: joinRecord.name || (item && item.name) || 'Unknown Item',
+-          quantity: joinRecord.quantity,
+-          description: joinRecord.description,
+-          item: item || null
+-        };
+-      })
+-    );
+-
+-    return sortByNameAscending(detailItems);
+-  }
+-
+-  async function addItemToTemplate(templateId, itemId, name, quantity, description) {
+-    await requireTemplateById(templateId);
+-    var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-
+-    var joinRecords = await readJoinRecordsByTemplateId(templateId);
+-    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
+-
+-    if (existingByName) {
+-      existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
+-      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+-      return existingByName;
+-    }
+-
+-    await requireItemById(itemId);
+-    var joinRecord = {
+-      id: window.KaPIds.NewId(),
+-      listRecordId: templateId,
+-      itemId: itemId,
+-      name: safeName,
+-      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
+-      description: window.KaPItemEntryRules.normalizeDescription(description)
+-    };
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+-    return joinRecord;
+-  }
+-
+-  async function updateTemplateItem(templateId, templateItemId, name, quantity, description) {
+-    await requireTemplateById(templateId);
+-    var existing = await findJoinRecordById(templateId, templateItemId);
+-    if (!existing) {
+-      throw new Error('Template item not found.');
+-    }
+-
+-    existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+-    existing.description = window.KaPItemEntryRules.normalizeDescription(description);
+-
+-    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+-    return existing;
+-  }
+-
+-  async function removeItemFromTemplate(templateId, templateItemId) {
+-    await requireTemplateById(templateId);
+-    var existing = await findJoinRecordById(templateId, templateItemId);
+-    if (!existing) {
+-      return;
+-    }
+-
+-    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
+-  }
+-
+-  window.KaPTemplatesService = {
+-    getAllTemplates: getAllTemplates,
+-    createTemplate: createTemplate,
+-    renameTemplate: renameTemplate,
+-    deleteTemplate: deleteTemplate,
+-    getTemplateItems: getTemplateItems,
+-    addItemToTemplate: addItemToTemplate,
+-    updateTemplateItem: updateTemplateItem,
+-    removeItemFromTemplate: removeItemFromTemplate
+-  };
+-})();
+diff --git a/docs/index.html b/docs/index.html
+deleted file mode 100644
+index c5e953e..0000000
+--- a/docs/index.html
++++ /dev/null
+@@ -1,115 +0,0 @@
+-<!doctype html>
+-<html lang="en">
+-<head>
+-  <meta charset="utf-8" />
+-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+-  <title>Kitchen & Pantry</title>
+-  <link rel="stylesheet" href="./styles.css?v=2026-04-12-16-26" />
+-</head>
+-<body>
+-  <div id="app-root" class="app-root">
+-    <header class="app-header">
+-      <div class="header-container">
+-        <h1 class="app-title">Kitchen & Pantry</h1>
+-        <button type="button" class="settings-button" id="settings-button" title="Settings">ΓÜÖ</button>
+-      </div>
+-    </header>
+-
+-    <nav class="tab-nav" aria-label="Primary">
+-      <div id="main-tabs" class="tab-list" role="tablist" aria-label="Kitchen and Pantry Sections"></div>
+-    </nav>
+-
+-    <main class="page-main" id="page-main">
+-      <section id="main-content" class="main-content" aria-live="polite"></section>
+-      <section id="settings-content" class="settings-content" aria-live="polite"></section>
+-    </main>
+-  </div>
+-
+-  <template id="main-tab-template">
+-    <button type="button" class="tab-button" role="tab" aria-selected="false">
+-      <span class="tab-label"></span>
+-      <span class="tab-inline-action" aria-hidden="true"></span>
+-    </button>
+-  </template>
+-
+-  <template id="main-content-shell-template">
+-    <section class="content-shell" role="region">
+-      <div class="empty-state-card">
+-        <p class="empty-state-text"></p>
+-      </div>
+-      <div class="record-list" data-record-list></div>
+-    </section>
+-  </template>
+-
+-  <template id="list-record-row-template">
+-    <button type="button" class="record-row">
+-      <span class="record-name"></span>
+-    </button>
+-  </template>
+-
+-  <template id="detail-shell-template">
+-    <section class="detail-shell" role="region">
+-      <div class="detail-header">
+-        <button type="button" class="detail-back-button">&#8592; Home</button>
+-        <h2 class="detail-title"></h2>
+-        <div class="detail-actions"></div>
+-      </div>
+-      <div class="detail-item-list" data-detail-item-list></div>
+-      <div class="empty-state-card">
+-        <p class="empty-state-text"></p>
+-      </div>
+-    </section>
+-  </template>
+-
+-  <template id="detail-item-row-template">
+-    <div class="detail-item-row">
+-      <div class="detail-item-content">
+-        <div class="detail-item-name"></div>
+-        <div class="detail-item-meta"></div>
+-      </div>
+-      <div class="detail-item-actions"></div>
+-    </div>
+-  </template>
+-
+-  <template id="settings-toggle-template">
+-    <div class="settings-toggle-row">
+-      <label class="settings-toggle-label"></label>
+-      <button type="button" class="settings-toggle-switch settings-toggle-switch--off" role="switch" aria-checked="false"></button>
+-    </div>
+-  </template>
+-
+-  <template id="modal-template">
+-    <div class="modal-overlay">
+-      <div class="modal-card" role="dialog" aria-modal="true">
+-        <div class="modal-footer">
+-          <button type="button" class="modal-button modal-button--secondary modal-cancel-button">Cancel</button>
+-          <h2 class="modal-title"></h2>
+-          <button type="button" class="modal-button modal-confirm-button"></button>
+-        </div>
+-        <div class="modal-body"></div>
+-      </div>
+-    </div>
+-  </template>
+-
+-  <script src="./shared/ids.js?v=2026-04-12-16-26"></script>
+-  <script src="./shared/settings.js?v=2026-04-12-16-26"></script>
+-  <script src="./data/stores.js?v=2026-04-12-16-26"></script>
+-  <script src="./data/db.js?v=2026-04-12-16-26"></script>
+-  <script src="./ui/ui.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/items/items-service.js?v=2026-04-12-16-26"></script>
+-  <script src="./shared/item-discovery.js?v=2026-04-12-16-26"></script>
+-  <script src="./shared/item-entry-rules.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/lists/lists-service.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/lists/lists-page.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/templates/templates-service.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/templates/templates-page.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/settings/settings-page.js?v=2026-04-12-16-26"></script>
+-  <script src="./features/main/main-page.js?v=2026-04-12-16-26"></script>
+-  <script src="./app-router.js?v=2026-04-12-16-26"></script>
+-  <script src="./app-init.js?v=2026-04-12-16-26"></script>
+-  <script src="./main.js?v=2026-04-12-16-26"></script>
+-</body>
+-</html>
+-
+-
+-
+diff --git a/docs/main.js b/docs/main.js
+deleted file mode 100644
+index dcf91f2..0000000
+--- a/docs/main.js
++++ /dev/null
+@@ -1,3 +0,0 @@
+-document.addEventListener('DOMContentLoaded', async function () {
+-  await AppInit.initialize();
+-});
+diff --git a/docs/shared/ids.js b/docs/shared/ids.js
+deleted file mode 100644
+index 973c3d0..0000000
+--- a/docs/shared/ids.js
++++ /dev/null
+@@ -1,17 +0,0 @@
+-(function () {
+-  function fallbackId() {
+-    return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+-  }
+-
+-  function NewId() {
+-    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+-      return window.crypto.randomUUID();
+-    }
+-
+-    return fallbackId();
+-  }
+-
+-  window.KaPIds = {
+-    NewId: NewId
+-  };
+-})();
+diff --git a/docs/shared/item-discovery.js b/docs/shared/item-discovery.js
+deleted file mode 100644
+index 568d19f..0000000
+--- a/docs/shared/item-discovery.js
++++ /dev/null
+@@ -1,58 +0,0 @@
+-(function () {
+-  function validateOptionalInteger(rawQuantity) {
+-    var trimmed = String(rawQuantity == null ? '' : rawQuantity).trim();
+-    if (!trimmed) {
+-      return { ok: true, value: null };
+-    }
+-
+-    if (!/^-?\d+$/.test(trimmed)) {
+-      return { ok: false, message: 'Quantity must be an integer.' };
+-    }
+-
+-    return { ok: true, value: Number(trimmed) };
+-  }
+-
+-  async function resolveExactItem(name) {
+-    var suggestions = await window.KaPItemsService.searchItems(name);
+-    return suggestions.find(function (item) {
+-      return String(item.name).toLowerCase() === String(name).toLowerCase();
+-    }) || null;
+-  }
+-
+-  function buildAddItemModalOptions(config) {
+-    var detailItems = config.detailItems || [];
+-    var currentContextItemIds = detailItems.map(function (detailItem) {
+-      return detailItem.itemId;
+-    });
+-
+-    return {
+-      title: config.title,
+-      confirmLabel: 'Add Item',
+-      itemNamePlaceholder: 'Search or type item name',
+-      quantityPlaceholder: 'e.g. 2',
+-      descriptionPlaceholder: 'Item notes',
+-      currentContextItemIds: currentContextItemIds,
+-      currentContextLabel: config.currentContextLabel,
+-      getAllItems: function () {
+-        return window.KaPItemsService.getAllItems();
+-      },
+-      searchItems: function (query) {
+-        return window.KaPItemsService.searchItems(query);
+-      },
+-      resolveExactItem: resolveExactItem,
+-      createItem: function (name) {
+-        return window.KaPItemsService.createItem(name, '');
+-      },
+-      deleteItem: function (item) {
+-        return window.KaPItemsService.deleteItem(item.id);
+-      },
+-      validateQuantity: validateOptionalInteger
+-    };
+-  }
+-
+-  window.KaPItemDiscovery = {
+-    validateOptionalInteger: validateOptionalInteger,
+-    resolveExactItem: resolveExactItem,
+-    buildAddItemModalOptions: buildAddItemModalOptions
+-  };
+-})();
+diff --git a/docs/shared/item-entry-rules.js b/docs/shared/item-entry-rules.js
+deleted file mode 100644
+index 85f2ba7..0000000
+--- a/docs/shared/item-entry-rules.js
++++ /dev/null
+@@ -1,50 +0,0 @@
+-(function () {
+-  function ensureValidItemEntryName(name) {
+-    var trimmed = (name || '').trim();
+-    if (!trimmed) {
+-      throw new Error('Item name is required.');
+-    }
+-
+-    return trimmed;
+-  }
+-
+-  function normalizeDescription(description) {
+-    return (description || '').trim();
+-  }
+-
+-  function normalizeOptionalIntegerQuantity(quantity) {
+-    var raw = String(quantity == null ? '' : quantity).trim();
+-    if (!raw) {
+-      return null;
+-    }
+-
+-    if (!/^-?\d+$/.test(raw)) {
+-      throw new Error('Quantity must be an integer.');
+-    }
+-
+-    return Number(raw);
+-  }
+-
+-  function normalizeNameKey(name) {
+-    return String(name || '').trim().toLowerCase();
+-  }
+-
+-  function findJoinRecordByName(joinRecords, name) {
+-    var nameKey = normalizeNameKey(name);
+-    return (joinRecords || []).find(function (record) {
+-      return normalizeNameKey(record && record.name) === nameKey;
+-    }) || null;
+-  }
+-
+-  function incrementQuantity(currentQuantity) {
+-    return currentQuantity == null ? 1 : currentQuantity + 1;
+-  }
+-
+-  window.KaPItemEntryRules = {
+-    ensureValidItemEntryName: ensureValidItemEntryName,
+-    normalizeDescription: normalizeDescription,
+-    normalizeOptionalIntegerQuantity: normalizeOptionalIntegerQuantity,
+-    findJoinRecordByName: findJoinRecordByName,
+-    incrementQuantity: incrementQuantity
+-  };
+-})();
+diff --git a/docs/shared/settings.js b/docs/shared/settings.js
+deleted file mode 100644
+index 8f7d726..0000000
+--- a/docs/shared/settings.js
++++ /dev/null
+@@ -1,50 +0,0 @@
+-(function () {
+-  var STORAGE_PREFIX = 'kap.settings.';
+-
+-  var KEYS = {
+-    REMEMBER_POSITION: 'rememberPosition',
+-    ACTIVE_TAB: 'activeTab',
+-    ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
+-    EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection'
+-  };
+-
+-  var defaults = {
+-    rememberPosition: true,
+-    activeTab: 'lists',
+-    activeDetailIdsByTab: {
+-      lists: null,
+-      templates: null,
+-      recipes: null
+-    },
+-    expandedAccordionSection: null
+-  };
+-
+-  function getKey(name) {
+-    return STORAGE_PREFIX + name;
+-  }
+-
+-  function get(name) {
+-    var key = getKey(name);
+-    var stored = localStorage.getItem(key);
+-    if (stored === null) {
+-      return defaults[name];
+-    }
+-
+-    try {
+-      return JSON.parse(stored);
+-    } catch (error) {
+-      return defaults[name];
+-    }
+-  }
+-
+-  function set(name, value) {
+-    var key = getKey(name);
+-    localStorage.setItem(key, JSON.stringify(value));
+-  }
+-
+-  window.KaPSettings = {
+-    KEYS: KEYS,
+-    get: get,
+-    set: set
+-  };
+-})();
+diff --git a/docs/styles.css b/docs/styles.css
+deleted file mode 100644
+index 3cb9ca8..0000000
+--- a/docs/styles.css
++++ /dev/null
+@@ -1,1043 +0,0 @@
+-:root {
+-  --color-bg: #0f131a;
+-  --color-surface: #171d26;
+-  --color-surface-hover: #1e2736;
+-  --color-surface-light: #1e2736;
+-  --color-surface-light-hover: #2b374d;
+-  --color-border: #2b3442;
+-  --color-text: #e6edf3;
+-  --color-muted: #9aa6b5;
+-  --color-disabled: #4f545b;
+-  --color-brand: #4d9fff;
+-  --color-brand-strong: #2e85ea;
+-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.35);
+-}
+-
+-* {
+-  box-sizing: border-box;
+-}
+-
+-html,
+-body {
+-  margin: 0;
+-  padding: 0;
+-  min-height: 100%;
+-}
+-
+-body {
+-  background: var(--color-bg);
+-  color: var(--color-text);
+-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+-}
+-
+-.app-root {
+-  min-height: 100vh;
+-}
+-
+-.app-header {
+-  position: sticky;
+-  top: 0;
+-  z-index: 30;
+-  display: flex;
+-  justify-content: center;
+-  background: var(--color-bg);
+-  padding: 14px 20px;
+-}
+-
+-.header-container {
+-  width: 100%;
+-  max-width: 900px;
+-  display: grid;
+-  grid-template-columns: 1fr auto 1fr;
+-  align-items: center;
+-}
+-
+-.app-title {
+-  grid-column: 2;
+-  justify-self: center;
+-  margin: 0;
+-  font-size: 1.45rem;
+-  line-height: 1.2;
+-}
+-
+-.settings-button {
+-  grid-column: 3;
+-  justify-self: end;
+-  background: transparent;
+-  border: 1px solid var(--color-border);
+-  color: var(--color-text);
+-  font-size: 1.2rem;
+-  padding: 4px 8px;
+-  cursor: pointer;
+-  border-radius: 6px;
+-  margin-right: 1.3rem;
+-}
+-
+-.settings-button:hover {
+-  border-color: var(--color-brand);
+-}
+-
+-.settings-button:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-.tab-nav {
+-  position: sticky;
+-  top: 58px;
+-  z-index: 20;
+-  background: var(--color-bg);
+-}
+-
+-.tab-list {
+-  display: flex;
+-  justify-content: center;
+-  gap: 8px;
+-  padding: 10px 20px 0 20px;
+-  overflow-x: auto;
+-}
+-
+-.tab-button {
+-  border: transparent;
+-  background: transparent;
+-  color: var(--color-muted);
+-  display: inline-flex;
+-  align-items: baseline;
+-  gap: 10px;
+-  padding: 8px 8px 14px 8px;
+-  font-size: 0.95rem;
+-  cursor: pointer;
+-  white-space: nowrap;
+-}
+-
+-.tab-label {
+-  font-weight: 500;
+-}
+-
+-.tab-inline-action {
+-  display: inline;
+-  color: #000000;
+-  background: var(--color-brand);
+-  border: 1px solid var(--color-brand);
+-  border-radius: 999px;
+-  padding: 2px 8px;
+-  font-size: 0.88rem;
+-  font-weight: 600;
+-  line-height: 1.2;
+-}
+-
+-.tab-inline-action[aria-disabled="true"] {
+-  color: var(--color-disabled);
+-  background: transparent;
+-  border-color: var(--color-border);
+-  cursor: not-allowed;
+-  pointer-events: none;
+-}
+-
+-.tab-button[aria-selected="true"] {
+-    border-bottom: solid 2px;
+-    border-color: var(--color-muted);
+-    /* background: #333; */
+-    border-top-left-radius: .5em;
+-    border-top-right-radius: .5rem;
+-}
+-
+-.tab-button:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-.page-main {
+-  max-width: 900px;
+-  margin: 0 auto;
+-  padding: 20px;
+-}
+-
+-.main-content {
+-  display: none;
+-}
+-
+-.main-content.active {
+-  display: block;
+-}
+-
+-.content-shell {
+-  display: grid;
+-  gap: 0;
+-}
+-
+-.empty-state-card {
+-  margin-top: 8px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 18px;
+-}
+-
+-.empty-state-text {
+-  margin: 0;
+-  color: var(--color-text);
+-}
+-
+-.record-list {
+-  display: grid;
+-}
+-
+-.record-row {
+-  display: flex;
+-  align-items: center;
+-  justify-content: space-between;
+-  gap: 12px;
+-  width: 100%;
+-  border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 12px 14px;
+-  background: transparent;
+-  color: var(--color-text);
+-  font-family: inherit;
+-  font-size: 1rem;
+-  text-align: left;
+-  cursor: pointer;
+-}
+-
+-.record-row:hover {
+-  border-color: var(--color-brand);
+-}
+-
+-.record-row:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-.record-name {
+-  font-weight: 500;
+-}
+-
+-.record-actions {
+-  display: flex;
+-  align-items: center;
+-  gap: 8px;
+-}
+-
+-.record-action-button {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  min-height: 32px;
+-  border: 1px solid var(--color-border);
+-  background: transparent;
+-  color: var(--color-text);
+-  border-radius: 8px;
+-  padding: 5px 10px;
+-  font-size: 0.85rem;
+-  cursor: pointer;
+-}
+-
+-.record-action-button:hover {
+-  border-color: var(--color-brand);
+-}
+-
+-.record-action-button--danger {
+-  color: #e74c3c;
+-  border-color: #e74c3c;
+-}
+-
+-.record-action-button--danger:hover {
+-  border-color: #c0392b;
+-  color: #c0392b;
+-}
+-
+-/* Detail view */
+-
+-.detail-shell {
+-  display: grid;
+-  gap: 0;
+-}
+-
+-.detail-item-list {
+-  display: grid;
+-  gap: 10px;
+-}
+-
+-.detail-item-row {
+-  display: flex;
+-  align-items: center;
+-  justify-content: space-between;
+-  gap: 12px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 12px 14px;
+-}
+-
+-.detail-item-content {
+-  min-width: 0;
+-}
+-
+-.detail-item-name {
+-  font-weight: 500;
+-}
+-
+-.detail-item-meta {
+-  margin-top: 4px;
+-  color: var(--color-muted);
+-  font-size: 0.85rem;
+-}
+-
+-.detail-item-actions {
+-  display: flex;
+-  align-items: center;
+-  gap: 8px;
+-}
+-
+-.detail-header {
+-  display: flex;
+-  align-items: center;
+-  gap: 12px;
+-  padding: 4px 0 16px 0;
+-}
+-
+-.detail-back-button {
+-  background: transparent;
+-  border: none;
+-  color: var(--color-brand);
+-  font-size: 0.95rem;
+-  font-family: inherit;
+-  cursor: pointer;
+-  padding: 4px 0;
+-  flex-shrink: 0;
+-}
+-
+-.detail-back-button:hover {
+-  color: var(--color-brand-strong);
+-}
+-
+-.detail-back-button:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-.detail-title {
+-  flex: 1;
+-  margin: 0;
+-  font-size: 1.1rem;
+-  font-weight: 600;
+-  color: var(--color-text);
+-}
+-
+-.detail-actions {
+-  display: flex;
+-  align-items: center;
+-  gap: 8px;
+-}
+-
+-.detail-add-button {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  min-height: 32px;
+-  font-size: 0.9rem;
+-  padding: 6px 12px;
+-}
+-
+-.detail-overflow-menu {
+-  position: relative;
+-}
+-
+-.detail-overflow-trigger {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  min-height: 32px;
+-  min-width: 42px;
+-  text-align: center;
+-  padding-left: 10px;
+-  padding-right: 10px;
+-}
+-
+-.detail-overflow-dots {
+-  display: inline-block;
+-  font-size: 1.2rem;
+-  font-weight: 700;
+-  line-height: 1;
+-  margin-top: -.5rem;
+-}
+-
+-.detail-overflow-list {
+-  position: absolute;
+-  right: 0;
+-  top: calc(100% + 6px);
+-  display: grid;
+-  min-width: 140px;
+-  background: var(--color-surface);
+-  border: 1px solid var(--color-border);
+-  border-radius: 8px;
+-  box-shadow: var(--shadow-soft);
+-  overflow: hidden;
+-  z-index: 5;
+-}
+-
+-.detail-overflow-list.detail-overflow-list--up {
+-  top: auto;
+-  bottom: calc(100% + 6px);
+-}
+-
+-.detail-overflow-list[hidden] {
+-  display: none !important;
+-}
+-
+-.detail-overflow-item {
+-  border: none;
+-  border-bottom: 1px solid var(--color-border);
+-  background: transparent;
+-  color: var(--color-text);
+-  padding: 10px 12px;
+-  text-align: left;
+-  font-size: 0.9rem;
+-  cursor: pointer;
+-}
+-
+-.detail-overflow-item:last-child {
+-  border-bottom: none;
+-}
+-
+-.detail-overflow-item:hover {
+-  background: rgba(77, 159, 255, 0.08);
+-}
+-
+-.detail-overflow-item--danger {
+-  color: #e74c3c;
+-}
+-
+-.detail-item-overflow-menu {
+-  position: relative;
+-}
+-
+-.detail-item-overflow-trigger {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  min-height: 32px;
+-  min-width: 36px;
+-  padding: 4px 8px;
+-}
+-
+-.detail-item-overflow-dots {
+-  display: inline-block;
+-  font-size: 1.1rem;
+-  font-weight: 700;
+-  line-height: 1;
+-  margin-top: -1px;
+-}
+-
+-.detail-item-overflow-menu .detail-overflow-list {
+-  right: 0;
+-  top: calc(100% + 6px);
+-}
+-
+-.detail-item-overflow-menu .detail-overflow-list.detail-overflow-list--up {
+-  top: auto;
+-  bottom: calc(100% + 6px);
+-}
+-
+-/* Settings */
+-
+-.settings-content {
+-  display: none;
+-}
+-
+-.settings-content.active {
+-  display: block;
+-  width: 100%;
+-}
+-
+-.settings-shell {
+-  display: grid;
+-  gap: 8px;
+-  width: 100%;
+-  max-width: 900px;
+-  margin: 0 auto;
+-}
+-
+-.settings-title {
+-  margin: 0 0 20px 0;
+-  font-size: 1.15rem;
+-  font-weight: 600;
+-  color: var(--color-text);
+-}
+-
+-.settings-header {
+-  display: grid;
+-  grid-template-columns: auto 1fr auto;
+-  align-items: center;
+-}
+-
+-.settings-header .detail-title {
+-  text-align: center;
+-}
+-
+-.settings-header-spacer {
+-  min-width: 56px;
+-}
+-
+-.settings-toggle-row {
+-  display: flex;
+-  align-items: flex-start;
+-  justify-content: space-between;
+-  width: 100%;
+-  box-sizing: border-box;
+-  padding: 12px 14px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  margin-bottom: 10px;
+-}
+-
+-.settings-toggle-text {
+-  flex: 1;
+-  display: grid;
+-  gap: 6px;
+-  padding-right: 14px;
+-}
+-
+-.settings-toggle-label {
+-  display: block;
+-  color: var(--color-text);
+-  font-size: 0.95rem;
+-  cursor: pointer;
+-}
+-
+-.settings-toggle-description {
+-  margin: 2px 0 0 0;
+-  color: #b6c0cc;
+-  font-size: 0.88rem;
+-  line-height: 1.4;
+-}
+-
+-.settings-toggle-switch {
+-  width: 48px;
+-  height: 28px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 14px;
+-  background: var(--color-surface);
+-  cursor: pointer;
+-  position: relative;
+-  flex-shrink: 0;
+-  padding: 2px;
+-  display: flex;
+-  align-items: center;
+-}
+-
+-.settings-toggle-switch::after {
+-  content: '';
+-  width: 20px;
+-  height: 20px;
+-  border-radius: 50%;
+-  background: var(--color-muted);
+-  position: absolute;
+-  left: 2px;
+-  transition: left 0.2s ease;
+-}
+-
+-.settings-toggle-switch--on {
+-  background: var(--color-brand);
+-  border-color: var(--color-brand);
+-}
+-
+-.settings-toggle-switch--on::after {
+-  left: 26px;
+-  background: #000;
+-}
+-
+-.settings-toggle-switch:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-/* Modal */
+-
+-.modal-overlay {
+-  position: fixed;
+-  inset: 0;
+-  z-index: 100;
+-  background: rgba(0, 0, 0, 0.6);
+-  display: flex;
+-  flex-direction: column;
+-  padding: 0;
+-}
+-
+-.modal-overlay--compact {
+-  flex-direction: row;
+-  align-items: center;
+-  justify-content: center;
+-  padding: 20px;
+-}
+-
+-.modal-card {
+-  background: var(--color-surface);
+-  border: none;
+-  border-radius: 0;
+-  padding: 24px 20px;
+-  width: 100%;
+-  max-width: 100%;
+-  height: 100%;
+-  display: flex;
+-  flex-direction: column;
+-  box-shadow: none;
+-  overflow-y: auto;
+-  margin: 0 auto;
+-}
+-
+-.modal-card--compact {
+-  width: 100%;
+-  max-width: 460px;
+-  height: auto;
+-  max-height: min(90vh, 520px);
+-  border: 1px solid var(--color-border);
+-  border-radius: 12px;
+-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+-  padding: 20px;
+-}
+-
+-@media (min-width: 941px) {
+-  .modal-card {
+-    width: 900px;
+-    margin: 0 auto;
+-  }
+-}
+-
+-.modal-title {
+-  margin: 0;
+-  font-size: 1.2rem;
+-  font-weight: 600;
+-  color: var(--color-text);
+-  text-align: center;
+-  line-height: 1.2;
+-  min-width: 0;
+-  white-space: nowrap;
+-  overflow: hidden;
+-  text-overflow: ellipsis;
+-}
+-
+-.modal-body {
+-  flex: 1;
+-  margin-top: 12px;
+-  overflow-y: auto;
+-}
+-
+-.modal-item-form {
+-  display: grid;
+-  gap: 10px;
+-}
+-
+-.modal-field-label {
+-  color: var(--color-muted);
+-  font-size: 0.82rem;
+-  text-transform: uppercase;
+-  letter-spacing: 0.03em;
+-}
+-
+-.modal-input-wrapper {
+-  position: relative;
+-}
+-
+-.modal-suggestions {
+-  position: absolute;
+-  top: 100%;
+-  left: 0;
+-  right: 0;
+-  z-index: 10;
+-  display: grid;
+-  gap: 6px;
+-  max-height: 400px;
+-  overflow-y: auto;
+-  background: var(--color-surface);
+-  border: 1px solid var(--color-border);
+-  border-top: none;
+-  border-bottom-left-radius: 8px;
+-  border-bottom-right-radius: 8px;
+-  padding: 6px;
+-}
+-
+-.modal-suggestions[hidden] {
+-  display: none;
+-}
+-
+-.modal-suggestion-row {
+-  display: flex;
+-  border-radius: .4rem;
+-  background: var(--color-border);
+-}
+-
+-.modal-suggestion-main {
+-  flex: 1;
+-  border: 1px solid var(--color-border);
+-  background: transparent;
+-  color: var(--color-text);
+-  border-radius: 8px;
+-  padding: 8px 10px;
+-  text-align: left;
+-  cursor: pointer;
+-}
+-
+-.modal-suggestion-main[disabled] {
+-  cursor: default;
+-  opacity: 0.75;
+-}
+-
+-.modal-suggestion-row--current-context .modal-suggestion-main {
+-  border-color: transparent;
+-}
+-
+-.modal-suggestion-content {
+-  display: grid;
+-  gap: 4px;
+-}
+-
+-.modal-suggestion-name {
+-  font-size: 0.95rem;
+-}
+-
+-.modal-suggestion-meta {
+-  color: var(--color-muted);
+-  font-size: 0.8rem;
+-}
+-
+-.modal-suggestion-delete {
+-  align-self: center;
+-  border: transparent;
+-  background: transparent;
+-  color: #c95454;
+-  width: 36px;
+-  min-width: 36px;
+-  height: 36px;
+-  cursor: pointer;
+-  font-size: 1.75rem;
+-}
+-
+-.modal-suggestion-delete:hover {
+-  border-color: #e74c3c;
+-  color: #e74c3c;
+-}
+-
+-.modal-error {
+-  margin: 0;
+-  color: #ff8f8f;
+-  font-size: 0.86rem;
+-}
+-
+-.modal-input {
+-  width: 100%;
+-  background: var(--color-bg);
+-  border: 1px solid var(--color-border);
+-  border-radius: 8px;
+-  color: var(--color-text);
+-  font-size: 0.95rem;
+-  font-family: inherit;
+-  padding: 9px 12px;
+-}
+-
+-.modal-input:focus {
+-  outline: none;
+-  border-color: var(--color-brand);
+-}
+-
+-.modal-message {
+-  margin: 0;
+-  color: var(--color-text);
+-  font-size: 0.95rem;
+-}
+-
+-.modal-footer {
+-  display: grid;
+-  grid-template-columns: auto 1fr auto;
+-  align-items: center;
+-  gap: 10px;
+-  position: sticky;
+-  top: 0;
+-  z-index: 2;
+-  background: var(--color-surface);
+-  padding-bottom: 12px;
+-  border-bottom: 1px solid var(--color-border);
+-  flex-shrink: 0;
+-}
+-
+-.modal-button {
+-  white-space: nowrap;
+-  border-radius: 8px;
+-  padding: 8px 16px;
+-  font-size: 0.9rem;
+-  font-weight: 500;
+-  font-family: inherit;
+-  cursor: pointer;
+-}
+-
+-.modal-button--secondary {
+-  background: transparent;
+-  border: 1px solid var(--color-border);
+-  color: var(--color-text);
+-}
+-
+-.modal-button--secondary:hover {
+-  border-color: var(--color-muted);
+-}
+-
+-.modal-button--primary {
+-  background: var(--color-brand);
+-  border: 1px solid var(--color-brand);
+-  color: #000;
+-  font-weight: 600;
+-}
+-
+-.modal-button--primary:hover {
+-  background: var(--color-brand-strong);
+-  border-color: var(--color-brand-strong);
+-}
+-
+-.modal-button--danger {
+-  background: #c0392b;
+-  border: 1px solid #c0392b;
+-  color: #fff;
+-  font-weight: 600;
+-}
+-
+-.modal-button--danger:hover {
+-  background: #a93226;
+-  border-color: #a93226;
+-}
+-
+-/* Accordion Layout Styles */
+-.accordion-container {
+-  display: flex;
+-  flex-direction: column;
+-  gap: 12px;
+-}
+-
+-.accordion-section {
+-  border: 1px solid var(--color-border);
+-  background: var(--color-surface);
+-  border-radius: 10px;
+-  overflow: visible;
+-}
+-
+-.accordion-header {
+-  display: flex;
+-  justify-content: space-between;
+-  align-items: center;
+-  padding: 16px 20px;
+-  background: var(--color-surface-light);
+-  cursor: pointer;
+-  -webkit-user-select: none;
+-  user-select: none;
+-  transition: background-color 0.2s ease;
+-  border-radius: 10px;
+-}
+-
+-.accordion-header:hover {
+-  background: var(--color-surface-light-hover);
+-}
+-
+-.accordion-header:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: -2px;
+-}
+-
+-.accordion-label {
+-  display: inline-flex;
+-  align-items: center;
+-  gap: 8px;
+-  font-size: 1.1rem;
+-  font-weight: 500;
+-  color: var(--color-text);
+-}
+-
+-.accordion-count-badge {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  min-width: 24px;
+-  height: 24px;
+-  padding: 0 8px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 999px;
+-  background: var(--color-bg);
+-  color: var(--color-muted);
+-  font-size: 0.78rem;
+-  font-weight: 600;
+-  line-height: 1;
+-}
+-
+-.accordion-info-wrap {
+-  position: relative;
+-  display: inline-flex;
+-  align-items: center;
+-}
+-
+-.accordion-info-icon {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  width: 24px;
+-  height: 24px;
+-  border: 1px solid var(--color-brand);
+-  border-radius: 999px;
+-  background: rgba(77, 159, 255, 0.12);
+-  color: var(--color-brand);
+-  font-size: 0.85rem;
+-  font-weight: 700;
+-  line-height: 1;
+-  cursor: help;
+-  padding: 0;
+-}
+-
+-.accordion-info-icon:hover,
+-.accordion-info-icon:focus-visible {
+-  background: rgba(77, 159, 255, 0.2);
+-  border-color: var(--color-brand-strong);
+-  color: var(--color-brand-strong);
+-}
+-
+-.accordion-info-icon:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-.accordion-info-tooltip {
+-  position: absolute;
+-  left: 50%;
+-  top: calc(100% + 10px);
+-  transform: translateX(-50%);
+-  width: min(320px, 72vw);
+-  padding: 10px 12px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 8px;
+-  background: var(--color-surface-light);
+-  color: var(--color-text);
+-  font-size: 0.85rem;
+-  line-height: 1.35;
+-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+-  opacity: 0;
+-  visibility: hidden;
+-  pointer-events: none;
+-  transition: opacity 0.14s ease;
+-  z-index: 60;
+-}
+-
+-.accordion-info-tooltip::after {
+-  content: '';
+-  position: absolute;
+-  left: 50%;
+-  bottom: 100%;
+-  transform: translateX(-50%);
+-  border-left: 6px solid transparent;
+-  border-right: 6px solid transparent;
+-  border-bottom: 6px solid var(--color-surface-light);
+-}
+-
+-.accordion-info-wrap:hover .accordion-info-tooltip,
+-.accordion-info-wrap:focus-within .accordion-info-tooltip {
+-  opacity: 1;
+-  visibility: visible;
+-}
+-
+-.accordion-actions {
+-  display: flex;
+-  gap: 8px;
+-}
+-
+-.accordion-new-button {
+-  background: var(--color-brand);
+-  border: 1px solid var(--color-brand);
+-  color: #000;
+-  font-weight: 600;
+-  padding: 6px 12px;
+-  border-radius: 6px;
+-  cursor: pointer;
+-  font-size: 0.9rem;
+-  transition: background-color 0.2s ease;
+-}
+-
+-.accordion-new-button:hover {
+-  background: var(--color-brand-strong);
+-  border-color: var(--color-brand-strong);
+-}
+-
+-.accordion-new-button:focus-visible {
+-  outline: 2px solid var(--color-brand);
+-  outline-offset: 2px;
+-}
+-
+-.accordion-content {
+-  max-height: 0;
+-  overflow: hidden;
+-  transition: max-height 0.3s ease;
+-}
+-
+-.accordion-content.expanded {
+-  max-height: 2000px;
+-}
+-
+-.accordion-record-row {
+-  display: flex;
+-  align-items: center;
+-  justify-content: space-between;
+-  gap: 12px;
+-  padding: 12px 20px;
+-  border-top: 1px solid var(--color-border);
+-  cursor: pointer;
+-  transition: background-color 0.15s ease;
+-}
+-
+-.accordion-record-row:first-child {
+-  border-top: none;
+-}
+-
+-.accordion-record-row:hover {
+-  background: rgba(77, 159, 255, 0.08);
+-}
+-
+-.list-item-count-pill {
+-  display: inline-flex;
+-  align-items: center;
+-  justify-content: center;
+-  min-width: 28px;
+-  padding: 2px 8px;
+-  border-radius: 999px;
+-  border: 1px solid var(--color-border);
+-  background: var(--color-bg);
+-  color: var(--color-muted);
+-  font-size: 0.82rem;
+-  font-weight: 600;
+-  line-height: 1.2;
+-  flex-shrink: 0;
+-}
+-
+-.empty-state-message {
+-  padding: 16px 20px;
+-  color: var(--color-muted);
+-  font-size: 0.95rem;
+-  text-align: center;
+-}
+-
+-@media (max-width: 640px) {
+-  .app-header {
+-    padding: 12px 14px;
+-  }
+-
+-  .tab-nav {
+-    top: 54px;
+-  }
+-
+-  .tab-list {
+-    padding: 8px 14px;
+-  }
+-
+-  .page-main {
+-    padding: 14px;
+-  }
+-
+-  .empty-state-card {
+-    padding: 14px;
+-  }
+-
+-  .tab-inline-action {
+-    font-size: 0.82rem;
+-  }
+-}
+diff --git a/docs/ui/ui.js b/docs/ui/ui.js
+deleted file mode 100644
+index e6f49fe..0000000
+--- a/docs/ui/ui.js
++++ /dev/null
+@@ -1,940 +0,0 @@
+-(function () {
+-  var activeOverflowMenu = null;
+-
+-  document.addEventListener('click', function (event) {
+-    if (!activeOverflowMenu) {
+-      return;
+-    }
+-
+-    if (!activeOverflowMenu.wrap.contains(event.target)) {
+-      activeOverflowMenu.setOpen(false);
+-      activeOverflowMenu = null;
+-    }
+-  });
+-
+-  document.addEventListener('keydown', function (event) {
+-    if (event.key !== 'Escape' || !activeOverflowMenu) {
+-      return;
+-    }
+-
+-    activeOverflowMenu.setOpen(false);
+-    activeOverflowMenu = null;
+-  });
+-
+-  function setActiveOverflowMenu(wrap, setOpen, isOpen) {
+-    if (!isOpen) {
+-      if (activeOverflowMenu && activeOverflowMenu.wrap === wrap) {
+-        activeOverflowMenu = null;
+-      }
+-      return;
+-    }
+-
+-    if (activeOverflowMenu && activeOverflowMenu.wrap !== wrap) {
+-      activeOverflowMenu.setOpen(false);
+-    }
+-
+-    activeOverflowMenu = {
+-      wrap: wrap,
+-      setOpen: setOpen
+-    };
+-  }
+-
+-  function newFromTemplate(templateId) {
+-    var template = document.getElementById(templateId);
+-    if (!template) {
+-      throw new Error('Template not found: ' + templateId);
+-    }
+-
+-    return template.content.firstElementChild.cloneNode(true);
+-  }
+-
+-  function NewMainTab(tab, isSelected, onSelect, onAction) {
+-    var node = newFromTemplate('main-tab-template');
+-    var label = node.querySelector('.tab-label');
+-    var inlineAction = node.querySelector('.tab-inline-action');
+-
+-    label.textContent = tab.label;
+-    inlineAction.textContent = tab.actionLabel;
+-    inlineAction.setAttribute('aria-disabled', isSelected ? 'false' : 'true');
+-    node.setAttribute('id', 'tab-' + tab.id);
+-    node.setAttribute('aria-controls', 'panel-' + tab.id);
+-    node.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+-
+-    if (isSelected) {
+-      node.classList.add('is-selected');
+-    }
+-
+-    node.addEventListener('click', function (event) {
+-      if (event.target.closest('.tab-inline-action')) {
+-        if (isSelected) {
+-          onAction(tab.id);
+-        }
+-        return;
+-      }
+-
+-      onSelect(tab.id);
+-    });
+-
+-    return node;
+-  }
+-
+-  function AddMainTab(container, tab, isSelected, onSelect, onAction) {
+-    var node = NewMainTab(tab, isSelected, onSelect, onAction);
+-    container.appendChild(node);
+-    return node;
+-  }
+-
+-  function ReplaceMainTabs(container, tabs, selectedTabId, onSelect, onAction) {
+-    container.replaceChildren();
+-
+-    tabs.forEach(function (tab) {
+-      AddMainTab(container, tab, tab.id === selectedTabId, onSelect, onAction);
+-    });
+-  }
+-
+-  function NewListRecordRow(record, onClick) {
+-    var node = newFromTemplate('list-record-row-template');
+-    var nameNode = node.querySelector('.record-name');
+-
+-    nameNode.textContent = record.name;
+-
+-    if (typeof onClick === 'function') {
+-      node.addEventListener('click', onClick);
+-    }
+-
+-    return node;
+-  }
+-
+-  function ReplaceRecordList(container, records, rowBuilder) {
+-    container.replaceChildren();
+-
+-    records.forEach(function (record) {
+-      container.appendChild(rowBuilder(record));
+-    });
+-  }
+-
+-  function NewMainContentShell(config) {
+-    var node = newFromTemplate('main-content-shell-template');
+-    var emptyStateText = node.querySelector('.empty-state-text');
+-    var emptyStateCard = node.querySelector('.empty-state-card');
+-    var recordList = node.querySelector('[data-record-list]');
+-    var records = config.records || [];
+-
+-    emptyStateText.textContent = config.emptyStateText;
+-
+-    if (records.length > 0 && typeof config.rowBuilder === 'function') {
+-      emptyStateCard.hidden = true;
+-      ReplaceRecordList(recordList, records, config.rowBuilder);
+-    } else {
+-      emptyStateCard.hidden = false;
+-      recordList.replaceChildren();
+-    }
+-
+-    return node;
+-  }
+-
+-  function AddMainContentShell(container, config) {
+-    var node = NewMainContentShell(config);
+-    container.appendChild(node);
+-    return node;
+-  }
+-
+-  function ReplaceMainContent(container, config) {
+-    container.replaceChildren();
+-    AddMainContentShell(container, config);
+-  }
+-
+-  function getClipBounds(element) {
+-    var ancestor = element && element.parentElement;
+-
+-    while (ancestor && ancestor !== document.body) {
+-      var style = window.getComputedStyle(ancestor);
+-      var overflowX = style.overflowX || '';
+-      var overflowY = style.overflowY || '';
+-      var isClippingAncestor = /(auto|scroll|hidden|clip)/.test(overflowX + overflowY);
+-
+-      if (isClippingAncestor) {
+-        return ancestor.getBoundingClientRect();
+-      }
+-
+-      ancestor = ancestor.parentElement;
+-    }
+-
+-    return {
+-      top: 0,
+-      bottom: window.innerHeight
+-    };
+-  }
+-
+-  function shouldOpenOverflowUp(trigger, menu) {
+-    var triggerRect = trigger.getBoundingClientRect();
+-    var menuHeight = menu.offsetHeight;
+-    var gap = 6;
+-    var clipBounds = getClipBounds(trigger);
+-    var spaceBelow = clipBounds.bottom - triggerRect.bottom;
+-    var spaceAbove = triggerRect.top - clipBounds.top;
+-
+-    return spaceBelow < menuHeight + gap && spaceAbove > spaceBelow;
+-  }
+-
+-  function NewDetailShell(config) {
+-    var node = newFromTemplate('detail-shell-template');
+-    var titleNode = node.querySelector('.detail-title');
+-    var backButton = node.querySelector('.detail-back-button');
+-    var actionsNode = node.querySelector('.detail-actions');
+-    var detailItemList = node.querySelector('[data-detail-item-list]');
+-    var emptyStateCard = node.querySelector('.empty-state-card');
+-    var emptyStateText = node.querySelector('.empty-state-text');
+-    var detailItems = config.detailItems || [];
+-
+-    titleNode.textContent = config.title;
+-    emptyStateText.textContent = config.emptyStateText || '';
+-    backButton.textContent = config.backLabel || '\u2190 Home';
+-
+-    backButton.addEventListener('click', config.onBack);
+-
+-    if (typeof config.onAddItem === 'function') {
+-      var addItemButton = document.createElement('button');
+-      addItemButton.type = 'button';
+-      addItemButton.className = 'accordion-new-button detail-add-button';
+-      addItemButton.textContent = config.addItemLabel || '+ Add Item';
+-      addItemButton.addEventListener('click', config.onAddItem);
+-      actionsNode.appendChild(addItemButton);
+-    }
+-
+-    if ((config.actions || []).length > 0) {
+-      var overflowWrap = document.createElement('div');
+-      overflowWrap.className = 'detail-overflow-menu';
+-
+-      var overflowTrigger = document.createElement('button');
+-      overflowTrigger.type = 'button';
+-      overflowTrigger.className = 'record-action-button detail-overflow-trigger';
+-
+-      var overflowDots = document.createElement('span');
+-      overflowDots.className = 'detail-overflow-dots';
+-      overflowDots.textContent = '\u2026';
+-      overflowTrigger.appendChild(overflowDots);
+-
+-      overflowTrigger.setAttribute('aria-haspopup', 'menu');
+-      overflowTrigger.setAttribute('aria-expanded', 'false');
+-      overflowTrigger.setAttribute('aria-label', 'More actions');
+-
+-      var overflowList = document.createElement('div');
+-      overflowList.className = 'detail-overflow-list';
+-      overflowList.setAttribute('role', 'menu');
+-
+-      function updateOverflowDirection() {
+-        overflowList.classList.remove('detail-overflow-list--up');
+-
+-        if (shouldOpenOverflowUp(overflowTrigger, overflowList)) {
+-          overflowList.classList.add('detail-overflow-list--up');
+-        }
+-      }
+-
+-      function setOverflowOpen(isOpen) {
+-        overflowList.style.display = isOpen ? 'grid' : 'none';
+-        overflowTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+-        setActiveOverflowMenu(overflowWrap, setOverflowOpen, isOpen);
+-
+-        if (isOpen) {
+-          updateOverflowDirection();
+-        }
+-      }
+-
+-      setOverflowOpen(false);
+-
+-      (config.actions || []).forEach(function (action) {
+-        var menuItem = document.createElement('button');
+-        menuItem.type = 'button';
+-        menuItem.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
+-        menuItem.textContent = action.label;
+-        menuItem.setAttribute('role', 'menuitem');
+-        menuItem.addEventListener('click', function () {
+-          setOverflowOpen(false);
+-          action.onClick();
+-        });
+-        overflowList.appendChild(menuItem);
+-      });
+-
+-      overflowTrigger.addEventListener('click', function (event) {
+-        event.stopPropagation();
+-        var isOpen = overflowList.style.display !== 'none';
+-        setOverflowOpen(!isOpen);
+-      });
+-
+-      overflowWrap.appendChild(overflowTrigger);
+-      overflowWrap.appendChild(overflowList);
+-      actionsNode.appendChild(overflowWrap);
+-    }
+-
+-    if (detailItems.length > 0 && typeof config.itemRowBuilder === 'function') {
+-      emptyStateCard.hidden = true;
+-      ReplaceDetailItemRows(detailItemList, detailItems, config.itemRowBuilder);
+-    } else {
+-      emptyStateCard.hidden = false;
+-      detailItemList.replaceChildren();
+-    }
+-
+-    return node;
+-  }
+-
+-  function NewDetailItemRow(detailItem, callbacks) {
+-    var node = newFromTemplate('detail-item-row-template');
+-    var nameNode = node.querySelector('.detail-item-name');
+-    var metaNode = node.querySelector('.detail-item-meta');
+-    var actionsNode = node.querySelector('.detail-item-actions');
+-    var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+-    var quantityText = detailItem.quantity == null ? 'Qty: -' : 'Qty: ' + String(detailItem.quantity);
+-    var descriptionText = detailItem.description ? ' | ' + detailItem.description : '';
+-
+-    nameNode.textContent = itemName;
+-    metaNode.textContent = quantityText + descriptionText;
+-
+-    if (actionsNode) {
+-      var overflowWrap = document.createElement('div');
+-      overflowWrap.className = 'detail-item-overflow-menu';
+-
+-      var overflowTrigger = document.createElement('button');
+-      overflowTrigger.type = 'button';
+-      overflowTrigger.className = 'record-action-button detail-item-overflow-trigger';
+-      overflowTrigger.setAttribute('aria-haspopup', 'menu');
+-      overflowTrigger.setAttribute('aria-expanded', 'false');
+-      overflowTrigger.setAttribute('aria-label', 'Item actions');
+-
+-      var overflowDots = document.createElement('span');
+-      overflowDots.className = 'detail-item-overflow-dots';
+-      overflowDots.textContent = '\u22EE';
+-      overflowTrigger.appendChild(overflowDots);
+-
+-      var overflowList = document.createElement('div');
+-      overflowList.className = 'detail-overflow-list';
+-      overflowList.setAttribute('role', 'menu');
+-
+-      function updateOverflowDirection() {
+-        overflowList.classList.remove('detail-overflow-list--up');
+-
+-        if (shouldOpenOverflowUp(overflowTrigger, overflowList)) {
+-          overflowList.classList.add('detail-overflow-list--up');
+-        }
+-      }
+-
+-      function setOverflowOpen(isOpen) {
+-        overflowList.style.display = isOpen ? 'grid' : 'none';
+-        overflowTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+-        setActiveOverflowMenu(overflowWrap, setOverflowOpen, isOpen);
+-
+-        if (isOpen) {
+-          updateOverflowDirection();
+-        }
+-      }
+-
+-      setOverflowOpen(false);
+-
+-      if (callbacks && typeof callbacks.onEdit === 'function') {
+-        var editItem = document.createElement('button');
+-        editItem.type = 'button';
+-        editItem.className = 'detail-overflow-item';
+-        editItem.textContent = 'Edit';
+-        editItem.setAttribute('role', 'menuitem');
+-        editItem.addEventListener('click', function () {
+-          setOverflowOpen(false);
+-          callbacks.onEdit();
+-        });
+-        overflowList.appendChild(editItem);
+-      }
+-
+-      if (callbacks && typeof callbacks.onRemove === 'function') {
+-        var removeItem = document.createElement('button');
+-        removeItem.type = 'button';
+-        removeItem.className = 'detail-overflow-item detail-overflow-item--danger';
+-        removeItem.textContent = 'Remove';
+-        removeItem.setAttribute('role', 'menuitem');
+-        removeItem.addEventListener('click', function () {
+-          setOverflowOpen(false);
+-          callbacks.onRemove();
+-        });
+-        overflowList.appendChild(removeItem);
+-      }
+-
+-      overflowTrigger.addEventListener('click', function (event) {
+-        event.stopPropagation();
+-        var isOpen = overflowList.style.display !== 'none';
+-        setOverflowOpen(!isOpen);
+-      });
+-
+-      overflowWrap.appendChild(overflowTrigger);
+-      overflowWrap.appendChild(overflowList);
+-      actionsNode.appendChild(overflowWrap);
+-    }
+-
+-    return node;
+-  }
+-
+-  function ReplaceDetailItemRows(container, detailItems, rowBuilder) {
+-    container.replaceChildren();
+-
+-    detailItems.forEach(function (detailItem) {
+-      container.appendChild(rowBuilder(detailItem));
+-    });
+-  }
+-
+-  function ReplaceDetailContent(container, config) {
+-    container.replaceChildren();
+-    container.appendChild(NewDetailShell(config));
+-  }
+-
+-  function NewSettingsToggle(config) {
+-    var node = document.createElement('div');
+-    node.className = 'settings-toggle-row';
+-
+-    var textWrap = document.createElement('div');
+-    textWrap.className = 'settings-toggle-text';
+-
+-    var label = document.createElement('label');
+-    label.className = 'settings-toggle-label';
+-    label.textContent = config.label;
+-    textWrap.appendChild(label);
+-
+-    if (config.description) {
+-      var description = document.createElement('p');
+-      description.className = 'settings-toggle-description';
+-      description.textContent = config.description;
+-      textWrap.appendChild(description);
+-    }
+-
+-    node.appendChild(textWrap);
+-
+-    var button = document.createElement('button');
+-    button.type = 'button';
+-    button.className = 'settings-toggle-switch' + (config.checked ? ' settings-toggle-switch--on' : ' settings-toggle-switch--off');
+-    button.setAttribute('role', 'switch');
+-    button.setAttribute('aria-checked', config.checked ? 'true' : 'false');
+-
+-    button.addEventListener('click', function () {
+-      var isNowOn = !button.classList.contains('settings-toggle-switch--on');
+-      button.classList.toggle('settings-toggle-switch--on');
+-      button.classList.toggle('settings-toggle-switch--off');
+-      button.setAttribute('aria-checked', isNowOn ? 'true' : 'false');
+-      config.onChange(isNowOn);
+-    });
+-
+-    node.appendChild(button);
+-    return node;
+-  }
+-
+-  function showModal(setupBody, config) {
+-    return new Promise(function (resolve) {
+-      var node = newFromTemplate('modal-template');
+-      var overlay = node;
+-      var card = node.querySelector('.modal-card');
+-      var titleNode = node.querySelector('.modal-title');
+-      var bodyNode = node.querySelector('.modal-body');
+-      var cancelButton = node.querySelector('.modal-cancel-button');
+-      var confirmButton = node.querySelector('.modal-confirm-button');
+-
+-      titleNode.textContent = config.title;
+-      confirmButton.textContent = config.confirmLabel || 'OK';
+-      card.setAttribute('aria-label', config.title);
+-
+-      if (config.compact) {
+-        overlay.classList.add('modal-overlay--compact');
+-        card.classList.add('modal-card--compact');
+-      }
+-
+-      cancelButton.classList.add('modal-button--secondary');
+-
+-      if (config.isDanger) {
+-        confirmButton.classList.add('modal-button--danger');
+-      } else {
+-        confirmButton.classList.add('modal-button--primary');
+-      }
+-
+-      if (config.showCancel === false) {
+-        cancelButton.hidden = true;
+-      }
+-
+-      var getValue = setupBody(bodyNode, confirmButton, cancelButton);
+-
+-      function close(result) {
+-        document.removeEventListener('keydown', onKeyDown);
+-        document.body.removeChild(node);
+-        resolve(result);
+-      }
+-
+-      function onKeyDown(event) {
+-        if (event.key === 'Escape') {
+-          close(config.cancelValue);
+-        }
+-      }
+-
+-      overlay.addEventListener('click', function (event) {
+-        if (event.target === overlay) {
+-          close(config.cancelValue);
+-        }
+-      });
+-
+-      cancelButton.addEventListener('click', function () {
+-        close(config.cancelValue);
+-      });
+-
+-      confirmButton.addEventListener('click', function () {
+-        close(getValue());
+-      });
+-
+-      document.addEventListener('keydown', onKeyDown);
+-      document.body.appendChild(node);
+-    });
+-  }
+-
+-  function ShowDiscoveryItemModal(options) {
+-    return new Promise(function (resolve) {
+-      var suggestionsEnabled = options.enableSuggestions !== false;
+-      var currentContextItemIds = (options.currentContextItemIds || []).filter(function (itemId) {
+-        return itemId != null;
+-      });
+-      var currentContextLabel = options.currentContextLabel || 'record';
+-      var node = newFromTemplate('modal-template');
+-      var overlay = node;
+-      var card = node.querySelector('.modal-card');
+-      var titleNode = node.querySelector('.modal-title');
+-      var bodyNode = node.querySelector('.modal-body');
+-      var cancelButton = node.querySelector('.modal-cancel-button');
+-      var confirmButton = node.querySelector('.modal-confirm-button');
+-      var selectedItem = null;
+-      var currentSuggestions = [];
+-
+-      titleNode.textContent = options.title || 'Add Item';
+-      confirmButton.textContent = options.confirmLabel || 'Add';
+-      card.setAttribute('aria-label', titleNode.textContent);
+-      cancelButton.classList.add('modal-button--secondary');
+-      confirmButton.classList.add('modal-button--primary');
+-
+-      var form = document.createElement('div');
+-      form.className = 'modal-item-form';
+-
+-      var nameLabel = document.createElement('label');
+-      nameLabel.className = 'modal-field-label';
+-      nameLabel.textContent = options.itemNameLabel || 'Item name';
+-      form.appendChild(nameLabel);
+-
+-      var nameInputWrapper = document.createElement('div');
+-      nameInputWrapper.className = 'modal-input-wrapper';
+-
+-      var nameInput = document.createElement('input');
+-      nameInput.type = 'text';
+-      nameInput.className = 'modal-input';
+-      nameInput.placeholder = options.itemNamePlaceholder || 'Type item name';
+-      nameInput.value = options.initialName || '';
+-      nameInputWrapper.appendChild(nameInput);
+-
+-      var suggestionsList = document.createElement('div');
+-      suggestionsList.className = 'modal-suggestions';
+-      suggestionsList.hidden = true;
+-      if (suggestionsEnabled) {
+-        nameInputWrapper.appendChild(suggestionsList);
+-      }
+-
+-      form.appendChild(nameInputWrapper);
+-
+-      var quantityLabel = document.createElement('label');
+-      quantityLabel.className = 'modal-field-label';
+-      quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
+-      form.appendChild(quantityLabel);
+-
+-      var quantityInput = document.createElement('input');
+-      quantityInput.type = 'text';
+-      quantityInput.className = 'modal-input';
+-      quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
+-      quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
+-      form.appendChild(quantityInput);
+-
+-      var descriptionLabel = document.createElement('label');
+-      descriptionLabel.className = 'modal-field-label';
+-      descriptionLabel.textContent = options.descriptionLabel || 'Description (optional)';
+-      form.appendChild(descriptionLabel);
+-
+-      var descriptionInput = document.createElement('input');
+-      descriptionInput.type = 'text';
+-      descriptionInput.className = 'modal-input';
+-      descriptionInput.placeholder = options.descriptionPlaceholder || 'Notes';
+-      descriptionInput.value = options.initialDescription || '';
+-      form.appendChild(descriptionInput);
+-
+-      var errorNode = document.createElement('p');
+-      errorNode.className = 'modal-error';
+-      form.appendChild(errorNode);
+-
+-      bodyNode.appendChild(form);
+-
+-      function close(result) {
+-        document.removeEventListener('keydown', onKeyDown);
+-        document.body.removeChild(node);
+-        resolve(result);
+-      }
+-
+-      function showError(message) {
+-        errorNode.textContent = message || '';
+-      }
+-
+-      function normalizeName(name) {
+-        return String(name || '').trim().toLowerCase();
+-      }
+-
+-      function sortItemsByName(items) {
+-        return (items || []).slice().sort(function (left, right) {
+-          return String(left.name || '').localeCompare(String(right.name || ''), undefined, {
+-            sensitivity: 'base'
+-          });
+-        });
+-      }
+-
+-      function isItemInCurrentContext(itemId) {
+-        return currentContextItemIds.indexOf(itemId) >= 0;
+-      }
+-
+-      function getCurrentContextMeta(item) {
+-        if (!item || !isItemInCurrentContext(item.id)) {
+-          return '';
+-        }
+-
+-        return 'Already on this ' + currentContextLabel;
+-      }
+-
+-      async function deleteCatalogItem(item) {
+-        if (!options.deleteItem || !item) {
+-          return;
+-        }
+-
+-        try {
+-          await options.deleteItem(item);
+-          if (selectedItem && selectedItem.id === item.id) {
+-            selectedItem = null;
+-          }
+-          showError('');
+-          await refreshSuggestions();
+-          nameInput.focus();
+-        } catch (error) {
+-          showError(error.message || 'Unable to delete item from catalog.');
+-        }
+-      }
+-
+-      function renderSuggestions() {
+-        if (!suggestionsEnabled) {
+-          return;
+-        }
+-
+-        suggestionsList.replaceChildren();
+-
+-        if (currentSuggestions.length === 0) {
+-          suggestionsList.hidden = true;
+-          return;
+-        }
+-
+-        suggestionsList.hidden = false;
+-
+-        currentSuggestions.slice(0, 8).forEach(function (item) {
+-          var isInCurrentContext = isItemInCurrentContext(item.id);
+-          var row = document.createElement('div');
+-          row.className = 'modal-suggestion-row';
+-          if (isInCurrentContext) {
+-            row.classList.add('modal-suggestion-row--current-context');
+-          }
+-
+-          var selectButton = document.createElement('button');
+-          selectButton.type = 'button';
+-          selectButton.className = 'modal-suggestion-main';
+-
+-          var content = document.createElement('div');
+-          content.className = 'modal-suggestion-content';
+-
+-          var nameNode = document.createElement('div');
+-          nameNode.className = 'modal-suggestion-name';
+-          nameNode.textContent = item.name;
+-          content.appendChild(nameNode);
+-
+-          var metaText = getCurrentContextMeta(item);
+-          if (metaText) {
+-            var metaNode = document.createElement('div');
+-            metaNode.className = 'modal-suggestion-meta';
+-            metaNode.textContent = metaText;
+-            content.appendChild(metaNode);
+-          }
+-
+-          selectButton.appendChild(content);
+-
+-          if (selectedItem && selectedItem.id === item.id) {
+-            selectButton.setAttribute('aria-selected', 'true');
+-          }
+-
+-          selectButton.addEventListener('click', function () {
+-            selectedItem = item;
+-            nameInput.value = item.name;
+-            showError('');
+-            currentSuggestions = [];
+-            renderSuggestions();
+-            quantityInput.focus();
+-          });
+-
+-          row.appendChild(selectButton);
+-
+-          if (options.deleteItem) {
+-            var deleteButton = document.createElement('button');
+-            deleteButton.type = 'button';
+-            deleteButton.className = 'modal-suggestion-delete';
+-            deleteButton.setAttribute('aria-label', 'Delete ' + item.name + ' from catalog');
+-            deleteButton.title = 'Delete from catalog';
+-            deleteButton.textContent = '≡ƒùæ';
+-            deleteButton.addEventListener('click', function (event) {
+-              event.preventDefault();
+-              event.stopPropagation();
+-              deleteCatalogItem(item);
+-            });
+-            row.appendChild(deleteButton);
+-          }
+-
+-          suggestionsList.appendChild(row);
+-        });
+-      }
+-
+-      async function refreshSuggestions() {
+-        if (!suggestionsEnabled) {
+-          return;
+-        }
+-
+-        var query = String(nameInput.value || '').trim();
+-        if (!query) {
+-          currentSuggestions = options.getAllItems
+-            ? await options.getAllItems()
+-            : [];
+-          selectedItem = null;
+-          currentSuggestions = sortItemsByName(currentSuggestions);
+-          renderSuggestions();
+-          return;
+-        }
+-
+-        currentSuggestions = await options.searchItems(query);
+-        currentSuggestions = sortItemsByName(currentSuggestions);
+-
+-        if (selectedItem && normalizeName(selectedItem.name) !== normalizeName(nameInput.value)) {
+-          selectedItem = null;
+-        }
+-
+-        renderSuggestions();
+-      }
+-
+-      async function handleSubmit() {
+-        try {
+-          showError('');
+-
+-          var rawName = String(nameInput.value || '').trim();
+-          if (!rawName) {
+-            showError('Item name is required.');
+-            nameInput.focus();
+-            return;
+-          }
+-
+-          var quantityResult = options.validateQuantity
+-            ? options.validateQuantity(quantityInput.value)
+-            : { ok: true, value: quantityInput.value };
+-
+-          if (!quantityResult.ok) {
+-            showError(quantityResult.message || 'Quantity is invalid.');
+-            quantityInput.focus();
+-            return;
+-          }
+-
+-          if (!suggestionsEnabled) {
+-            close({
+-              name: rawName,
+-              quantity: quantityResult.value,
+-              description: String(descriptionInput.value || '').trim()
+-            });
+-            return;
+-          }
+-
+-          var item = selectedItem;
+-          if (!item || normalizeName(item.name) !== normalizeName(rawName)) {
+-            var exact = await options.resolveExactItem(rawName);
+-            if (exact) {
+-              item = exact;
+-            } else {
+-              item = await options.createItem(rawName);
+-            }
+-          }
+-
+-          close({
+-            item: item,
+-            name: rawName,
+-            quantity: quantityResult.value,
+-            description: String(descriptionInput.value || '').trim()
+-          });
+-        } catch (error) {
+-          showError(error.message || 'Unable to submit item.');
+-        }
+-      }
+-
+-      function onKeyDown(event) {
+-        if (event.key === 'Escape') {
+-          close(null);
+-        }
+-      }
+-
+-      nameInput.addEventListener('input', function () {
+-        if (!suggestionsEnabled) {
+-          return;
+-        }
+-
+-        refreshSuggestions().catch(function () {
+-          showError('Unable to load suggestions.');
+-        });
+-      });
+-
+-      nameInput.addEventListener('keydown', function (event) {
+-        if (event.key === 'Enter') {
+-          event.preventDefault();
+-          if (suggestionsEnabled) {
+-            currentSuggestions = [];
+-            renderSuggestions();
+-          }
+-          quantityInput.focus();
+-        }
+-      });
+-
+-      quantityInput.addEventListener('keydown', function (event) {
+-        if (event.key === 'Enter') {
+-          event.preventDefault();
+-          handleSubmit();
+-        }
+-      });
+-
+-      descriptionInput.addEventListener('keydown', function (event) {
+-        if (event.key === 'Enter') {
+-          event.preventDefault();
+-          handleSubmit();
+-        }
+-      });
+-
+-      overlay.addEventListener('click', function (event) {
+-        if (event.target === overlay) {
+-          close(null);
+-        }
+-      });
+-
+-      cancelButton.addEventListener('click', function () {
+-        close(null);
+-      });
+-
+-      confirmButton.addEventListener('click', function () {
+-        handleSubmit();
+-      });
+-
+-      document.addEventListener('keydown', onKeyDown);
+-      document.body.appendChild(node);
+-
+-      requestAnimationFrame(function () {
+-        nameInput.focus();
+-        if (suggestionsEnabled) {
+-          refreshSuggestions().catch(function () {
+-            showError('Unable to load suggestions.');
+-          });
+-        }
+-      });
+-    });
+-  }
+-
+-  function ShowPrompt(config) {
+-    return showModal(function (bodyNode, confirmButton) {
+-      var input = document.createElement('input');
+-      input.type = 'text';
+-      input.className = 'modal-input';
+-      input.placeholder = config.placeholder || '';
+-      input.value = config.value || '';
+-      bodyNode.appendChild(input);
+-
+-      input.addEventListener('keydown', function (event) {
+-        if (event.key === 'Enter') {
+-          event.preventDefault();
+-          confirmButton.click();
+-        }
+-      });
+-
+-      requestAnimationFrame(function () {
+-        input.focus();
+-        input.select();
+-      });
+-
+-      return function () { return input.value; };
+-    }, {
+-      title: config.title,
+-      confirmLabel: config.confirmLabel || 'OK',
+-      cancelValue: null,
+-      isDanger: false
+-    });
+-  }
+-
+-  function ShowConfirm(config) {
+-    return showModal(function (bodyNode, confirmButton, cancelButton) {
+-      if (config.message) {
+-        var p = document.createElement('p');
+-        p.className = 'modal-message';
+-        p.textContent = config.message;
+-        bodyNode.appendChild(p);
+-      }
+-
+-      requestAnimationFrame(function () {
+-        cancelButton.focus();
+-      });
+-
+-      return function () { return true; };
+-    }, {
+-      title: config.title,
+-      confirmLabel: config.confirmLabel || 'Confirm',
+-      cancelValue: false,
+-      isDanger: config.isDanger || false,
+-      compact: true
+-    });
+-  }
+-
+-  function ShowAlert(config) {
+-    return showModal(function (bodyNode, confirmButton) {
+-      if (config.message) {
+-        var p = document.createElement('p');
+-        p.className = 'modal-message';
+-        p.textContent = config.message;
+-        bodyNode.appendChild(p);
+-      }
+-
+-      requestAnimationFrame(function () {
+-        confirmButton.focus();
+-      });
+-
+-      return function () { return true; };
+-    }, {
+-      title: config.title,
+-      confirmLabel: config.confirmLabel || 'OK',
+-      cancelValue: null,
+-      showCancel: false,
+-      isDanger: false
+-    });
+-  }
+-
+-  window.KaPUI = {
+-    NewMainTab: NewMainTab,
+-    AddMainTab: AddMainTab,
+-    ReplaceMainTabs: ReplaceMainTabs,
+-    NewListRecordRow: NewListRecordRow,
+-    ReplaceRecordList: ReplaceRecordList,
+-    NewMainContentShell: NewMainContentShell,
+-    AddMainContentShell: AddMainContentShell,
+-    ReplaceMainContent: ReplaceMainContent,
+-    NewDetailShell: NewDetailShell,
+-    ReplaceDetailContent: ReplaceDetailContent,
+-    NewDetailItemRow: NewDetailItemRow,
+-    ReplaceDetailItemRows: ReplaceDetailItemRows,
+-    NewSettingsToggle: NewSettingsToggle,
+-    ShowDiscoveryItemModal: ShowDiscoveryItemModal,
+-    ShowPrompt: ShowPrompt,
+-    ShowConfirm: ShowConfirm,
+-    ShowAlert: ShowAlert
+-  };
+-})();
+diff --git a/src/features/lists/lists-page.js b/src/features/lists/lists-page.js
+index a28b455..01a7fb4 100644
+--- a/src/features/lists/lists-page.js
++++ b/src/features/lists/lists-page.js
+@@ -88,12 +88,10 @@
+       title: 'Edit Item',
+       confirmLabel: 'Save',
+       itemNamePlaceholder: 'Item name',
+-      quantityPlaceholder: 'e.g. 2',
+       descriptionPlaceholder: 'Item notes',
+       initialName: detailItem.name,
+-      initialQuantity: detailItem.quantity,
+       initialDescription: detailItem.description,
+-      validateQuantity: window.KaPItemDiscovery.validateOptionalInteger,
++      showQuantityField: false,
+       enableSuggestions: false
+     });
+ 
+@@ -106,7 +104,7 @@
+         listRecord.id,
+         detailItem.id,
+         result.name,
+-        result.quantity,
++        detailItem.quantity,
+         result.description
+       );
+     } catch (error) {
+@@ -162,6 +160,16 @@
+       detailItems: detailItems,
+       itemRowBuilder: function (detailItem) {
+         return window.KaPUI.NewDetailItemRow(detailItem, {
++          onIncrement: async function () {
++            var updated = await window.KaPListsService.incrementListItemQuantity(record.id, detailItem.id);
++            detailItem.quantity = updated.quantity;
++            return updated.quantity;
++          },
++          onDecrement: async function () {
++            var updated = await window.KaPListsService.decrementListItemQuantity(record.id, detailItem.id);
++            detailItem.quantity = updated.quantity;
++            return updated.quantity;
++          },
+           onEdit: async function () {
+             await editListItemWithPrompt(record, detailItem);
+             await renderDetailInto(container, record, hooks);
+diff --git a/src/features/lists/lists-service.js b/src/features/lists/lists-service.js
+index 5b0818e..af87417 100644
+--- a/src/features/lists/lists-service.js
++++ b/src/features/lists/lists-service.js
+@@ -185,6 +185,32 @@
+     await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
+   }
+ 
++  async function incrementListItemQuantity(listId, listItemId) {
++    await requireListById(listId);
++    var existing = await findJoinRecordById(listId, listItemId);
++    if (!existing) {
++      throw new Error('List item not found.');
++    }
++
++    var current = existing.quantity == null ? 1 : existing.quantity;
++    existing.quantity = current + 1;
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    return existing;
++  }
++
++  async function decrementListItemQuantity(listId, listItemId) {
++    await requireListById(listId);
++    var existing = await findJoinRecordById(listId, listItemId);
++    if (!existing) {
++      throw new Error('List item not found.');
++    }
++
++    var current = existing.quantity == null ? 1 : existing.quantity;
++    existing.quantity = Math.max(1, current - 1);
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    return existing;
++  }
++
+   window.KaPListsService = {
+     getAllLists: getAllLists,
+     createList: createList,
+@@ -194,6 +220,8 @@
+     getListItems: getListItems,
+     addItemToList: addItemToList,
+     updateListItem: updateListItem,
+-    removeItemFromList: removeItemFromList
++    removeItemFromList: removeItemFromList,
++    incrementListItemQuantity: incrementListItemQuantity,
++    decrementListItemQuantity: decrementListItemQuantity
+   };
+ })();
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index d5be336..4ad517c 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -36,7 +36,7 @@
+ 
+   var currentRoute = null;
+   var requestedDetailRecord = null;
+-  var pantryInfoText = 'Pantry & Fridge lists save staples and keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
++  var pantryInfoText = 'Pantry & Fridge lists keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
+ 
+   function getSavedExpandedSection() {
+     return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
+@@ -404,10 +404,69 @@
+   }
+ 
+   function attachEventListeners() {
+-    var settingsButton = document.getElementById('settings-button');
+-    if (settingsButton) {
+-      settingsButton.addEventListener('click', openSettings);
++    var menuContainer = document.querySelector('.header-menu');
++    var menuButton = document.getElementById('menu-button');
++    var menuList = document.getElementById('header-menu-list');
++    var menuSettingsButton = document.getElementById('menu-settings-button');
++
++    function closeMenu() {
++      if (!menuList || !menuButton) {
++        return;
++      }
++
++      menuList.hidden = true;
++      menuButton.setAttribute('aria-expanded', 'false');
++    }
++
++    function openMenu() {
++      if (!menuList || !menuButton) {
++        return;
++      }
++
++      menuList.hidden = false;
++      menuButton.setAttribute('aria-expanded', 'true');
+     }
++
++    if (menuButton && menuList) {
++      menuButton.addEventListener('click', function (e) {
++        e.stopPropagation();
++        if (menuList.hidden) {
++          openMenu();
++        } else {
++          closeMenu();
++        }
++      });
++
++      menuButton.addEventListener('keydown', function (e) {
++        if (e.key === 'ArrowDown') {
++          e.preventDefault();
++          openMenu();
++          if (menuSettingsButton) {
++            menuSettingsButton.focus();
++          }
++        }
++      });
++    }
++
++    if (menuSettingsButton) {
++      menuSettingsButton.addEventListener('click', function (e) {
++        e.stopPropagation();
++        closeMenu();
++        openSettings();
++      });
++    }
++
++    document.addEventListener('click', function (e) {
++      if (menuContainer && !menuContainer.contains(e.target)) {
++        closeMenu();
++      }
++    });
++
++    document.addEventListener('keydown', function (e) {
++      if (e.key === 'Escape') {
++        closeMenu();
++      }
++    });
+   }
+ 
+   async function initialize() {
+diff --git a/src/features/settings/settings-page.js b/src/features/settings/settings-page.js
+index cc370f5..d98ef4b 100644
+--- a/src/features/settings/settings-page.js
++++ b/src/features/settings/settings-page.js
+@@ -1,7 +1,5 @@
+ (function () {
+   async function renderInto(container, hooks) {
+-    var rememberPosition = window.KaPSettings.get(window.KaPSettings.KEYS.REMEMBER_POSITION);
+-
+     var section = document.createElement('section');
+     section.className = 'settings-shell';
+ 
+@@ -29,16 +27,6 @@
+ 
+     section.appendChild(header);
+ 
+-    var toggleRow = window.KaPUI.NewSettingsToggle({
+-      label: 'Remember position when switching views',
+-      description: 'On: each section remembers the last opened Grocery List, Pantry entry, or Recipe view. Off: opening Grocery Lists, Pantry, or Recipes always starts from that section\'s main list.',
+-      checked: rememberPosition,
+-      onChange: function (checked) {
+-        window.KaPSettings.set(window.KaPSettings.KEYS.REMEMBER_POSITION, checked);
+-      }
+-    });
+-    section.appendChild(toggleRow);
+-
+     container.replaceChildren(section);
+   }
+ 
+diff --git a/src/features/templates/templates-page.js b/src/features/templates/templates-page.js
+index 2b39870..c57e72e 100644
+--- a/src/features/templates/templates-page.js
++++ b/src/features/templates/templates-page.js
+@@ -88,12 +88,10 @@
+       title: 'Edit Item',
+       confirmLabel: 'Save',
+       itemNamePlaceholder: 'Item name',
+-      quantityPlaceholder: 'e.g. 2',
+       descriptionPlaceholder: 'Item notes',
+       initialName: detailItem.name,
+-      initialQuantity: detailItem.quantity,
+       initialDescription: detailItem.description,
+-      validateQuantity: window.KaPItemDiscovery.validateOptionalInteger,
++      showQuantityField: false,
+       enableSuggestions: false
+     });
+ 
+@@ -106,7 +104,7 @@
+         templateRecord.id,
+         detailItem.id,
+         result.name,
+-        result.quantity,
++        detailItem.quantity,
+         result.description
+       );
+     } catch (error) {
+@@ -162,6 +160,16 @@
+       detailItems: detailItems,
+       itemRowBuilder: function (detailItem) {
+         return window.KaPUI.NewDetailItemRow(detailItem, {
++          onIncrement: async function () {
++            var updated = await window.KaPTemplatesService.incrementTemplateItemQuantity(record.id, detailItem.id);
++            detailItem.quantity = updated.quantity;
++            return updated.quantity;
++          },
++          onDecrement: async function () {
++            var updated = await window.KaPTemplatesService.decrementTemplateItemQuantity(record.id, detailItem.id);
++            detailItem.quantity = updated.quantity;
++            return updated.quantity;
++          },
+           onEdit: async function () {
+             await editTemplateItemWithPrompt(record, detailItem);
+             await renderDetailInto(container, record, hooks);
+diff --git a/src/features/templates/templates-service.js b/src/features/templates/templates-service.js
+index 490790b..ff5d442 100644
+--- a/src/features/templates/templates-service.js
++++ b/src/features/templates/templates-service.js
+@@ -179,6 +179,32 @@
+     await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
+   }
+ 
++  async function incrementTemplateItemQuantity(templateId, templateItemId) {
++    await requireTemplateById(templateId);
++    var existing = await findJoinRecordById(templateId, templateItemId);
++    if (!existing) {
++      throw new Error('Template item not found.');
++    }
++
++    var current = existing.quantity == null ? 1 : existing.quantity;
++    existing.quantity = current + 1;
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    return existing;
++  }
++
++  async function decrementTemplateItemQuantity(templateId, templateItemId) {
++    await requireTemplateById(templateId);
++    var existing = await findJoinRecordById(templateId, templateItemId);
++    if (!existing) {
++      throw new Error('Template item not found.');
++    }
++
++    var current = existing.quantity == null ? 1 : existing.quantity;
++    existing.quantity = Math.max(1, current - 1);
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    return existing;
++  }
++
+   window.KaPTemplatesService = {
+     getAllTemplates: getAllTemplates,
+     createTemplate: createTemplate,
+@@ -187,6 +213,8 @@
+     getTemplateItems: getTemplateItems,
+     addItemToTemplate: addItemToTemplate,
+     updateTemplateItem: updateTemplateItem,
+-    removeItemFromTemplate: removeItemFromTemplate
++    removeItemFromTemplate: removeItemFromTemplate,
++    incrementTemplateItemQuantity: incrementTemplateItemQuantity,
++    decrementTemplateItemQuantity: decrementTemplateItemQuantity
+   };
+ })();
+diff --git a/src/index.html b/src/index.html
+index c5e953e..f2c9d58 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -11,7 +11,21 @@
+     <header class="app-header">
+       <div class="header-container">
+         <h1 class="app-title">Kitchen & Pantry</h1>
+-        <button type="button" class="settings-button" id="settings-button" title="Settings">ΓÜÖ</button>
++        <div class="header-menu">
++          <button
++            type="button"
++            class="header-menu-button"
++            id="menu-button"
++            title="Menu"
++            aria-label="Open menu"
++            aria-haspopup="true"
++            aria-expanded="false"
++            aria-controls="header-menu-list"
++          >&#9776;</button>
++          <div class="header-menu-list" id="header-menu-list" role="menu" hidden>
++            <button type="button" class="header-menu-item" id="menu-settings-button" role="menuitem">Settings</button>
++          </div>
++        </div>
+       </div>
+     </header>
+ 
+@@ -63,6 +77,7 @@
+ 
+   <template id="detail-item-row-template">
+     <div class="detail-item-row">
++      <span class="detail-item-qty-pill"></span>
+       <div class="detail-item-content">
+         <div class="detail-item-name"></div>
+         <div class="detail-item-meta"></div>
+diff --git a/src/shared/item-discovery.js b/src/shared/item-discovery.js
+index 568d19f..2e8b437 100644
+--- a/src/shared/item-discovery.js
++++ b/src/shared/item-discovery.js
+@@ -30,6 +30,7 @@
+       confirmLabel: 'Add Item',
+       itemNamePlaceholder: 'Search or type item name',
+       quantityPlaceholder: 'e.g. 2',
++      initialQuantity: 1,
+       descriptionPlaceholder: 'Item notes',
+       currentContextItemIds: currentContextItemIds,
+       currentContextLabel: config.currentContextLabel,
+diff --git a/src/shared/settings.js b/src/shared/settings.js
+index 8f7d726..4328200 100644
+--- a/src/shared/settings.js
++++ b/src/shared/settings.js
+@@ -2,14 +2,12 @@
+   var STORAGE_PREFIX = 'kap.settings.';
+ 
+   var KEYS = {
+-    REMEMBER_POSITION: 'rememberPosition',
+     ACTIVE_TAB: 'activeTab',
+     ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
+     EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection'
+   };
+ 
+   var defaults = {
+-    rememberPosition: true,
+     activeTab: 'lists',
+     activeDetailIdsByTab: {
+       lists: null,
+diff --git a/src/styles.css b/src/styles.css
+index 3cb9ca8..8cf415c 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -60,28 +60,68 @@ body {
+   line-height: 1.2;
+ }
+ 
+-.settings-button {
++.header-menu {
+   grid-column: 3;
+   justify-self: end;
++  position: relative;
++  margin-right: 1.3rem;
++}
++
++.header-menu-button {
+   background: transparent;
+   border: 1px solid var(--color-border);
+   color: var(--color-text);
+   font-size: 1.2rem;
++  line-height: 1;
+   padding: 4px 8px;
+   cursor: pointer;
+   border-radius: 6px;
+-  margin-right: 1.3rem;
+ }
+ 
+-.settings-button:hover {
++.header-menu-button:hover {
+   border-color: var(--color-brand);
+ }
+ 
+-.settings-button:focus-visible {
++.header-menu-button:focus-visible {
+   outline: 2px solid var(--color-brand);
+   outline-offset: 2px;
+ }
+ 
++.header-menu-list {
++  position: absolute;
++  right: 0;
++  top: calc(100% + 8px);
++  min-width: 160px;
++  padding: 6px;
++  border: 1px solid var(--color-border);
++  border-radius: 8px;
++  background: var(--color-surface-light);
++  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
++  z-index: 40;
++}
++
++.header-menu-item {
++  width: 100%;
++  text-align: left;
++  background: transparent;
++  border: 1px solid transparent;
++  color: var(--color-text);
++  padding: 8px 10px;
++  border-radius: 6px;
++  font-size: 0.92rem;
++  cursor: pointer;
++}
++
++.header-menu-item:hover {
++  background: var(--color-surface-light-hover);
++  border-color: var(--color-border);
++}
++
++.header-menu-item:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 1px;
++}
++
+ .tab-nav {
+   position: sticky;
+   top: 58px;
+@@ -223,9 +263,9 @@ body {
+   align-items: center;
+   justify-content: center;
+   min-height: 32px;
+-  border: 1px solid var(--color-border);
++  border: 1px solid transparent;
+   background: transparent;
+-  color: var(--color-text);
++  color: var(--color-brand);
+   border-radius: 8px;
+   padding: 5px 10px;
+   font-size: 0.85rem;
+@@ -255,21 +295,20 @@ body {
+ 
+ .detail-item-list {
+   display: grid;
+-  gap: 10px;
++  gap: 0;
+ }
+ 
+ .detail-item-row {
+   display: flex;
+   align-items: center;
+-  justify-content: space-between;
+   gap: 12px;
+-  border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 12px 14px;
++  border-top: 1px solid var(--color-border);
++  padding: 12px 0;
+ }
+ 
+ .detail-item-content {
+   min-width: 0;
++  flex: 1;
+ }
+ 
+ .detail-item-name {
+@@ -288,11 +327,31 @@ body {
+   gap: 8px;
+ }
+ 
++.detail-item-qty-pill {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-width: 28px;
++  padding: 2px 8px;
++  border-radius: 999px;
++  border: 1px solid var(--color-border);
++  background: var(--color-bg);
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  font-weight: 600;
++  line-height: 1.2;
++  flex-shrink: 0;
++}
++
+ .detail-header {
+   display: flex;
+   align-items: center;
+   gap: 12px;
+   padding: 4px 0 16px 0;
++  position: sticky;
++  top: 58px;
++  background: var(--color-bg);
++  z-index: 10;
+ }
+ 
+ .detail-back-button {
+@@ -358,7 +417,7 @@ body {
+   font-size: 1.2rem;
+   font-weight: 700;
+   line-height: 1;
+-  margin-top: -.5rem;
++  margin-top: -.64rem;
+ }
+ 
+ .detail-overflow-list {
+@@ -407,6 +466,42 @@ body {
+   color: #e74c3c;
+ }
+ 
++.detail-overflow-qty-row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  padding: 6px 8px;
++  border-bottom: 1px solid var(--color-border);
++  gap: 4px;
++}
++
++.detail-overflow-qty-btn {
++  border: 1px solid var(--color-border);
++  background: transparent;
++  color: var(--color-text);
++  width: 28px;
++  height: 28px;
++  border-radius: 6px;
++  font-size: 1.1rem;
++  line-height: 1;
++  cursor: pointer;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  flex-shrink: 0;
++}
++
++.detail-overflow-qty-btn:hover {
++  background: rgba(77, 159, 255, 0.08);
++}
++
++.detail-overflow-qty-display {
++  font-size: 0.9rem;
++  color: var(--color-text);
++  min-width: 28px;
++  text-align: center;
++}
++
+ .detail-item-overflow-menu {
+   position: relative;
+ }
+@@ -425,7 +520,7 @@ body {
+   font-size: 1.1rem;
+   font-weight: 700;
+   line-height: 1;
+-  margin-top: -1px;
++  margin-top: -.4rem;
+ }
+ 
+ .detail-item-overflow-menu .detail-overflow-list {
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index e6f49fe..bd0bdf8 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -283,12 +283,40 @@
+     var nameNode = node.querySelector('.detail-item-name');
+     var metaNode = node.querySelector('.detail-item-meta');
+     var actionsNode = node.querySelector('.detail-item-actions');
++    var qtyPillNode = node.querySelector('.detail-item-qty-pill');
+     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+-    var quantityText = detailItem.quantity == null ? 'Qty: -' : 'Qty: ' + String(detailItem.quantity);
+-    var descriptionText = detailItem.description ? ' | ' + detailItem.description : '';
++    var descriptionText = detailItem.description || '';
++    var currentQuantity = detailItem.quantity;
++    var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+ 
+     nameNode.textContent = itemName;
+-    metaNode.textContent = quantityText + descriptionText;
++
++    function updateQtyPill(qty) {
++      if (!qtyPillNode) {
++        return;
++      }
++
++      var numericQty = Number(qty);
++      var showPill = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && numericQty !== 1;
++
++      if (showPill) {
++        qtyPillNode.textContent = String(qty);
++        qtyPillNode.style.display = '';
++      } else if (hasQtyControls) {
++        qtyPillNode.style.display = 'none';
++      } else {
++        qtyPillNode.remove();
++        qtyPillNode = null;
++      }
++    }
++
++    updateQtyPill(currentQuantity);
++
++    if (descriptionText) {
++      metaNode.textContent = descriptionText;
++    } else {
++      metaNode.hidden = true;
++    }
+ 
+     if (actionsNode) {
+       var overflowWrap = document.createElement('div');
+@@ -303,7 +331,7 @@
+ 
+       var overflowDots = document.createElement('span');
+       overflowDots.className = 'detail-item-overflow-dots';
+-      overflowDots.textContent = '\u22EE';
++      overflowDots.textContent = '\u2026';
+       overflowTrigger.appendChild(overflowDots);
+ 
+       var overflowList = document.createElement('div');
+@@ -330,6 +358,58 @@
+ 
+       setOverflowOpen(false);
+ 
++      if (hasQtyControls) {
++        var qtyRow = document.createElement('div');
++        qtyRow.className = 'detail-overflow-qty-row';
++        qtyRow.setAttribute('role', 'group');
++        qtyRow.setAttribute('aria-label', 'Quantity');
++
++        var qtyDecrBtn = document.createElement('button');
++        qtyDecrBtn.type = 'button';
++        qtyDecrBtn.className = 'detail-overflow-qty-btn';
++        qtyDecrBtn.setAttribute('aria-label', 'Decrease quantity of ' + itemName);
++        qtyDecrBtn.textContent = '\u2212';
++
++        var qtyDisplay = document.createElement('span');
++        qtyDisplay.className = 'detail-overflow-qty-display';
++        qtyDisplay.textContent = currentQuantity == null ? '1' : String(currentQuantity);
++
++        var qtyIncrBtn = document.createElement('button');
++        qtyIncrBtn.type = 'button';
++        qtyIncrBtn.className = 'detail-overflow-qty-btn';
++        qtyIncrBtn.setAttribute('aria-label', 'Increase quantity of ' + itemName);
++        qtyIncrBtn.textContent = '+';
++
++        if (typeof callbacks.onDecrement === 'function') {
++          qtyDecrBtn.addEventListener('click', async function (event) {
++            event.stopPropagation();
++            var newQty = await callbacks.onDecrement();
++            if (newQty != null) {
++              currentQuantity = newQty;
++              qtyDisplay.textContent = String(newQty);
++              updateQtyPill(newQty);
++            }
++          });
++        }
++
++        if (typeof callbacks.onIncrement === 'function') {
++          qtyIncrBtn.addEventListener('click', async function (event) {
++            event.stopPropagation();
++            var newQty = await callbacks.onIncrement();
++            if (newQty != null) {
++              currentQuantity = newQty;
++              qtyDisplay.textContent = String(newQty);
++              updateQtyPill(newQty);
++            }
++          });
++        }
++
++        qtyRow.appendChild(qtyDecrBtn);
++        qtyRow.appendChild(qtyDisplay);
++        qtyRow.appendChild(qtyIncrBtn);
++        overflowList.appendChild(qtyRow);
++      }
++
+       if (callbacks && typeof callbacks.onEdit === 'function') {
+         var editItem = document.createElement('button');
+         editItem.type = 'button';
+@@ -489,6 +569,7 @@
+   function ShowDiscoveryItemModal(options) {
+     return new Promise(function (resolve) {
+       var suggestionsEnabled = options.enableSuggestions !== false;
++      var showQuantityField = options.showQuantityField !== false;
+       var currentContextItemIds = (options.currentContextItemIds || []).filter(function (itemId) {
+         return itemId != null;
+       });
+@@ -536,17 +617,20 @@
+ 
+       form.appendChild(nameInputWrapper);
+ 
+-      var quantityLabel = document.createElement('label');
+-      quantityLabel.className = 'modal-field-label';
+-      quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
+-      form.appendChild(quantityLabel);
+-
+-      var quantityInput = document.createElement('input');
+-      quantityInput.type = 'text';
+-      quantityInput.className = 'modal-input';
+-      quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
+-      quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
+-      form.appendChild(quantityInput);
++      var quantityInput = null;
++      if (showQuantityField) {
++        var quantityLabel = document.createElement('label');
++        quantityLabel.className = 'modal-field-label';
++        quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
++        form.appendChild(quantityLabel);
++
++        quantityInput = document.createElement('input');
++        quantityInput.type = 'text';
++        quantityInput.className = 'modal-input';
++        quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
++        quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
++        form.appendChild(quantityInput);
++      }
+ 
+       var descriptionLabel = document.createElement('label');
+       descriptionLabel.className = 'modal-field-label';
+@@ -672,7 +756,11 @@
+             showError('');
+             currentSuggestions = [];
+             renderSuggestions();
+-            quantityInput.focus();
++            if (quantityInput) {
++              quantityInput.focus();
++            } else {
++              descriptionInput.focus();
++            }
+           });
+ 
+           row.appendChild(selectButton);
+@@ -734,12 +822,14 @@
+           }
+ 
+           var quantityResult = options.validateQuantity
+-            ? options.validateQuantity(quantityInput.value)
+-            : { ok: true, value: quantityInput.value };
++            ? options.validateQuantity(quantityInput ? quantityInput.value : options.initialQuantity)
++            : { ok: true, value: quantityInput ? quantityInput.value : options.initialQuantity };
+ 
+           if (!quantityResult.ok) {
+             showError(quantityResult.message || 'Quantity is invalid.');
+-            quantityInput.focus();
++            if (quantityInput) {
++              quantityInput.focus();
++            }
+             return;
+           }
+ 
+@@ -796,16 +886,22 @@
+             currentSuggestions = [];
+             renderSuggestions();
+           }
+-          quantityInput.focus();
++          if (quantityInput) {
++            quantityInput.focus();
++          } else {
++            descriptionInput.focus();
++          }
+         }
+       });
+ 
+-      quantityInput.addEventListener('keydown', function (event) {
+-        if (event.key === 'Enter') {
+-          event.preventDefault();
+-          handleSubmit();
+-        }
+-      });
++      if (quantityInput) {
++        quantityInput.addEventListener('keydown', function (event) {
++          if (event.key === 'Enter') {
++            event.preventDefault();
++            handleSubmit();
++          }
++        });
++      }
+ 
+       descriptionInput.addEventListener('keydown', function (event) {
+         if (event.key === 'Enter') {
