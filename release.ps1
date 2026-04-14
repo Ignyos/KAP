@@ -135,6 +135,28 @@ function Invoke-BuildScript {
   }
 }
 
+function Clear-DirectoryContents {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [switch]$WhatIfMode
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+
+  $children = Get-ChildItem -LiteralPath $Path -Force
+  foreach ($child in $children) {
+    if ($WhatIfMode) {
+      Write-Host "[WhatIf] Would remove $($child.FullName)" -ForegroundColor Yellow
+      continue
+    }
+
+    Remove-Item -LiteralPath $child.FullName -Recurse -Force
+  }
+}
+
 $scriptDir = Split-Path -Parent $PSCommandPath
 Push-Location $scriptDir
 try {
@@ -158,7 +180,13 @@ try {
 
   $releaseNotesPath = Join-Path $repoRoot "RELEASE_NOTES.md"
   if (-not (Test-Path -LiteralPath $releaseNotesPath)) {
-    throw "Required file not found: $releaseNotesPath"
+    if ($WhatIfMode) {
+      Write-Host "[WhatIf] Would create missing release notes file: $releaseNotesPath" -ForegroundColor Yellow
+    }
+    else {
+      Set-Content -LiteralPath $releaseNotesPath -Value "" -Encoding UTF8
+      Write-Host "Created missing release notes file: RELEASE_NOTES.md" -ForegroundColor Yellow
+    }
   }
 
   $releaseNotesStylePath = Join-Path $repoRoot "RELEASE_NOTES_STYLE.md"
@@ -174,7 +202,7 @@ try {
     }
   }
 
-  $timestamp = Get-Date -Format "yyyy-MM-dd-HH-mm"
+  $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd-HH-mm")
   $tagName = $timestamp
 
   Update-AssetVersionReferences -RootPath $repoRoot -Version $timestamp -WhatIfMode:$WhatIfMode
@@ -295,6 +323,25 @@ Return only the updated RELEASE_NOTES.md content.
   else {
     Invoke-Git -Args @("push", "origin", $branchName)
     Invoke-Git -Args @("push", "origin", $tagName)
+
+    $docsPath = Join-Path $repoRoot "docs"
+    Clear-DirectoryContents -Path $docsPath -WhatIfMode:$WhatIfMode
+
+    if (Test-Path -LiteralPath $releaseNotesPath) {
+      if ($WhatIfMode) {
+        Write-Host "[WhatIf] Would remove $releaseNotesPath" -ForegroundColor Yellow
+      }
+      else {
+        Remove-Item -LiteralPath $releaseNotesPath -Force
+      }
+    }
+
+    if ($WhatIfMode) {
+      Write-Host "[WhatIf] Would clean docs contents and remove RELEASE_NOTES.md after push." -ForegroundColor Yellow
+    }
+    else {
+      Write-Host "Post-release cleanup complete: docs contents removed and RELEASE_NOTES.md deleted." -ForegroundColor Green
+    }
   }
 
   Write-Host ""

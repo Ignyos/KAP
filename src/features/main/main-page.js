@@ -432,6 +432,45 @@
     return 'To install this app, open your browser menu and choose "Install app" or "Create shortcut".' + securityNote;
   }
 
+  function getCurrentReleaseVersion() {
+    var stylesheet = document.querySelector('link[rel="stylesheet"][href]');
+    if (!stylesheet) {
+      return 'Unknown';
+    }
+
+    var hrefValue = String(stylesheet.getAttribute('href') || '');
+    if (!hrefValue) {
+      return 'Unknown';
+    }
+
+    try {
+      var parsedUrl = new URL(hrefValue, window.location.href);
+      return formatReleaseVersion(parsedUrl.searchParams.get('v') || 'Unknown');
+    } catch (error) {
+      var regexMatch = hrefValue.match(/[?&]v=([^&]+)/);
+      return formatReleaseVersion(regexMatch && regexMatch[1] ? regexMatch[1] : 'Unknown');
+    }
+  }
+
+  function formatReleaseVersion(rawVersion) {
+    var value = String(rawVersion || '').trim();
+    var match = value.match(/^(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      return value || 'Unknown';
+    }
+
+    return match[1] + '-' + match[2] + '-' + match[3] + ' ' + match[4] + ':' + match[5];
+  }
+
+  async function handleAboutMenuClick() {
+    await window.KaPUI.ShowAboutModal({
+      title: 'About Kitchen & Pantry',
+      companyName: 'Ignyos',
+      companyUrl: 'https://ignyos.com',
+      releaseVersion: getCurrentReleaseVersion()
+    });
+  }
+
   function updateInstallMenuButton() {
     if (!installMenuButtonRef) {
       return;
@@ -510,6 +549,7 @@
     var menuButton = document.getElementById('menu-button');
     var menuList = document.getElementById('header-menu-list');
     var menuInstallButton = document.getElementById('menu-install-button');
+    var menuAboutButton = document.getElementById('menu-about-button');
     var menuSettingsButton = document.getElementById('menu-settings-button');
 
     installMenuButtonRef = menuInstallButton;
@@ -549,6 +589,8 @@
           openMenu();
           if (menuInstallButton) {
             menuInstallButton.focus();
+          } else if (menuAboutButton) {
+            menuAboutButton.focus();
           } else if (menuSettingsButton) {
             menuSettingsButton.focus();
           }
@@ -561,6 +603,14 @@
         e.stopPropagation();
         closeMenu();
         await handleInstallMenuClick();
+      });
+    }
+
+    if (menuAboutButton) {
+      menuAboutButton.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        closeMenu();
+        await handleAboutMenuClick();
       });
     }
 

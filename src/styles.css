@@ -981,6 +981,26 @@ body {
   font-size: 0.95rem;
 }
 
+.modal-link {
+  color: var(--color-brand);
+  text-decoration: underline;
+}
+
+.modal-link:hover {
+  color: var(--color-brand-strong);
+}
+
+.modal-about-content {
+  display: grid;
+  gap: 16px;
+  padding: 10px 0 6px;
+  text-align: center;
+}
+
+.modal-about-line {
+  line-height: 1.5;
+}
+
 .modal-footer {
   display: grid;
   grid-template-columns: auto 1fr auto;

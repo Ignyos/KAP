@@ -1806,6 +1806,50 @@
     });
   }
 
+  function ShowAboutModal(config) {
+    return showModal(function (bodyNode, confirmButton) {
+      var companyName = String(config.companyName || 'Ignyos').trim();
+      var companyUrl = String(config.companyUrl || 'https://ignyos.com').trim();
+      var releaseVersion = String(config.releaseVersion || 'Unknown').trim();
+
+      var aboutWrap = document.createElement('div');
+      aboutWrap.className = 'modal-about-content';
+
+      var companyMessage = document.createElement('p');
+      companyMessage.className = 'modal-message modal-about-line';
+      companyMessage.appendChild(document.createTextNode('Created by '));
+      var companyLink = document.createElement('a');
+      companyLink.className = 'modal-link';
+      companyLink.href = companyUrl;
+      companyLink.target = '_blank';
+      companyLink.rel = 'noopener noreferrer';
+      companyLink.textContent = companyName;
+      companyMessage.appendChild(companyLink);
+      companyMessage.appendChild(document.createTextNode('.'));
+      aboutWrap.appendChild(companyMessage);
+
+      var versionMessage = document.createElement('p');
+      versionMessage.className = 'modal-message modal-about-line';
+      versionMessage.textContent = 'Version: ' + releaseVersion;
+      aboutWrap.appendChild(versionMessage);
+
+      bodyNode.appendChild(aboutWrap);
+
+      requestAnimationFrame(function () {
+        confirmButton.focus();
+      });
+
+      return function () { return true; };
+    }, {
+      title: config.title || 'About',
+      confirmLabel: config.confirmLabel || 'OK',
+      cancelValue: null,
+      showCancel: false,
+      isDanger: false,
+      compact: true
+    });
+  }
+
   window.KaPUI = {
     NewMainTab: NewMainTab,
     AddMainTab: AddMainTab,
@@ -1825,6 +1869,7 @@
     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,
     ShowConfirm: ShowConfirm,
-    ShowAlert: ShowAlert
+    ShowAlert: ShowAlert,
+    ShowAboutModal: ShowAboutModal
   };
 })();
