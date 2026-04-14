@@ -33,14 +33,7 @@
       },
       searchLists: async function (query) {
         var allLists = await window.KaPListsService.getAllLists();
-        var normalized = String(query || '').trim().toLowerCase();
-        if (!normalized) {
-          return allLists;
-        }
-
-        return allLists.filter(function (listRecord) {
-          return String(listRecord.name || '').toLowerCase().indexOf(normalized) >= 0;
-        });
+        return allLists;
       },
       resolveExactList: async function (name) {
         var allLists = await window.KaPListsService.getAllLists();
