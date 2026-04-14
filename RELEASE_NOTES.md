@@ -1,19 +1,29 @@
-# Kitchen & Pantry Release Notes
+# Release v2026-04-13-20-07
 
 ## Overview
-This release improves day-to-day list management with inline quantity controls, simplifies item editing, and updates header navigation for Settings.
+This release adds global item categories and a template target-list workflow to speed up recurring list building. It also improves modal behavior and fixes migration and item-update reliability issues.
+
+## New Features
+- **Global Categories**: Adds shared categories that can be created, selected, and deleted while adding or editing items in Grocery Lists and Pantry & Fridge.
+- **Category Grouped Views**: Adds per-record category grouping with an Uncategorized bucket and alphabetical grouping/sorting when enabled.
+- **Template Target List**: Adds per-template target list selection so tapping a template item adds or increments that item on the configured grocery list.
+- **Template Usage Pills**: Adds list-usage pills on template items so you can see where each template item is currently used.
 
 ## Improvements
-- **Inline Quantity Controls**: Adds + and - controls in item overflow menus for Grocery Lists and Pantry & Fridge so quantities can be adjusted without reopening dialogs.
-- **Item Edit Simplification**: Updates item Edit dialogs to focus on Item Name and Description while preserving quantity from the list entry.
-- **Default Add Quantity**: Sets new list/template item entries to start at quantity 1 by default.
-- **Settings Access Menu**: Replaces the header settings button with a menu that includes a Settings action and supports keyboard and outside-click close behavior.
-- **Detail View Polish**: Updates detail rows with quantity pills, cleaner spacing/borders, and sticky detail headers for easier scanning while scrolling.
+- **Edit Item Flow**: Simplifies list/template item editing to name and notes while preserving the existing quantity value.
+- **Category View Defaults**: Sets Grocery Lists to show categories by default and Pantry & Fridge templates to hide categories by default.
+- **Category Dropdown UX**: Improves category suggestions so the dropdown opens on focus, closes on outside click or Escape, and is less intrusive on modal load.
+- **Template Detail Layout**: Refines template item row structure and action alignment for clearer scanning of quantity, name, and usage context.
+
+## Bug Fixes
+- **IndexedDB Upgrade Reliability**: Fixes upgrade failures by using the active versionchange transaction during schema upgrades.
+- **Category Update Resilience**: Fixes "Item not found" failures when editing some existing list/template entries by recovering missing backing item records.
 
 ## Technical Changes
-- **Quantity Service Methods**: Adds dedicated increment/decrement quantity operations for list and template item records, with decrement clamped to a minimum of 1.
-- **Settings State Cleanup**: Removes the unused "Remember position" setting key and UI toggle.
-- **Build Tooling**: Adds a clean.ps1 script and a VS Code Clean launch profile to clear generated docs output before rebuilds.
+- **Schema Update**: Bumps IndexedDB schema to version 3 and adds a dedicated categories store and indexes.
+- **Category Service Layer**: Adds a categories service for search/create/resolve/delete operations and item uncategorization on category delete.
+- **Record Settings Persistence**: Adds persisted per-record category view preferences in settings.
+- **Template Service Enhancements**: Adds template target-list configuration and per-item list-usage aggregation support.
 
 ## Installation
 1. Clone or pull the latest code from the repository
