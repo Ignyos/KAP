@@ -1,0 +1,420 @@
+Release timestamp: 2026-04-13-20-44
+Diff source: 2026-04-13-20-07..HEAD
+Generated at: 2026-04-13 20:44:40Z
+diff --git a/src/assets/icon-192.svg b/src/assets/icon-192.svg
+new file mode 100644
+index 0000000..4f86988
+--- /dev/null
++++ b/src/assets/icon-192.svg
+@@ -0,0 +1,11 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Kitchen and Pantry app icon">
++  <defs>
++    <linearGradient id="kapGrad192" x1="0" y1="0" x2="1" y2="1">
++      <stop offset="0%" stop-color="#2e85ea"/>
++      <stop offset="100%" stop-color="#4d9fff"/>
++    </linearGradient>
++  </defs>
++  <rect x="8" y="8" width="176" height="176" rx="38" fill="#0f131a"/>
++  <rect x="22" y="22" width="148" height="148" rx="28" fill="url(#kapGrad192)"/>
++  <path d="M58 137V55h18v32l30-32h23l-33 34 35 48h-22l-25-35-8 8v27H58z" fill="#0f131a"/>
++</svg>
+diff --git a/src/assets/icon-512.svg b/src/assets/icon-512.svg
+new file mode 100644
+index 0000000..ee4d388
+--- /dev/null
++++ b/src/assets/icon-512.svg
+@@ -0,0 +1,11 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Kitchen and Pantry app icon">
++  <defs>
++    <linearGradient id="kapGrad512" x1="0" y1="0" x2="1" y2="1">
++      <stop offset="0%" stop-color="#2e85ea"/>
++      <stop offset="100%" stop-color="#4d9fff"/>
++    </linearGradient>
++  </defs>
++  <rect x="24" y="24" width="464" height="464" rx="96" fill="#0f131a"/>
++  <rect x="56" y="56" width="400" height="400" rx="74" fill="url(#kapGrad512)"/>
++  <path d="M152 366V146h49v87l83-87h63l-90 93 96 127h-60l-68-92-24 25v67H152z" fill="#0f131a"/>
++</svg>
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index 4ad517c..cfc828a 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -37,6 +37,9 @@
+   var currentRoute = null;
+   var requestedDetailRecord = null;
+   var pantryInfoText = 'Pantry & Fridge lists keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
++  var deferredInstallPrompt = null;
++  var isInstalled = false;
++  var installMenuButtonRef = null;
+ 
+   function getSavedExpandedSection() {
+     return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
+@@ -403,12 +406,115 @@
+     window.KaPRouter.navigate('/settings');
+   }
+ 
++  function isRunningStandalone() {
++    var isIosStandalone = window.navigator && window.navigator.standalone === true;
++    var isDisplayModeStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
++    return isIosStandalone || isDisplayModeStandalone;
++  }
++
++  function getInstallFallbackMessage() {
++    var userAgent = String((window.navigator && window.navigator.userAgent) || '').toLowerCase();
++    var isIos = /iphone|ipad|ipod/.test(userAgent);
++    var isAndroid = /android/.test(userAgent);
++    var isSecureForPwa = window.isSecureContext || window.location.protocol === 'http:' && window.location.hostname === 'localhost';
++    var securityNote = isSecureForPwa
++      ? ''
++      : ' Install requires HTTPS (or localhost) rather than opening files directly.';
++
++    if (isIos) {
++      return 'To install this app on iPhone or iPad, open Safari Share and choose "Add to Home Screen".' + securityNote;
++    }
++
++    if (isAndroid) {
++      return 'To install this app, open your browser menu and choose "Install app" or "Add to Home screen".' + securityNote;
++    }
++
++    return 'To install this app, open your browser menu and choose "Install app" or "Create shortcut".' + securityNote;
++  }
++
++  function updateInstallMenuButton() {
++    if (!installMenuButtonRef) {
++      return;
++    }
++
++    if (isInstalled) {
++      installMenuButtonRef.textContent = 'App Installed';
++      installMenuButtonRef.disabled = true;
++      installMenuButtonRef.setAttribute('aria-disabled', 'true');
++      installMenuButtonRef.title = 'This app is already installed on this device.';
++      return;
++    }
++
++    installMenuButtonRef.textContent = deferredInstallPrompt ? 'Install App' : 'Install App (Help)';
++    installMenuButtonRef.disabled = false;
++    installMenuButtonRef.setAttribute('aria-disabled', 'false');
++    installMenuButtonRef.title = deferredInstallPrompt
++      ? 'Install this app on your device.'
++      : 'Shows install instructions for your browser.';
++  }
++
++  async function handleInstallMenuClick() {
++    if (isInstalled) {
++      await window.KaPUI.ShowAlert({
++        title: 'Install App',
++        message: 'Kitchen & Pantry is already installed on this device.'
++      });
++      return;
++    }
++
++    if (deferredInstallPrompt) {
++      var installPrompt = deferredInstallPrompt;
++      deferredInstallPrompt = null;
++      updateInstallMenuButton();
++
++      try {
++        installPrompt.prompt();
++        if (installPrompt.userChoice) {
++          await installPrompt.userChoice;
++        }
++      } catch (error) {
++        await window.KaPUI.ShowAlert({
++          title: 'Install App',
++          message: 'Unable to show the install prompt right now. ' + getInstallFallbackMessage()
++        });
++      }
++
++      return;
++    }
++
++    await window.KaPUI.ShowAlert({
++      title: 'Install App',
++      message: getInstallFallbackMessage()
++    });
++  }
++
++  function attachInstallPromptHandlers() {
++    isInstalled = isRunningStandalone();
++    updateInstallMenuButton();
++
++    window.addEventListener('beforeinstallprompt', function (event) {
++      event.preventDefault();
++      deferredInstallPrompt = event;
++      updateInstallMenuButton();
++    });
++
++    window.addEventListener('appinstalled', function () {
++      isInstalled = true;
++      deferredInstallPrompt = null;
++      updateInstallMenuButton();
++    });
++  }
++
+   function attachEventListeners() {
+     var menuContainer = document.querySelector('.header-menu');
+     var menuButton = document.getElementById('menu-button');
+     var menuList = document.getElementById('header-menu-list');
++    var menuInstallButton = document.getElementById('menu-install-button');
+     var menuSettingsButton = document.getElementById('menu-settings-button');
+ 
++    installMenuButtonRef = menuInstallButton;
++    updateInstallMenuButton();
++
+     function closeMenu() {
+       if (!menuList || !menuButton) {
+         return;
+@@ -441,13 +547,23 @@
+         if (e.key === 'ArrowDown') {
+           e.preventDefault();
+           openMenu();
+-          if (menuSettingsButton) {
++          if (menuInstallButton) {
++            menuInstallButton.focus();
++          } else if (menuSettingsButton) {
+             menuSettingsButton.focus();
+           }
+         }
+       });
+     }
+ 
++    if (menuInstallButton) {
++      menuInstallButton.addEventListener('click', async function (e) {
++        e.stopPropagation();
++        closeMenu();
++        await handleInstallMenuClick();
++      });
++    }
++
+     if (menuSettingsButton) {
+       menuSettingsButton.addEventListener('click', function (e) {
+         e.stopPropagation();
+@@ -470,6 +586,7 @@
+   }
+ 
+   async function initialize() {
++    attachInstallPromptHandlers();
+     attachEventListeners();
+     var mainContainer = document.getElementById('main-content');
+     if (mainContainer) {
+diff --git a/src/index.html b/src/index.html
+index f500ca8..9281b7a 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -4,6 +4,9 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Kitchen & Pantry</title>
++  <link rel="manifest" href="./manifest.webmanifest" />
++  <link rel="icon" type="image/svg+xml" href="./assets/icon-192.svg" />
++  <link rel="apple-touch-icon" href="./assets/icon-192.svg" />
+   <link rel="stylesheet" href="./styles.css?v=2026-04-13-20-07" />
+ </head>
+ <body>
+@@ -23,6 +26,7 @@
+             aria-controls="header-menu-list"
+           >&#9776;</button>
+           <div class="header-menu-list" id="header-menu-list" role="menu" hidden>
++            <button type="button" class="header-menu-item" id="menu-install-button" role="menuitem">Install App</button>
+             <button type="button" class="header-menu-item" id="menu-settings-button" role="menuitem">Settings</button>
+           </div>
+         </div>
+diff --git a/src/main.js b/src/main.js
+index dcf91f2..08b650f 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -1,3 +1,9 @@
+ document.addEventListener('DOMContentLoaded', async function () {
+   await AppInit.initialize();
++
++  if ('serviceWorker' in navigator && window.isSecureContext) {
++    navigator.serviceWorker.register('./service-worker.js').catch(function (error) {
++      console.error('Service worker registration failed:', error);
++    });
++  }
+ });
+diff --git a/src/manifest.webmanifest b/src/manifest.webmanifest
+new file mode 100644
+index 0000000..5907f4e
+--- /dev/null
++++ b/src/manifest.webmanifest
+@@ -0,0 +1,24 @@
++{
++  "name": "Kitchen & Pantry",
++  "short_name": "KaP",
++  "description": "Kitchen & Pantry helps you manage grocery lists and pantry templates.",
++  "start_url": "./index.html",
++  "scope": "./",
++  "display": "standalone",
++  "background_color": "#0f131a",
++  "theme_color": "#0f131a",
++  "icons": [
++    {
++      "src": "./assets/icon-192.svg",
++      "sizes": "192x192",
++      "type": "image/svg+xml",
++      "purpose": "any"
++    },
++    {
++      "src": "./assets/icon-512.svg",
++      "sizes": "512x512",
++      "type": "image/svg+xml",
++      "purpose": "any"
++    }
++  ]
++}
+diff --git a/src/service-worker.js b/src/service-worker.js
+new file mode 100644
+index 0000000..4a3aeb8
+--- /dev/null
++++ b/src/service-worker.js
+@@ -0,0 +1,101 @@
++var CACHE_NAME = 'kap-app-v2026-04-13-pwa-1';
++var APP_SHELL = [
++  './',
++  './index.html',
++  './styles.css',
++  './main.js',
++  './app-init.js',
++  './app-router.js',
++  './manifest.webmanifest',
++  './service-worker.js',
++  './assets/icon-192.svg',
++  './assets/icon-512.svg',
++  './shared/ids.js',
++  './shared/settings.js',
++  './shared/item-discovery.js',
++  './shared/item-entry-rules.js',
++  './data/stores.js',
++  './data/db.js',
++  './ui/ui.js',
++  './features/items/items-service.js',
++  './features/categories/categories-service.js',
++  './features/lists/lists-service.js',
++  './features/lists/lists-page.js',
++  './features/templates/templates-service.js',
++  './features/templates/templates-page.js',
++  './features/settings/settings-page.js',
++  './features/main/main-page.js'
++];
++
++self.addEventListener('install', function (event) {
++  event.waitUntil(
++    caches.open(CACHE_NAME).then(function (cache) {
++      return cache.addAll(APP_SHELL);
++    })
++  );
++  self.skipWaiting();
++});
++
++self.addEventListener('activate', function (event) {
++  event.waitUntil(
++    caches.keys().then(function (cacheNames) {
++      return Promise.all(
++        cacheNames.map(function (cacheName) {
++          if (cacheName !== CACHE_NAME) {
++            return caches.delete(cacheName);
++          }
++          return Promise.resolve();
++        })
++      );
++    })
++  );
++  self.clients.claim();
++});
++
++self.addEventListener('fetch', function (event) {
++  if (event.request.method !== 'GET') {
++    return;
++  }
++
++  var requestUrl = new URL(event.request.url);
++  if (requestUrl.origin !== self.location.origin) {
++    return;
++  }
++
++  if (event.request.mode === 'navigate') {
++    event.respondWith(
++      fetch(event.request)
++        .then(function (response) {
++          var responseClone = response.clone();
++          caches.open(CACHE_NAME).then(function (cache) {
++            cache.put('./index.html', responseClone);
++          });
++          return response;
++        })
++        .catch(function () {
++          return caches.match('./index.html');
++        })
++    );
++    return;
++  }
++
++  event.respondWith(
++    caches.match(event.request).then(function (cachedResponse) {
++      if (cachedResponse) {
++        return cachedResponse;
++      }
++
++      return fetch(event.request).then(function (networkResponse) {
++        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
++          return networkResponse;
++        }
++
++        var responseClone = networkResponse.clone();
++        caches.open(CACHE_NAME).then(function (cache) {
++          cache.put(event.request, responseClone);
++        });
++        return networkResponse;
++      });
++    })
++  );
++});
+diff --git a/src/styles.css b/src/styles.css
+index b1ba62b..76b3c78 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -122,6 +122,19 @@ body {
+   outline-offset: 1px;
+ }
+ 
++.header-menu-item[aria-disabled="true"],
++.header-menu-item:disabled {
++  color: var(--color-disabled);
++  cursor: not-allowed;
++  opacity: 0.8;
++}
++
++.header-menu-item[aria-disabled="true"]:hover,
++.header-menu-item:disabled:hover {
++  background: transparent;
++  border-color: transparent;
++}
++
+ .tab-nav {
+   position: sticky;
+   top: 58px;
+@@ -983,6 +996,11 @@ body {
+ }
+ 
+ .modal-button {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: auto;
++  justify-self: start;
+   white-space: nowrap;
+   border-radius: 8px;
+   padding: 8px 16px;
+@@ -992,6 +1010,10 @@ body {
+   cursor: pointer;
+ }
+ 
++.modal-confirm-button {
++  justify-self: end;
++}
++
+ .modal-button--secondary {
+   background: transparent;
+   border: 1px solid var(--color-border);

@@ -37,6 +37,9 @@
   var currentRoute = null;
   var requestedDetailRecord = null;
   var pantryInfoText = 'Pantry & Fridge lists keep track of what you usually keep on hand. Use them as checklists to generate shopping lists.';
+  var deferredInstallPrompt = null;
+  var isInstalled = false;
+  var installMenuButtonRef = null;
 
   function getSavedExpandedSection() {
     return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
@@ -403,11 +406,114 @@
     window.KaPRouter.navigate('/settings');
   }
 
+  function isRunningStandalone() {
+    var isIosStandalone = window.navigator && window.navigator.standalone === true;
+    var isDisplayModeStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+    return isIosStandalone || isDisplayModeStandalone;
+  }
+
+  function getInstallFallbackMessage() {
+    var userAgent = String((window.navigator && window.navigator.userAgent) || '').toLowerCase();
+    var isIos = /iphone|ipad|ipod/.test(userAgent);
+    var isAndroid = /android/.test(userAgent);
+    var isSecureForPwa = window.isSecureContext || window.location.protocol === 'http:' && window.location.hostname === 'localhost';
+    var securityNote = isSecureForPwa
+      ? ''
+      : ' Install requires HTTPS (or localhost) rather than opening files directly.';
+
+    if (isIos) {
+      return 'To install this app on iPhone or iPad, open Safari Share and choose "Add to Home Screen".' + securityNote;
+    }
+
+    if (isAndroid) {
+      return 'To install this app, open your browser menu and choose "Install app" or "Add to Home screen".' + securityNote;
+    }
+
+    return 'To install this app, open your browser menu and choose "Install app" or "Create shortcut".' + securityNote;
+  }
+
+  function updateInstallMenuButton() {
+    if (!installMenuButtonRef) {
+      return;
+    }
+
+    if (isInstalled) {
+      installMenuButtonRef.textContent = 'App Installed';
+      installMenuButtonRef.disabled = true;
+      installMenuButtonRef.setAttribute('aria-disabled', 'true');
+      installMenuButtonRef.title = 'This app is already installed on this device.';
+      return;
+    }
+
+    installMenuButtonRef.textContent = deferredInstallPrompt ? 'Install App' : 'Install App (Help)';
+    installMenuButtonRef.disabled = false;
+    installMenuButtonRef.setAttribute('aria-disabled', 'false');
+    installMenuButtonRef.title = deferredInstallPrompt
+      ? 'Install this app on your device.'
+      : 'Shows install instructions for your browser.';
+  }
+
+  async function handleInstallMenuClick() {
+    if (isInstalled) {
+      await window.KaPUI.ShowAlert({
+        title: 'Install App',
+        message: 'Kitchen & Pantry is already installed on this device.'
+      });
+      return;
+    }
+
+    if (deferredInstallPrompt) {
+      var installPrompt = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      updateInstallMenuButton();
+
+      try {
+        installPrompt.prompt();
+        if (installPrompt.userChoice) {
+          await installPrompt.userChoice;
+        }
+      } catch (error) {
+        await window.KaPUI.ShowAlert({
+          title: 'Install App',
+          message: 'Unable to show the install prompt right now. ' + getInstallFallbackMessage()
+        });
+      }
+
+      return;
+    }
+
+    await window.KaPUI.ShowAlert({
+      title: 'Install App',
+      message: getInstallFallbackMessage()
+    });
+  }
+
+  function attachInstallPromptHandlers() {
+    isInstalled = isRunningStandalone();
+    updateInstallMenuButton();
+
+    window.addEventListener('beforeinstallprompt', function (event) {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      updateInstallMenuButton();
+    });
+
+    window.addEventListener('appinstalled', function () {
+      isInstalled = true;
+      deferredInstallPrompt = null;
+      updateInstallMenuButton();
+    });
+  }
+
   function attachEventListeners() {
     var menuContainer = document.querySelector('.header-menu');
     var menuButton = document.getElementById('menu-button');
     var menuList = document.getElementById('header-menu-list');
+    var menuInstallButton = document.getElementById('menu-install-button');
     var menuSettingsButton = document.getElementById('menu-settings-button');
+
+    installMenuButtonRef = menuInstallButton;
+    updateInstallMenuButton();
 
     function closeMenu() {
       if (!menuList || !menuButton) {
@@ -441,10 +547,20 @@
         if (e.key === 'ArrowDown') {
           e.preventDefault();
           openMenu();
-          if (menuSettingsButton) {
+          if (menuInstallButton) {
+            menuInstallButton.focus();
+          } else if (menuSettingsButton) {
             menuSettingsButton.focus();
           }
         }
+      });
+    }
+
+    if (menuInstallButton) {
+      menuInstallButton.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        closeMenu();
+        await handleInstallMenuClick();
       });
     }
 
@@ -470,6 +586,7 @@
   }
 
   async function initialize() {
+    attachInstallPromptHandlers();
     attachEventListeners();
     var mainContainer = document.getElementById('main-content');
     if (mainContainer) {
