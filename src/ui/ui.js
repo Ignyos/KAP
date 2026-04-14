@@ -288,8 +288,20 @@
     var descriptionText = detailItem.description || '';
     var currentQuantity = detailItem.quantity;
     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+    var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
 
     nameNode.textContent = itemName;
+
+    if (detailItem.isCrossedOff) {
+      node.classList.add('detail-item-row--crossed');
+    }
+
+    if (hasCrossOffToggle) {
+      node.classList.add('detail-item-row--toggleable');
+      node.addEventListener('click', function () {
+        callbacks.onToggleCrossOff(!detailItem.isCrossedOff);
+      });
+    }
 
     function updateQtyPill(qty) {
       if (!qtyPillNode) {
@@ -416,7 +428,8 @@
         editItem.className = 'detail-overflow-item';
         editItem.textContent = 'Edit';
         editItem.setAttribute('role', 'menuitem');
-        editItem.addEventListener('click', function () {
+        editItem.addEventListener('click', function (event) {
+          event.stopPropagation();
           setOverflowOpen(false);
           callbacks.onEdit();
         });
@@ -429,7 +442,8 @@
         removeItem.className = 'detail-overflow-item detail-overflow-item--danger';
         removeItem.textContent = 'Remove';
         removeItem.setAttribute('role', 'menuitem');
-        removeItem.addEventListener('click', function () {
+        removeItem.addEventListener('click', function (event) {
+          event.stopPropagation();
           setOverflowOpen(false);
           callbacks.onRemove();
         });
@@ -445,6 +459,9 @@
       overflowWrap.appendChild(overflowTrigger);
       overflowWrap.appendChild(overflowList);
       actionsNode.appendChild(overflowWrap);
+      actionsNode.addEventListener('click', function (event) {
+        event.stopPropagation();
+      });
     }
 
     return node;
@@ -570,6 +587,7 @@
     return new Promise(function (resolve) {
       var suggestionsEnabled = options.enableSuggestions !== false;
       var showQuantityField = options.showQuantityField !== false;
+      var showCategoryField = options.showCategoryField !== false;
       var currentContextItemIds = (options.currentContextItemIds || []).filter(function (itemId) {
         return itemId != null;
       });
@@ -582,7 +600,9 @@
       var cancelButton = node.querySelector('.modal-cancel-button');
       var confirmButton = node.querySelector('.modal-confirm-button');
       var selectedItem = null;
+      var selectedCategory = null;
       var currentSuggestions = [];
+      var currentCategorySuggestions = [];
 
       titleNode.textContent = options.title || 'Add Item';
       confirmButton.textContent = options.confirmLabel || 'Add';
@@ -632,6 +652,40 @@
         form.appendChild(quantityInput);
       }
 
+      var categoryInput = null;
+      var categoryInputWrapper = null;
+      var categorySuggestionsList = null;
+      if (showCategoryField) {
+        var categoryLabel = document.createElement('label');
+        categoryLabel.className = 'modal-field-label';
+        categoryLabel.textContent = options.categoryLabel || 'Category (optional)';
+        form.appendChild(categoryLabel);
+
+        categoryInputWrapper = document.createElement('div');
+        categoryInputWrapper.className = 'modal-input-wrapper';
+
+        categoryInput = document.createElement('input');
+        categoryInput.type = 'text';
+        categoryInput.className = 'modal-input';
+        categoryInput.placeholder = options.categoryPlaceholder || 'Search or type category';
+        categoryInput.value = options.initialCategoryName || '';
+        categoryInputWrapper.appendChild(categoryInput);
+
+        categorySuggestionsList = document.createElement('div');
+        categorySuggestionsList.className = 'modal-suggestions';
+        categorySuggestionsList.hidden = true;
+        categoryInputWrapper.appendChild(categorySuggestionsList);
+
+        form.appendChild(categoryInputWrapper);
+
+        if (options.initialCategoryId || options.initialCategoryName) {
+          selectedCategory = {
+            id: options.initialCategoryId || '',
+            name: options.initialCategoryName || ''
+          };
+        }
+      }
+
       var descriptionLabel = document.createElement('label');
       descriptionLabel.className = 'modal-field-label';
       descriptionLabel.textContent = options.descriptionLabel || 'Description (optional)';
@@ -652,6 +706,7 @@
 
       function close(result) {
         document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('click', onDocumentClick);
         document.body.removeChild(node);
         resolve(result);
       }
@@ -666,6 +721,14 @@
 
       function sortItemsByName(items) {
         return (items || []).slice().sort(function (left, right) {
+          return String(left.name || '').localeCompare(String(right.name || ''), undefined, {
+            sensitivity: 'base'
+          });
+        });
+      }
+
+      function sortCategoriesByName(categories) {
+        return (categories || []).slice().sort(function (left, right) {
           return String(left.name || '').localeCompare(String(right.name || ''), undefined, {
             sensitivity: 'base'
           });
@@ -699,6 +762,29 @@
           nameInput.focus();
         } catch (error) {
           showError(error.message || 'Unable to delete item from catalog.');
+        }
+      }
+
+      async function deleteCatalogCategory(category) {
+        if (!options.deleteCategory || !category) {
+          return;
+        }
+
+        try {
+          await options.deleteCategory(category);
+          if (selectedCategory && selectedCategory.id === category.id) {
+            selectedCategory = null;
+            if (categoryInput) {
+              categoryInput.value = '';
+            }
+          }
+          showError('');
+          await refreshCategorySuggestions();
+          if (categoryInput) {
+            categoryInput.focus();
+          }
+        } catch (error) {
+          showError(error.message || 'Unable to delete category.');
         }
       }
 
@@ -753,11 +839,26 @@
           selectButton.addEventListener('click', function () {
             selectedItem = item;
             nameInput.value = item.name;
+            if (categoryInput) {
+              selectedCategory = item.categoryId || item.categoryName
+                ? {
+                  id: item.categoryId || '',
+                  name: item.categoryName || ''
+                }
+                : null;
+              categoryInput.value = selectedCategory ? selectedCategory.name : '';
+            }
             showError('');
             currentSuggestions = [];
             renderSuggestions();
+            if (categoryInput) {
+              currentCategorySuggestions = [];
+              renderCategorySuggestions();
+            }
             if (quantityInput) {
               quantityInput.focus();
+            } else if (categoryInput) {
+              categoryInput.focus();
             } else {
               descriptionInput.focus();
             }
@@ -810,6 +911,108 @@
         renderSuggestions();
       }
 
+      function renderCategorySuggestions() {
+        if (!categoryInput || !categorySuggestionsList) {
+          return;
+        }
+
+        categorySuggestionsList.replaceChildren();
+
+        if (currentCategorySuggestions.length === 0) {
+          categorySuggestionsList.hidden = true;
+          return;
+        }
+
+        categorySuggestionsList.hidden = false;
+
+        currentCategorySuggestions.slice(0, 8).forEach(function (category) {
+          var row = document.createElement('div');
+          row.className = 'modal-suggestion-row';
+
+          var selectButton = document.createElement('button');
+          selectButton.type = 'button';
+          selectButton.className = 'modal-suggestion-main';
+
+          var content = document.createElement('div');
+          content.className = 'modal-suggestion-content';
+
+          var nameNode = document.createElement('div');
+          nameNode.className = 'modal-suggestion-name';
+          nameNode.textContent = category.name;
+          content.appendChild(nameNode);
+
+          selectButton.appendChild(content);
+
+          if (selectedCategory && selectedCategory.id === category.id) {
+            selectButton.setAttribute('aria-selected', 'true');
+          }
+
+          selectButton.addEventListener('click', function () {
+            selectedCategory = category;
+            categoryInput.value = category.name;
+            showError('');
+            currentCategorySuggestions = [];
+            renderCategorySuggestions();
+            descriptionInput.focus();
+          });
+
+          row.appendChild(selectButton);
+
+          if (options.deleteCategory) {
+            var deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'modal-suggestion-delete';
+            deleteButton.setAttribute('aria-label', 'Delete category ' + category.name);
+            deleteButton.title = 'Delete category';
+            deleteButton.textContent = '🗑';
+            deleteButton.addEventListener('click', function (event) {
+              event.preventDefault();
+              event.stopPropagation();
+              deleteCatalogCategory(category);
+            });
+            row.appendChild(deleteButton);
+          }
+
+          categorySuggestionsList.appendChild(row);
+        });
+      }
+
+      async function refreshCategorySuggestions() {
+        if (!categoryInput || !categorySuggestionsList) {
+          return;
+        }
+
+        var query = String(categoryInput.value || '').trim();
+        if (!query) {
+          currentCategorySuggestions = options.getAllCategories
+            ? await options.getAllCategories()
+            : [];
+          currentCategorySuggestions = sortCategoriesByName(currentCategorySuggestions);
+          renderCategorySuggestions();
+          return;
+        }
+
+        currentCategorySuggestions = options.searchCategories
+          ? await options.searchCategories(query)
+          : [];
+        currentCategorySuggestions = sortCategoriesByName(currentCategorySuggestions);
+
+        if (selectedCategory && normalizeName(selectedCategory.name) !== normalizeName(categoryInput.value)) {
+          selectedCategory = null;
+        }
+
+        renderCategorySuggestions();
+      }
+
+      function closeCategorySuggestions() {
+        if (!categorySuggestionsList) {
+          return;
+        }
+
+        currentCategorySuggestions = [];
+        renderCategorySuggestions();
+      }
+
       async function handleSubmit() {
         try {
           showError('');
@@ -825,6 +1028,28 @@
             ? options.validateQuantity(quantityInput ? quantityInput.value : options.initialQuantity)
             : { ok: true, value: quantityInput ? quantityInput.value : options.initialQuantity };
 
+          var rawCategoryName = categoryInput ? String(categoryInput.value || '').trim() : '';
+          var category = null;
+
+          if (rawCategoryName) {
+            if (selectedCategory && normalizeName(selectedCategory.name) === normalizeName(rawCategoryName)) {
+              category = selectedCategory;
+            } else if (options.resolveExactCategory) {
+              category = await options.resolveExactCategory(rawCategoryName);
+            }
+
+            if (!category && options.createCategory) {
+              category = await options.createCategory(rawCategoryName);
+            }
+
+            if (!category) {
+              category = {
+                id: '',
+                name: rawCategoryName
+              };
+            }
+          }
+
           if (!quantityResult.ok) {
             showError(quantityResult.message || 'Quantity is invalid.');
             if (quantityInput) {
@@ -837,7 +1062,9 @@
             close({
               name: rawName,
               quantity: quantityResult.value,
-              description: String(descriptionInput.value || '').trim()
+              description: String(descriptionInput.value || '').trim(),
+              categoryId: category ? category.id || '' : '',
+              categoryName: category ? category.name || '' : ''
             });
             return;
           }
@@ -856,7 +1083,9 @@
             item: item,
             name: rawName,
             quantity: quantityResult.value,
-            description: String(descriptionInput.value || '').trim()
+            description: String(descriptionInput.value || '').trim(),
+            categoryId: category ? category.id || '' : '',
+            categoryName: category ? category.name || '' : ''
           });
         } catch (error) {
           showError(error.message || 'Unable to submit item.');
@@ -865,7 +1094,22 @@
 
       function onKeyDown(event) {
         if (event.key === 'Escape') {
+          if (categorySuggestionsList && !categorySuggestionsList.hidden) {
+            closeCategorySuggestions();
+            return;
+          }
+
           close(null);
+        }
+      }
+
+      function onDocumentClick(event) {
+        if (!categoryInputWrapper || !categorySuggestionsList || categorySuggestionsList.hidden) {
+          return;
+        }
+
+        if (!categoryInputWrapper.contains(event.target)) {
+          closeCategorySuggestions();
         }
       }
 
@@ -888,11 +1132,35 @@
           }
           if (quantityInput) {
             quantityInput.focus();
+          } else if (categoryInput) {
+            categoryInput.focus();
           } else {
             descriptionInput.focus();
           }
         }
       });
+
+      if (categoryInput) {
+        categoryInput.addEventListener('focus', function () {
+          refreshCategorySuggestions().catch(function () {
+            showError('Unable to load categories.');
+          });
+        });
+
+        categoryInput.addEventListener('input', function () {
+          refreshCategorySuggestions().catch(function () {
+            showError('Unable to load categories.');
+          });
+        });
+
+        categoryInput.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            closeCategorySuggestions();
+            handleSubmit();
+          }
+        });
+      }
 
       if (quantityInput) {
         quantityInput.addEventListener('keydown', function (event) {
@@ -925,6 +1193,7 @@
       });
 
       document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('click', onDocumentClick);
       document.body.appendChild(node);
 
       requestAnimationFrame(function () {
@@ -934,6 +1203,529 @@
             showError('Unable to load suggestions.');
           });
         }
+      });
+    });
+  }
+
+  function ShowTemplateConfigModal(options) {
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+      var selectedList = null;
+      var currentListSuggestions = [];
+
+      titleNode.textContent = options.title || 'Edit Template';
+      confirmButton.textContent = options.confirmLabel || 'Save';
+      card.setAttribute('aria-label', titleNode.textContent);
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var nameLabel = document.createElement('label');
+      nameLabel.className = 'modal-field-label';
+      nameLabel.textContent = options.nameLabel || 'Template name';
+      form.appendChild(nameLabel);
+
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'modal-input';
+      nameInput.placeholder = options.namePlaceholder || 'Template name';
+      nameInput.value = options.initialName || '';
+      form.appendChild(nameInput);
+
+      var targetLabel = document.createElement('label');
+      targetLabel.className = 'modal-field-label';
+      targetLabel.textContent = options.targetListLabel || 'Target List (optional)';
+      form.appendChild(targetLabel);
+
+      var targetInputWrapper = document.createElement('div');
+      targetInputWrapper.className = 'modal-input-wrapper';
+
+      var targetInput = document.createElement('input');
+      targetInput.type = 'text';
+      targetInput.className = 'modal-input';
+      targetInput.placeholder = options.targetListPlaceholder || 'Search list name';
+      targetInput.value = options.initialTargetListName || '';
+      targetInputWrapper.appendChild(targetInput);
+
+      var targetSuggestionsList = document.createElement('div');
+      targetSuggestionsList.className = 'modal-suggestions';
+      targetSuggestionsList.hidden = true;
+      targetInputWrapper.appendChild(targetSuggestionsList);
+
+      form.appendChild(targetInputWrapper);
+
+      if (options.initialTargetListId || options.initialTargetListName) {
+        selectedList = {
+          id: options.initialTargetListId || '',
+          name: options.initialTargetListName || ''
+        };
+      }
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('click', onDocumentClick);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function showError(message) {
+        errorNode.textContent = message || '';
+      }
+
+      function normalizeName(name) {
+        return String(name || '').trim().toLowerCase();
+      }
+
+      function sortByName(records) {
+        return (records || []).slice().sort(function (left, right) {
+          return String(left.name || '').localeCompare(String(right.name || ''), undefined, {
+            sensitivity: 'base'
+          });
+        });
+      }
+
+      function renderListSuggestions() {
+        targetSuggestionsList.replaceChildren();
+
+        if (currentListSuggestions.length === 0) {
+          targetSuggestionsList.hidden = true;
+          return;
+        }
+
+        targetSuggestionsList.hidden = false;
+
+        currentListSuggestions.slice(0, 8).forEach(function (listRecord) {
+          var row = document.createElement('div');
+          row.className = 'modal-suggestion-row';
+
+          var selectButton = document.createElement('button');
+          selectButton.type = 'button';
+          selectButton.className = 'modal-suggestion-main';
+
+          var content = document.createElement('div');
+          content.className = 'modal-suggestion-content';
+
+          var nameNode = document.createElement('div');
+          nameNode.className = 'modal-suggestion-name';
+          nameNode.textContent = listRecord.name;
+          content.appendChild(nameNode);
+
+          selectButton.appendChild(content);
+
+          if (selectedList && selectedList.id === listRecord.id) {
+            selectButton.setAttribute('aria-selected', 'true');
+          }
+
+          selectButton.addEventListener('click', function () {
+            selectedList = {
+              id: listRecord.id,
+              name: listRecord.name
+            };
+            targetInput.value = listRecord.name;
+            showError('');
+            currentListSuggestions = [];
+            renderListSuggestions();
+          });
+
+          row.appendChild(selectButton);
+          targetSuggestionsList.appendChild(row);
+        });
+      }
+
+      async function refreshListSuggestions() {
+        var query = String(targetInput.value || '').trim();
+        if (!query) {
+          currentListSuggestions = options.getAllLists
+            ? await options.getAllLists()
+            : [];
+          currentListSuggestions = sortByName(currentListSuggestions);
+          renderListSuggestions();
+          return;
+        }
+
+        currentListSuggestions = options.searchLists
+          ? await options.searchLists(query)
+          : [];
+        currentListSuggestions = sortByName(currentListSuggestions);
+
+        if (selectedList && normalizeName(selectedList.name) !== normalizeName(targetInput.value)) {
+          selectedList = null;
+        }
+
+        renderListSuggestions();
+      }
+
+      function closeListSuggestions() {
+        currentListSuggestions = [];
+        renderListSuggestions();
+      }
+
+      async function handleSubmit() {
+        try {
+          showError('');
+
+          var rawName = String(nameInput.value || '').trim();
+          if (!rawName) {
+            showError('Template name is required.');
+            nameInput.focus();
+            return;
+          }
+
+          var rawTargetListName = String(targetInput.value || '').trim();
+          var targetList = null;
+
+          if (rawTargetListName) {
+            if (selectedList && normalizeName(selectedList.name) === normalizeName(rawTargetListName)) {
+              targetList = selectedList;
+            } else if (options.resolveExactList) {
+              targetList = await options.resolveExactList(rawTargetListName);
+            }
+
+            if (!targetList) {
+              showError('Select a target list from suggestions, or clear the field.');
+              targetInput.focus();
+              return;
+            }
+          }
+
+          close({
+            name: rawName,
+            targetListId: targetList ? targetList.id : '',
+            targetListName: targetList ? targetList.name : ''
+          });
+        } catch (error) {
+          showError(error.message || 'Unable to save template settings.');
+        }
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          if (!targetSuggestionsList.hidden) {
+            closeListSuggestions();
+            return;
+          }
+
+          close(null);
+        }
+      }
+
+      function onDocumentClick(event) {
+        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
+          closeListSuggestions();
+        }
+      }
+
+      nameInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          targetInput.focus();
+        }
+      });
+
+      targetInput.addEventListener('focus', function () {
+        refreshListSuggestions().catch(function () {
+          showError('Unable to load lists.');
+        });
+      });
+
+      targetInput.addEventListener('input', function () {
+        refreshListSuggestions().catch(function () {
+          showError('Unable to load lists.');
+        });
+      });
+
+      targetInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          closeListSuggestions();
+          handleSubmit();
+        }
+      });
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      cancelButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      confirmButton.addEventListener('click', function () {
+        handleSubmit();
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('click', onDocumentClick);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        if (options.focusTargetListOnOpen) {
+          targetInput.focus();
+        } else {
+          nameInput.focus();
+          nameInput.select();
+        }
+      });
+    });
+  }
+
+  function ShowTemplateTargetListModal(options) {
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+      var selectedList = null;
+      var currentListSuggestions = [];
+
+      titleNode.textContent = options.title || 'Choose Target List';
+      confirmButton.textContent = options.confirmLabel || 'Set Target List';
+      card.setAttribute('aria-label', titleNode.textContent);
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+      confirmButton.hidden = true;
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var messageNode = document.createElement('p');
+      messageNode.className = 'modal-message';
+      messageNode.textContent = options.message || 'Select a target list before adding template items.';
+      form.appendChild(messageNode);
+
+      var targetLabel = document.createElement('label');
+      targetLabel.className = 'modal-field-label';
+      targetLabel.textContent = options.targetListLabel || 'Target List';
+      form.appendChild(targetLabel);
+
+      var targetInputWrapper = document.createElement('div');
+      targetInputWrapper.className = 'modal-input-wrapper';
+
+      var targetInput = document.createElement('input');
+      targetInput.type = 'text';
+      targetInput.className = 'modal-input';
+      targetInput.placeholder = options.targetListPlaceholder || 'Search list name';
+      targetInput.value = options.initialTargetListName || '';
+      targetInputWrapper.appendChild(targetInput);
+
+      var targetSuggestionsList = document.createElement('div');
+      targetSuggestionsList.className = 'modal-suggestions';
+      targetSuggestionsList.hidden = true;
+      targetInputWrapper.appendChild(targetSuggestionsList);
+
+      form.appendChild(targetInputWrapper);
+
+      if (options.initialTargetListId || options.initialTargetListName) {
+        selectedList = {
+          id: options.initialTargetListId || '',
+          name: options.initialTargetListName || ''
+        };
+      }
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('click', onDocumentClick);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function showError(message) {
+        errorNode.textContent = message || '';
+      }
+
+      function normalizeName(name) {
+        return String(name || '').trim().toLowerCase();
+      }
+
+      function sortByName(records) {
+        return (records || []).slice().sort(function (left, right) {
+          return String(left.name || '').localeCompare(String(right.name || ''), undefined, {
+            sensitivity: 'base'
+          });
+        });
+      }
+
+      function renderListSuggestions() {
+        targetSuggestionsList.replaceChildren();
+
+        if (currentListSuggestions.length === 0) {
+          targetSuggestionsList.hidden = true;
+          return;
+        }
+
+        targetSuggestionsList.hidden = false;
+
+        currentListSuggestions.slice(0, 8).forEach(function (listRecord) {
+          var row = document.createElement('div');
+          row.className = 'modal-suggestion-row';
+
+          var selectButton = document.createElement('button');
+          selectButton.type = 'button';
+          selectButton.className = 'modal-suggestion-main';
+
+          var content = document.createElement('div');
+          content.className = 'modal-suggestion-content';
+
+          var nameNode = document.createElement('div');
+          nameNode.className = 'modal-suggestion-name';
+          nameNode.textContent = listRecord.name;
+          content.appendChild(nameNode);
+
+          selectButton.appendChild(content);
+
+          if (selectedList && selectedList.id === listRecord.id) {
+            selectButton.setAttribute('aria-selected', 'true');
+          }
+
+          selectButton.addEventListener('click', function () {
+            selectedList = {
+              id: listRecord.id,
+              name: listRecord.name
+            };
+            targetInput.value = listRecord.name;
+            showError('');
+            currentListSuggestions = [];
+            renderListSuggestions();
+            close({
+              targetListId: selectedList.id,
+              targetListName: selectedList.name
+            });
+          });
+
+          row.appendChild(selectButton);
+          targetSuggestionsList.appendChild(row);
+        });
+      }
+
+      async function refreshListSuggestions() {
+        currentListSuggestions = options.getAllLists
+          ? await options.getAllLists()
+          : [];
+        currentListSuggestions = sortByName(currentListSuggestions);
+
+        renderListSuggestions();
+      }
+
+      function closeListSuggestions() {
+        currentListSuggestions = [];
+        renderListSuggestions();
+      }
+
+      async function handleSubmit() {
+        try {
+          showError('');
+
+          var rawTargetListName = String(targetInput.value || '').trim();
+          var targetList = null;
+
+          if (!rawTargetListName) {
+            showError('Target list is required.');
+            targetInput.focus();
+            return;
+          }
+
+          if (selectedList && normalizeName(selectedList.name) === normalizeName(rawTargetListName)) {
+            targetList = selectedList;
+          } else if (options.resolveExactList) {
+            targetList = await options.resolveExactList(rawTargetListName);
+          }
+
+          if (!targetList) {
+            showError('Select a target list from suggestions.');
+            targetInput.focus();
+            return;
+          }
+
+          close({
+            targetListId: targetList.id,
+            targetListName: targetList.name
+          });
+        } catch (error) {
+          showError(error.message || 'Unable to set target list.');
+        }
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          if (!targetSuggestionsList.hidden) {
+            closeListSuggestions();
+            return;
+          }
+
+          close(null);
+        }
+      }
+
+      function onDocumentClick(event) {
+        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
+          closeListSuggestions();
+        }
+      }
+
+      targetInput.addEventListener('focus', function () {
+        refreshListSuggestions().catch(function () {
+          showError('Unable to load lists.');
+        });
+      });
+
+      targetInput.addEventListener('input', function () {
+        refreshListSuggestions().catch(function () {
+          showError('Unable to load lists.');
+        });
+      });
+
+      targetInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          closeListSuggestions();
+          handleSubmit();
+        }
+      });
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      cancelButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('click', onDocumentClick);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        targetInput.focus();
+        refreshListSuggestions().catch(function () {
+          showError('Unable to load lists.');
+        });
       });
     });
   }
@@ -1029,6 +1821,8 @@
     ReplaceDetailItemRows: ReplaceDetailItemRows,
     NewSettingsToggle: NewSettingsToggle,
     ShowDiscoveryItemModal: ShowDiscoveryItemModal,
+    ShowTemplateConfigModal: ShowTemplateConfigModal,
+    ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,
     ShowConfirm: ShowConfirm,
     ShowAlert: ShowAlert

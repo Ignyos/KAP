@@ -55,6 +55,10 @@
     });
   }
 
+  function normalizeIsoTimestamp(value) {
+    return value ? String(value) : '';
+  }
+
   async function getAllLists() {
     var records = await window.KaPDB.readAllFromIndex(
       window.KaPStores.STORE_NAMES.LIST_RECORDS,
@@ -119,6 +123,10 @@
           name: joinRecord.name || (item && item.name) || 'Unknown Item',
           quantity: joinRecord.quantity,
           description: joinRecord.description,
+          categoryId: (item && item.categoryId) || '',
+          categoryName: (item && item.categoryName) || '',
+          isCrossedOff: joinRecord.isCrossedOff === true,
+          crossedOffAt: normalizeIsoTimestamp(joinRecord.crossedOffAt),
           item: item || null
         };
       })
@@ -198,6 +206,51 @@
     return existing;
   }
 
+  async function setListItemCrossedOff(listId, listItemId, isCrossedOff) {
+    await requireListById(listId);
+    var existing = await findJoinRecordById(listId, listItemId);
+    if (!existing) {
+      throw new Error('List item not found.');
+    }
+
+    existing.isCrossedOff = isCrossedOff === true;
+    existing.crossedOffAt = existing.isCrossedOff ? nowIso() : '';
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+    return existing;
+  }
+
+  async function deleteCrossedOffItems(listId) {
+    await requireListById(listId);
+    var joinRecords = await readJoinRecordsByListId(listId);
+
+    var crossedOffItems = joinRecords.filter(function (record) {
+      return record && record.isCrossedOff === true;
+    });
+
+    await Promise.all(crossedOffItems.map(function (record) {
+      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, record.id);
+    }));
+
+    return crossedOffItems.length;
+  }
+
+  async function uncrossOffAllItems(listId) {
+    await requireListById(listId);
+    var joinRecords = await readJoinRecordsByListId(listId);
+
+    var crossedOffItems = joinRecords.filter(function (record) {
+      return record && record.isCrossedOff === true;
+    });
+
+    await Promise.all(crossedOffItems.map(function (record) {
+      record.isCrossedOff = false;
+      record.crossedOffAt = '';
+      return window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, record);
+    }));
+
+    return crossedOffItems.length;
+  }
+
   async function decrementListItemQuantity(listId, listItemId) {
     await requireListById(listId);
     var existing = await findJoinRecordById(listId, listItemId);
@@ -222,6 +275,9 @@
     updateListItem: updateListItem,
     removeItemFromList: removeItemFromList,
     incrementListItemQuantity: incrementListItemQuantity,
-    decrementListItemQuantity: decrementListItemQuantity
+    decrementListItemQuantity: decrementListItemQuantity,
+    setListItemCrossedOff: setListItemCrossedOff,
+    deleteCrossedOffItems: deleteCrossedOffItems,
+    uncrossOffAllItems: uncrossOffAllItems
   };
 })();

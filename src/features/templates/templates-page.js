@@ -20,19 +20,48 @@
     }
   }
 
-  async function renameTemplate(record) {
-    var nextName = await window.KaPUI.ShowPrompt({
+  async function editTemplateConfig(record, focusTargetListOnOpen) {
+    var result = await window.KaPUI.ShowTemplateConfigModal({
       title: 'Edit Pantry Entry',
-      placeholder: 'Pantry entry name',
-      value: record.name,
-      confirmLabel: 'Save'
+      confirmLabel: 'Save',
+      initialName: record.name,
+      initialTargetListId: record.targetListId,
+      initialTargetListName: record.targetListName,
+      focusTargetListOnOpen: focusTargetListOnOpen === true,
+      getAllLists: function () {
+        return window.KaPListsService.getAllLists();
+      },
+      searchLists: async function (query) {
+        var allLists = await window.KaPListsService.getAllLists();
+        var normalized = String(query || '').trim().toLowerCase();
+        if (!normalized) {
+          return allLists;
+        }
+
+        return allLists.filter(function (listRecord) {
+          return String(listRecord.name || '').toLowerCase().indexOf(normalized) >= 0;
+        });
+      },
+      resolveExactList: async function (name) {
+        var allLists = await window.KaPListsService.getAllLists();
+        var normalized = String(name || '').trim().toLowerCase();
+        return allLists.find(function (listRecord) {
+          return String(listRecord.name || '').trim().toLowerCase() === normalized;
+        }) || null;
+      }
     });
-    if (nextName === null) {
+
+    if (result === null) {
       return null;
     }
 
     try {
-      return await window.KaPTemplatesService.renameTemplate(record.id, nextName);
+      return await window.KaPTemplatesService.updateTemplateConfig(
+        record.id,
+        result.name,
+        result.targetListId,
+        result.targetListName
+      );
     } catch (error) {
       await showError(error.message || 'Unable to update pantry entry.');
       return null;
@@ -78,6 +107,13 @@
         result.quantity,
         result.description
       );
+
+      await window.KaPItemsService.setItemCategory(
+        result.item.id,
+        result.categoryId || '',
+        result.categoryName || '',
+        result.name
+      );
     } catch (error) {
       await showError(error.message || 'Unable to add item.');
     }
@@ -88,10 +124,29 @@
       title: 'Edit Item',
       confirmLabel: 'Save',
       itemNamePlaceholder: 'Item name',
+      categoryPlaceholder: 'Search or type category',
       descriptionPlaceholder: 'Item notes',
       initialName: detailItem.name,
+      initialCategoryId: detailItem.categoryId,
+      initialCategoryName: detailItem.categoryName,
       initialDescription: detailItem.description,
       showQuantityField: false,
+      showCategoryField: true,
+      getAllCategories: function () {
+        return window.KaPCategoriesService.getAllCategories();
+      },
+      searchCategories: function (query) {
+        return window.KaPCategoriesService.searchCategories(query);
+      },
+      resolveExactCategory: function (name) {
+        return window.KaPCategoriesService.resolveExactCategory(name);
+      },
+      createCategory: function (name) {
+        return window.KaPCategoriesService.createCategory(name);
+      },
+      deleteCategory: function (category) {
+        return window.KaPCategoriesService.deleteCategory(category.id);
+      },
       enableSuggestions: false
     });
 
@@ -107,9 +162,238 @@
         detailItem.quantity,
         result.description
       );
+
+      if (detailItem.itemId) {
+        await window.KaPItemsService.setItemCategory(
+          detailItem.itemId,
+          result.categoryId || '',
+          result.categoryName || '',
+          result.name
+        );
+      }
     } catch (error) {
       await showError(error.message || 'Unable to update item.');
     }
+  }
+
+  function sortByNameAscending(records) {
+    return (records || []).slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        sensitivity: 'base'
+      });
+    });
+  }
+
+  function getCategoryViewState(recordType, recordId) {
+    var saved = window.KaPSettings.get(window.KaPSettings.KEYS.CATEGORY_VIEW_BY_RECORD) || {};
+    var scope = saved[recordType] || {};
+    return scope[recordId] === true;
+  }
+
+  function setCategoryViewState(recordType, recordId, isVisible) {
+    var saved = window.KaPSettings.get(window.KaPSettings.KEYS.CATEGORY_VIEW_BY_RECORD) || {};
+    if (!saved[recordType]) {
+      saved[recordType] = {};
+    }
+
+    saved[recordType][recordId] = isVisible === true;
+    window.KaPSettings.set(window.KaPSettings.KEYS.CATEGORY_VIEW_BY_RECORD, saved);
+  }
+
+  function getCategoryLabel(detailItem) {
+    var name = String((detailItem && detailItem.categoryName) || '').trim();
+    return name || 'Uncategorized';
+  }
+
+  function sortCategoryLabelsAscending(labels) {
+    return (labels || []).slice().sort(function (a, b) {
+      return String(a || '').localeCompare(String(b || ''), undefined, {
+        sensitivity: 'base'
+      });
+    });
+  }
+
+  async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
+    var activeTemplateRecord = templateRecord;
+
+    if (!templateRecord.targetListId) {
+      var targetListChoice = await window.KaPUI.ShowTemplateTargetListModal({
+        title: 'Choose Target List',
+        confirmLabel: 'Set And Add Item',
+        message: 'This template does not have a target list yet. Choose what Grocery List this pantry entry should add items to when you click on them.',
+        getAllLists: function () {
+          return window.KaPListsService.getAllLists();
+        },
+        searchLists: async function (query) {
+          var allLists = await window.KaPListsService.getAllLists();
+          var normalized = String(query || '').trim().toLowerCase();
+          if (!normalized) {
+            return allLists;
+          }
+
+          return allLists.filter(function (listRecord) {
+            return String(listRecord.name || '').toLowerCase().indexOf(normalized) >= 0;
+          });
+        },
+        resolveExactList: async function (name) {
+          var allLists = await window.KaPListsService.getAllLists();
+          var normalized = String(name || '').trim().toLowerCase();
+          return allLists.find(function (listRecord) {
+            return String(listRecord.name || '').trim().toLowerCase() === normalized;
+          }) || null;
+        }
+      });
+
+      if (!targetListChoice) {
+        return;
+      }
+
+      var updatedTemplate = await window.KaPTemplatesService.updateTemplateConfig(
+        templateRecord.id,
+        templateRecord.name,
+        targetListChoice.targetListId,
+        targetListChoice.targetListName
+      );
+
+      if (!updatedTemplate || !updatedTemplate.targetListId) {
+        return;
+      }
+
+      activeTemplateRecord = updatedTemplate;
+    }
+
+    try {
+      var itemId = detailItem.itemId;
+      if (!itemId) {
+        var recoveredItem = await window.KaPItemsService.createItem(
+          detailItem.name,
+          detailItem.description,
+          detailItem.categoryId,
+          detailItem.categoryName
+        );
+        itemId = recoveredItem.id;
+      }
+
+      await window.KaPListsService.addItemToList(
+        activeTemplateRecord.targetListId,
+        itemId,
+        detailItem.name,
+        detailItem.quantity,
+        detailItem.description
+      );
+
+      await renderDetailInto(container, activeTemplateRecord, hooks);
+    } catch (error) {
+      await showError(error.message || 'Unable to add item to target list.');
+    }
+  }
+
+  function buildTemplateDetailItemRow(templateRecord, detailItem, container, hooks) {
+    var row = window.KaPUI.NewDetailItemRow(detailItem, {
+      onIncrement: async function () {
+        var updated = await window.KaPTemplatesService.incrementTemplateItemQuantity(templateRecord.id, detailItem.id);
+        detailItem.quantity = updated.quantity;
+        return updated.quantity;
+      },
+      onDecrement: async function () {
+        var updated = await window.KaPTemplatesService.decrementTemplateItemQuantity(templateRecord.id, detailItem.id);
+        detailItem.quantity = updated.quantity;
+        return updated.quantity;
+      },
+      onEdit: async function () {
+        await editTemplateItemWithPrompt(templateRecord, detailItem);
+        await renderDetailInto(container, templateRecord, hooks);
+      },
+      onRemove: async function () {
+        await removeTemplateItemWithConfirm(templateRecord, detailItem);
+        await renderDetailInto(container, templateRecord, hooks);
+      }
+    });
+
+    row.classList.add('detail-item-row--toggleable');
+    row.classList.add('template-detail-item-row');
+    row.addEventListener('click', function () {
+      addTemplateItemToTargetList(templateRecord, detailItem, container, hooks);
+    });
+
+    var qtyNode = row.querySelector('.detail-item-qty-pill');
+    var contentNode = row.querySelector('.detail-item-content');
+    var actionsNode = row.querySelector('.detail-item-actions');
+
+    if (contentNode && actionsNode) {
+      var mainColumn = document.createElement('div');
+      mainColumn.className = 'template-detail-item-main';
+
+      if (qtyNode) {
+        mainColumn.appendChild(qtyNode);
+      }
+
+      mainColumn.appendChild(contentNode);
+      row.insertBefore(mainColumn, actionsNode);
+    }
+
+    var usageEntries = detailItem.listUsages || [];
+    if (usageEntries.length > 0) {
+      row.classList.add('template-detail-item-row--with-usage');
+      var mainColumnNode = row.querySelector('.template-detail-item-main');
+      if (mainColumnNode) {
+        var usageWrap = document.createElement('div');
+        usageWrap.className = 'template-item-usage-pills';
+
+        usageEntries.forEach(function (usageEntry) {
+          var usagePill = document.createElement('span');
+          usagePill.className = 'template-item-usage-pill';
+          usagePill.textContent = String(usageEntry.quantity) + ' on ' + String(usageEntry.listName || 'Unknown') + ' list';
+          usageWrap.appendChild(usagePill);
+        });
+
+        mainColumnNode.appendChild(usageWrap);
+      }
+    }
+
+    return row;
+  }
+
+  function renderCategorizedItems(container, templateRecord, hooks, detailItems) {
+    var detailList = container.querySelector('[data-detail-item-list]');
+    if (!detailList) {
+      return;
+    }
+
+    detailList.replaceChildren();
+
+    var groupedByCategory = {};
+    detailItems.forEach(function (detailItem) {
+      var categoryLabel = getCategoryLabel(detailItem);
+      if (!groupedByCategory[categoryLabel]) {
+        groupedByCategory[categoryLabel] = [];
+      }
+      groupedByCategory[categoryLabel].push(detailItem);
+    });
+
+    sortCategoryLabelsAscending(Object.keys(groupedByCategory)).forEach(function (categoryLabel) {
+      var groupSection = document.createElement('section');
+      groupSection.className = 'category-group';
+
+      var groupHeader = document.createElement('div');
+      groupHeader.className = 'category-group-header';
+
+      var groupTitle = document.createElement('h3');
+      groupTitle.className = 'category-group-title';
+      groupTitle.textContent = categoryLabel;
+      groupHeader.appendChild(groupTitle);
+      groupSection.appendChild(groupHeader);
+
+      var groupList = document.createElement('div');
+      groupList.className = 'detail-item-list category-group-item-list';
+
+      sortByNameAscending(groupedByCategory[categoryLabel]).forEach(function (detailItem) {
+        groupList.appendChild(buildTemplateDetailItemRow(templateRecord, detailItem, container, hooks));
+      });
+
+      groupSection.appendChild(groupList);
+      detailList.appendChild(groupSection);
+    });
   }
 
   async function removeTemplateItemWithConfirm(templateRecord, detailItem) {
@@ -148,6 +432,8 @@
 
   async function renderDetailInto(container, record, hooks) {
     var detailItems = await window.KaPTemplatesService.getTemplateItems(record.id);
+    var showCategories = getCategoryViewState('templates', record.id);
+    var sortedItems = sortByNameAscending(detailItems);
 
     window.KaPUI.ReplaceDetailContent(container, {
       title: record.name,
@@ -157,34 +443,31 @@
         await addTemplateItemWithDiscoveryModal(record, detailItems);
         await renderDetailInto(container, record, hooks);
       },
-      detailItems: detailItems,
+      detailItems: sortedItems,
       itemRowBuilder: function (detailItem) {
-        return window.KaPUI.NewDetailItemRow(detailItem, {
-          onIncrement: async function () {
-            var updated = await window.KaPTemplatesService.incrementTemplateItemQuantity(record.id, detailItem.id);
-            detailItem.quantity = updated.quantity;
-            return updated.quantity;
-          },
-          onDecrement: async function () {
-            var updated = await window.KaPTemplatesService.decrementTemplateItemQuantity(record.id, detailItem.id);
-            detailItem.quantity = updated.quantity;
-            return updated.quantity;
-          },
-          onEdit: async function () {
-            await editTemplateItemWithPrompt(record, detailItem);
-            await renderDetailInto(container, record, hooks);
-          },
-          onRemove: async function () {
-            await removeTemplateItemWithConfirm(record, detailItem);
-            await renderDetailInto(container, record, hooks);
-          }
-        });
+        return buildTemplateDetailItemRow(record, detailItem, container, hooks);
       },
       actions: [
         {
+          label: showCategories ? 'Hide Categories' : 'Show Categories',
+          onClick: async function () {
+            setCategoryViewState('templates', record.id, !showCategories);
+            await renderDetailInto(container, record, hooks);
+          }
+        },
+        {
+          label: 'Set Target List',
+          onClick: async function () {
+            var updatedFromTarget = await editTemplateConfig(record, true);
+            if (updatedFromTarget) {
+              await renderDetailInto(container, updatedFromTarget, hooks);
+            }
+          }
+        },
+        {
           label: 'Edit',
           onClick: async function () {
-            var updated = await renameTemplate(record);
+            var updated = await editTemplateConfig(record, false);
             if (updated) {
               hooks.onAfterChange(updated);
             }
@@ -202,6 +485,10 @@
         }
       ]
     });
+
+    if (showCategories && sortedItems.length > 0) {
+      renderCategorizedItems(container, record, hooks, sortedItems);
+    }
   }
 
   window.KaPTemplatesPage = {

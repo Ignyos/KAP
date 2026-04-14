@@ -78,6 +78,13 @@
         result.quantity,
         result.description
       );
+
+      await window.KaPItemsService.setItemCategory(
+        result.item.id,
+        result.categoryId || '',
+        result.categoryName || '',
+        result.name
+      );
     } catch (error) {
       await showError(error.message || 'Unable to add item.');
     }
@@ -88,10 +95,29 @@
       title: 'Edit Item',
       confirmLabel: 'Save',
       itemNamePlaceholder: 'Item name',
+      categoryPlaceholder: 'Search or type category',
       descriptionPlaceholder: 'Item notes',
       initialName: detailItem.name,
+      initialCategoryId: detailItem.categoryId,
+      initialCategoryName: detailItem.categoryName,
       initialDescription: detailItem.description,
       showQuantityField: false,
+      showCategoryField: true,
+      getAllCategories: function () {
+        return window.KaPCategoriesService.getAllCategories();
+      },
+      searchCategories: function (query) {
+        return window.KaPCategoriesService.searchCategories(query);
+      },
+      resolveExactCategory: function (name) {
+        return window.KaPCategoriesService.resolveExactCategory(name);
+      },
+      createCategory: function (name) {
+        return window.KaPCategoriesService.createCategory(name);
+      },
+      deleteCategory: function (category) {
+        return window.KaPCategoriesService.deleteCategory(category.id);
+      },
       enableSuggestions: false
     });
 
@@ -107,6 +133,15 @@
         detailItem.quantity,
         result.description
       );
+
+      if (detailItem.itemId) {
+        await window.KaPItemsService.setItemCategory(
+          detailItem.itemId,
+          result.categoryId || '',
+          result.categoryName || '',
+          result.name
+        );
+      }
     } catch (error) {
       await showError(error.message || 'Unable to update item.');
     }
@@ -132,6 +167,275 @@
     }
   }
 
+  function sortByNameAscending(records) {
+    return (records || []).slice().sort(function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        sensitivity: 'base'
+      });
+    });
+  }
+
+  function sortCrossedOffItems(records) {
+    return (records || []).slice().sort(function (a, b) {
+      var leftTime = Date.parse(a.crossedOffAt || '');
+      var rightTime = Date.parse(b.crossedOffAt || '');
+      var leftValid = !Number.isNaN(leftTime);
+      var rightValid = !Number.isNaN(rightTime);
+
+      if (leftValid && rightValid && leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+
+      if (leftValid && !rightValid) {
+        return 1;
+      }
+
+      if (!leftValid && rightValid) {
+        return -1;
+      }
+
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+        sensitivity: 'base'
+      });
+    });
+  }
+
+  function getCategoryViewState(recordType, recordId) {
+    var saved = window.KaPSettings.get(window.KaPSettings.KEYS.CATEGORY_VIEW_BY_RECORD) || {};
+    var scope = saved[recordType] || {};
+    return scope[recordId] !== false;
+  }
+
+  function setCategoryViewState(recordType, recordId, isVisible) {
+    var saved = window.KaPSettings.get(window.KaPSettings.KEYS.CATEGORY_VIEW_BY_RECORD) || {};
+    if (!saved[recordType]) {
+      saved[recordType] = {};
+    }
+
+    saved[recordType][recordId] = isVisible === true;
+    window.KaPSettings.set(window.KaPSettings.KEYS.CATEGORY_VIEW_BY_RECORD, saved);
+  }
+
+  function getCategoryLabel(detailItem) {
+    var name = String((detailItem && detailItem.categoryName) || '').trim();
+    return name || 'Uncategorized';
+  }
+
+  function sortCategoryLabelsAscending(labels) {
+    return (labels || []).slice().sort(function (a, b) {
+      return String(a || '').localeCompare(String(b || ''), undefined, {
+        sensitivity: 'base'
+      });
+    });
+  }
+
+  function buildListDetailItemRow(listRecord, detailItem, container, hooks) {
+    return window.KaPUI.NewDetailItemRow(detailItem, {
+      onToggleCrossOff: async function (nextCrossedOffState) {
+        await window.KaPListsService.setListItemCrossedOff(listRecord.id, detailItem.id, nextCrossedOffState);
+        await renderDetailInto(container, listRecord, hooks);
+      },
+      onIncrement: async function () {
+        var updated = await window.KaPListsService.incrementListItemQuantity(listRecord.id, detailItem.id);
+        detailItem.quantity = updated.quantity;
+        return updated.quantity;
+      },
+      onDecrement: async function () {
+        var updated = await window.KaPListsService.decrementListItemQuantity(listRecord.id, detailItem.id);
+        detailItem.quantity = updated.quantity;
+        return updated.quantity;
+      },
+      onEdit: async function () {
+        await editListItemWithPrompt(listRecord, detailItem);
+        await renderDetailInto(container, listRecord, hooks);
+      },
+      onRemove: async function () {
+        await removeListItemWithConfirm(listRecord, detailItem);
+        await renderDetailInto(container, listRecord, hooks);
+      }
+    });
+  }
+
+  function renderCategorizedActiveItems(container, listRecord, hooks, activeItems) {
+    var detailList = container.querySelector('[data-detail-item-list]');
+    if (!detailList) {
+      return;
+    }
+
+    detailList.replaceChildren();
+
+    var groupedByCategory = {};
+    activeItems.forEach(function (detailItem) {
+      var categoryLabel = getCategoryLabel(detailItem);
+      if (!groupedByCategory[categoryLabel]) {
+        groupedByCategory[categoryLabel] = [];
+      }
+      groupedByCategory[categoryLabel].push(detailItem);
+    });
+
+    sortCategoryLabelsAscending(Object.keys(groupedByCategory)).forEach(function (categoryLabel) {
+      var groupSection = document.createElement('section');
+      groupSection.className = 'category-group';
+
+      var groupHeader = document.createElement('div');
+      groupHeader.className = 'category-group-header';
+
+      var groupTitle = document.createElement('h3');
+      groupTitle.className = 'category-group-title';
+      groupTitle.textContent = categoryLabel;
+      groupHeader.appendChild(groupTitle);
+      groupSection.appendChild(groupHeader);
+
+      var groupList = document.createElement('div');
+      groupList.className = 'detail-item-list category-group-item-list';
+
+      sortByNameAscending(groupedByCategory[categoryLabel]).forEach(function (detailItem) {
+        groupList.appendChild(buildListDetailItemRow(listRecord, detailItem, container, hooks));
+      });
+
+      groupSection.appendChild(groupList);
+      detailList.appendChild(groupSection);
+    });
+  }
+
+  async function appendCrossedOffSection(container, listRecord, crossedOffItems, hooks) {
+    var detailShell = container.querySelector('.detail-shell');
+    if (!detailShell) {
+      return;
+    }
+
+    var section = document.createElement('section');
+    section.className = 'crossed-off-section';
+
+    var header = document.createElement('div');
+    header.className = 'crossed-off-header';
+
+    var title = document.createElement('h3');
+    title.className = 'crossed-off-title';
+    title.textContent = 'Crossed Off Items';
+    header.appendChild(title);
+
+    var menuWrap = document.createElement('div');
+    menuWrap.className = 'detail-overflow-menu crossed-off-menu';
+
+    var menuTrigger = document.createElement('button');
+    menuTrigger.type = 'button';
+    menuTrigger.className = 'record-action-button detail-overflow-trigger';
+    menuTrigger.setAttribute('aria-haspopup', 'menu');
+    menuTrigger.setAttribute('aria-expanded', 'false');
+    menuTrigger.setAttribute('aria-label', 'Crossed off actions');
+
+    var menuDots = document.createElement('span');
+    menuDots.className = 'detail-overflow-dots';
+    menuDots.textContent = '\u2026';
+    menuTrigger.appendChild(menuDots);
+
+    var menuList = document.createElement('div');
+    menuList.className = 'detail-overflow-list';
+    menuList.setAttribute('role', 'menu');
+    menuList.style.display = 'none';
+
+    function closeMenu() {
+      menuList.style.display = 'none';
+      menuTrigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function openMenu() {
+      menuList.style.display = 'grid';
+      menuTrigger.setAttribute('aria-expanded', 'true');
+    }
+
+    function toggleMenu(event) {
+      event.stopPropagation();
+      if (menuList.style.display === 'none') {
+        openMenu();
+      } else {
+        closeMenu();
+      }
+    }
+
+    function deleteAllCrossedOff() {
+      return Promise.resolve().then(async function () {
+        await window.KaPListsService.deleteCrossedOffItems(listRecord.id);
+        await renderDetailInto(container, listRecord, hooks);
+      }).catch(async function (error) {
+        await showError(error.message || 'Unable to delete crossed-off items.');
+      });
+    }
+
+    function uncrossOffAll() {
+      return window.KaPListsService.uncrossOffAllItems(listRecord.id)
+        .then(async function () {
+          await renderDetailInto(container, listRecord, hooks);
+        })
+        .catch(async function (error) {
+          await showError(error.message || 'Unable to uncross-off items.');
+        });
+    }
+
+    var deleteAllItem = document.createElement('button');
+    deleteAllItem.type = 'button';
+    deleteAllItem.className = 'detail-overflow-item detail-overflow-item--danger';
+    deleteAllItem.textContent = 'Delete all crossed-off';
+    deleteAllItem.setAttribute('role', 'menuitem');
+    deleteAllItem.addEventListener('click', function (event) {
+      event.stopPropagation();
+      closeMenu();
+      deleteAllCrossedOff();
+    });
+
+    var uncrossAllItem = document.createElement('button');
+    uncrossAllItem.type = 'button';
+    uncrossAllItem.className = 'detail-overflow-item';
+    uncrossAllItem.textContent = 'Uncross-off all';
+    uncrossAllItem.setAttribute('role', 'menuitem');
+    uncrossAllItem.addEventListener('click', function (event) {
+      event.stopPropagation();
+      closeMenu();
+      uncrossOffAll();
+    });
+
+    menuList.appendChild(deleteAllItem);
+    menuList.appendChild(uncrossAllItem);
+
+    menuTrigger.addEventListener('click', toggleMenu);
+
+    detailShell.addEventListener('click', function (event) {
+      if (!menuWrap.contains(event.target)) {
+        closeMenu();
+      }
+    });
+
+    detailShell.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    });
+
+    menuWrap.appendChild(menuTrigger);
+    menuWrap.appendChild(menuList);
+    header.appendChild(menuWrap);
+    section.appendChild(header);
+
+    if (crossedOffItems.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'crossed-off-empty';
+      empty.textContent = 'No crossed-off items.';
+      section.appendChild(empty);
+    } else {
+      var crossedList = document.createElement('div');
+      crossedList.className = 'detail-item-list crossed-off-item-list';
+
+      crossedOffItems.forEach(function (detailItem) {
+        crossedList.appendChild(buildListDetailItemRow(listRecord, detailItem, container, hooks));
+      });
+
+      section.appendChild(crossedList);
+    }
+
+    detailShell.appendChild(section);
+  }
+
   async function renderInto(container, hooks) {
     var records = await window.KaPListsService.getAllLists();
 
@@ -148,39 +452,34 @@
 
   async function renderDetailInto(container, record, hooks) {
     var detailItems = await window.KaPListsService.getListItems(record.id);
+    var showCategories = getCategoryViewState('lists', record.id);
+    var activeItems = sortByNameAscending(detailItems.filter(function (detailItem) {
+      return detailItem.isCrossedOff !== true;
+    }));
+    var crossedOffItems = sortCrossedOffItems(detailItems.filter(function (detailItem) {
+      return detailItem.isCrossedOff === true;
+    }));
 
     window.KaPUI.ReplaceDetailContent(container, {
       title: record.name,
-      emptyStateText: 'No items yet.',
+      emptyStateText: 'No active items yet.',
       onBack: hooks.onBack,
       onAddItem: async function () {
         await addListItemWithDiscoveryModal(record, detailItems);
         await renderDetailInto(container, record, hooks);
       },
-      detailItems: detailItems,
+      detailItems: activeItems,
       itemRowBuilder: function (detailItem) {
-        return window.KaPUI.NewDetailItemRow(detailItem, {
-          onIncrement: async function () {
-            var updated = await window.KaPListsService.incrementListItemQuantity(record.id, detailItem.id);
-            detailItem.quantity = updated.quantity;
-            return updated.quantity;
-          },
-          onDecrement: async function () {
-            var updated = await window.KaPListsService.decrementListItemQuantity(record.id, detailItem.id);
-            detailItem.quantity = updated.quantity;
-            return updated.quantity;
-          },
-          onEdit: async function () {
-            await editListItemWithPrompt(record, detailItem);
-            await renderDetailInto(container, record, hooks);
-          },
-          onRemove: async function () {
-            await removeListItemWithConfirm(record, detailItem);
-            await renderDetailInto(container, record, hooks);
-          }
-        });
+        return buildListDetailItemRow(record, detailItem, container, hooks);
       },
       actions: [
+        {
+          label: showCategories ? 'Hide Categories' : 'Show Categories',
+          onClick: async function () {
+            setCategoryViewState('lists', record.id, !showCategories);
+            await renderDetailInto(container, record, hooks);
+          }
+        },
         {
           label: 'Edit',
           onClick: async function () {
@@ -202,6 +501,12 @@
         }
       ]
     });
+
+    if (showCategories && activeItems.length > 0) {
+      renderCategorizedActiveItems(container, record, hooks, activeItems);
+    }
+
+    await appendCrossedOffSection(container, record, crossedOffItems, hooks);
   }
 
   window.KaPListsPage = {

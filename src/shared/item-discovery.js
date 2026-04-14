@@ -47,6 +47,21 @@
       deleteItem: function (item) {
         return window.KaPItemsService.deleteItem(item.id);
       },
+      getAllCategories: function () {
+        return window.KaPCategoriesService.getAllCategories();
+      },
+      searchCategories: function (query) {
+        return window.KaPCategoriesService.searchCategories(query);
+      },
+      resolveExactCategory: function (name) {
+        return window.KaPCategoriesService.resolveExactCategory(name);
+      },
+      createCategory: function (name) {
+        return window.KaPCategoriesService.createCategory(name);
+      },
+      deleteCategory: function (category) {
+        return window.KaPCategoriesService.deleteCategory(category.id);
+      },
       validateQuantity: validateOptionalInteger
     };
   }

@@ -1,6 +1,6 @@
 (function () {
   var DATABASE_NAME = 'ignyos.kap';
-  var DATABASE_VERSION = 2;
+  var DATABASE_VERSION = 3;
 
   var state = {
     db: null
@@ -97,7 +97,7 @@
       };
 
       request.onupgradeneeded = function (event) {
-        window.KaPStores.upgrade(event.target.result);
+        window.KaPStores.upgrade(event.target.result, event.oldVersion || 0, event.target.transaction);
       };
 
       request.onsuccess = function () {

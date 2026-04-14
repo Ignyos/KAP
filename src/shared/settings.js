@@ -4,7 +4,8 @@
   var KEYS = {
     ACTIVE_TAB: 'activeTab',
     ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
-    EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection'
+    EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection',
+    CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord'
   };
 
   var defaults = {
@@ -14,7 +15,11 @@
       templates: null,
       recipes: null
     },
-    expandedAccordionSection: null
+    expandedAccordionSection: null,
+    categoryViewByRecord: {
+      lists: {},
+      templates: {}
+    }
   };
 
   function getKey(name) {

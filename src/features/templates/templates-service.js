@@ -1,5 +1,6 @@
 (function () {
   var TEMPLATE_TYPE = 'Template';
+  var LIST_TYPE = 'List';
 
   function nowIso() {
     return new Date().toISOString();
@@ -12,6 +13,14 @@
     }
 
     return trimmed;
+  }
+
+  function normalizeOptionalString(value) {
+    return String(value || '').trim();
+  }
+
+  function normalizeNameKey(name) {
+    return String(name || '').trim().toLowerCase();
   }
 
   async function requireTemplateById(templateId) {
@@ -47,6 +56,14 @@
     }) || null;
   }
 
+  async function getAllListRecords() {
+    return window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.LIST_RECORDS,
+      window.KaPStores.INDEX_NAMES.LIST_RECORDS_BY_TYPE,
+      LIST_TYPE
+    );
+  }
+
   function sortByNameAscending(records) {
     return records.sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
@@ -74,6 +91,8 @@
       name: safeName,
       description: '',
       type: TEMPLATE_TYPE,
+      targetListId: '',
+      targetListName: '',
       createdDate: timestamp,
       updatedDate: timestamp
     };
@@ -97,12 +116,72 @@
     return record;
   }
 
+  async function updateTemplateConfig(id, nextName, targetListId, targetListName) {
+    var safeName = ensureValidTemplateName(nextName);
+    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+
+    if (!record || record.type !== TEMPLATE_TYPE) {
+      throw new Error('Template not found.');
+    }
+
+    record.name = safeName;
+    record.targetListId = normalizeOptionalString(targetListId);
+    record.targetListName = normalizeOptionalString(targetListName);
+    record.updatedDate = nowIso();
+
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
+    return record;
+  }
+
   async function deleteTemplate(id) {
     await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
   }
 
   async function getTemplateItems(templateId) {
     await requireTemplateById(templateId);
+    var listRecords = await getAllListRecords();
+    var listNamesById = {};
+    listRecords.forEach(function (listRecord) {
+      listNamesById[listRecord.id] = listRecord.name || 'List';
+    });
+
+    var usageByItemId = {};
+    var usageByName = {};
+
+    var usageGroups = await Promise.all(listRecords.map(function (listRecord) {
+      return readJoinRecordsByTemplateId(listRecord.id).then(function (joinRecords) {
+        return {
+          listRecord: listRecord,
+          joinRecords: joinRecords || []
+        };
+      });
+    }));
+
+    usageGroups.forEach(function (usageGroup) {
+      usageGroup.joinRecords.forEach(function (joinRecord) {
+        var usageEntry = {
+          listId: usageGroup.listRecord.id,
+          listName: usageGroup.listRecord.name || 'List',
+          quantity: joinRecord.quantity == null ? 1 : joinRecord.quantity
+        };
+
+        if (joinRecord.itemId) {
+          if (!usageByItemId[joinRecord.itemId]) {
+            usageByItemId[joinRecord.itemId] = [];
+          }
+          usageByItemId[joinRecord.itemId].push(usageEntry);
+        }
+
+        var nameKey = normalizeNameKey(joinRecord.name);
+        if (nameKey) {
+          if (!usageByName[nameKey]) {
+            usageByName[nameKey] = [];
+          }
+          usageByName[nameKey].push(usageEntry);
+        }
+      });
+    });
+
     var joinRecords = await readJoinRecordsByTemplateId(templateId);
     var detailItems = await Promise.all(
       joinRecords.map(async function (joinRecord) {
@@ -112,13 +191,35 @@
           await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
         }
 
+        var itemName = joinRecord.name || (item && item.name) || 'Unknown Item';
+        var usageList = usageByItemId[joinRecord.itemId] || usageByName[normalizeNameKey(itemName)] || [];
+        var usageListUniqueById = {};
+        usageList.forEach(function (usageEntry) {
+          usageListUniqueById[usageEntry.listId] = {
+            listId: usageEntry.listId,
+            listName: listNamesById[usageEntry.listId] || usageEntry.listName,
+            quantity: usageEntry.quantity
+          };
+        });
+
+        var listUsages = Object.keys(usageListUniqueById).map(function (listId) {
+          return usageListUniqueById[listId];
+        }).sort(function (left, right) {
+          return String(left.listName || '').localeCompare(String(right.listName || ''), undefined, {
+            sensitivity: 'base'
+          });
+        });
+
         return {
           id: joinRecord.id,
           listRecordId: joinRecord.listRecordId,
           itemId: joinRecord.itemId,
-          name: joinRecord.name || (item && item.name) || 'Unknown Item',
+          name: itemName,
           quantity: joinRecord.quantity,
           description: joinRecord.description,
+          categoryId: (item && item.categoryId) || '',
+          categoryName: (item && item.categoryName) || '',
+          listUsages: listUsages,
           item: item || null
         };
       })
@@ -209,6 +310,7 @@
     getAllTemplates: getAllTemplates,
     createTemplate: createTemplate,
     renameTemplate: renameTemplate,
+    updateTemplateConfig: updateTemplateConfig,
     deleteTemplate: deleteTemplate,
     getTemplateItems: getTemplateItems,
     addItemToTemplate: addItemToTemplate,

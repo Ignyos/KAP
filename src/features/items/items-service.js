@@ -12,6 +12,14 @@
     return (description || '').trim();
   }
 
+  function normalizeCategoryId(value) {
+    return String(value || '').trim();
+  }
+
+  function normalizeCategoryName(value) {
+    return String(value || '').trim();
+  }
+
   function sortByNameAscending(items) {
     return items.sort(function (a, b) {
       return String(a.name).localeCompare(String(b.name));
@@ -39,7 +47,7 @@
     });
   }
 
-  async function createItem(name, description) {
+  async function createItem(name, description, categoryId, categoryName) {
     var safeName = ensureValidItemName(name);
     var safeDescription = normalizeDescription(description);
     var existingItems = await getAllItems();
@@ -54,14 +62,16 @@
     var item = {
       id: window.KaPIds.NewId(),
       name: safeName,
-      description: safeDescription
+      description: safeDescription,
+      categoryId: normalizeCategoryId(categoryId),
+      categoryName: normalizeCategoryName(categoryName)
     };
 
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, item);
     return item;
   }
 
-  async function updateItem(id, nextName, nextDescription) {
+  async function updateItem(id, nextName, nextDescription, categoryId, categoryName) {
     var item = await getItemById(id);
     if (!item) {
       throw new Error('Item not found.');
@@ -69,6 +79,11 @@
 
     item.name = ensureValidItemName(nextName);
     item.description = normalizeDescription(nextDescription);
+
+    if (arguments.length >= 4) {
+      item.categoryId = normalizeCategoryId(categoryId);
+      item.categoryName = normalizeCategoryName(categoryName);
+    }
 
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, item);
     return item;
@@ -84,12 +99,38 @@
     return true;
   }
 
+  async function setItemCategory(id, categoryId, categoryName, fallbackItemName) {
+    var safeCategoryId = normalizeCategoryId(categoryId);
+    var safeCategoryName = normalizeCategoryName(categoryName);
+    var item = await getItemById(id);
+    if (!item) {
+      var safeName = ensureValidItemName(fallbackItemName || '');
+      item = {
+        id: id,
+        name: safeName,
+        description: '',
+        categoryId: safeCategoryId,
+        categoryName: safeCategoryName
+      };
+
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, item);
+      return item;
+    }
+
+    item.categoryId = safeCategoryId;
+    item.categoryName = safeCategoryName;
+
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, item);
+    return item;
+  }
+
   window.KaPItemsService = {
     getAllItems: getAllItems,
     getItemById: getItemById,
     searchItems: searchItems,
     createItem: createItem,
     updateItem: updateItem,
-    deleteItem: deleteItem
+    deleteItem: deleteItem,
+    setItemCategory: setItemCategory
   };
 })();
