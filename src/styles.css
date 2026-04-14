@@ -122,6 +122,19 @@ body {
   outline-offset: 1px;
 }
 
+.header-menu-item[aria-disabled="true"],
+.header-menu-item:disabled {
+  color: var(--color-disabled);
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.header-menu-item[aria-disabled="true"]:hover,
+.header-menu-item:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
 .tab-nav {
   position: sticky;
   top: 58px;
@@ -983,6 +996,11 @@ body {
 }
 
 .modal-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  justify-self: start;
   white-space: nowrap;
   border-radius: 8px;
   padding: 8px 16px;
@@ -990,6 +1008,10 @@ body {
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
+}
+
+.modal-confirm-button {
+  justify-self: end;
 }
 
 .modal-button--secondary {
