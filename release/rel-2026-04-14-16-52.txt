@@ -1,0 +1,23 @@
+Release timestamp: 2026-04-14-16-52
+Diff source: 2026-04-13-20-44..HEAD
+Generated at: 2026-04-14 16:52:22Z
+diff --git a/src/features/templates/templates-page.js b/src/features/templates/templates-page.js
+index 9b28f66..cf5764f 100644
+--- a/src/features/templates/templates-page.js
++++ b/src/features/templates/templates-page.js
+@@ -33,14 +33,7 @@
+       },
+       searchLists: async function (query) {
+         var allLists = await window.KaPListsService.getAllLists();
+-        var normalized = String(query || '').trim().toLowerCase();
+-        if (!normalized) {
+-          return allLists;
+-        }
+-
+-        return allLists.filter(function (listRecord) {
+-          return String(listRecord.name || '').toLowerCase().indexOf(normalized) >= 0;
+-        });
++        return allLists;
+       },
+       resolveExactList: async function (name) {
+         var allLists = await window.KaPListsService.getAllLists();
