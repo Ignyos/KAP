@@ -652,6 +652,51 @@ body {
   font-size: 0.9rem;
 }
 
+.crossed-off-actions {
+  display: flex;
+  gap: 0;
+  margin-top: 10px;
+}
+
+.crossed-off-action-button {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-button-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.crossed-off-action-button:not(:last-child) {
+  margin-right: 10px;
+}
+
+.crossed-off-action-button:hover {
+  background-color: var(--color-button-hover-bg);
+  color: var(--color-button-hover-text);
+}
+
+.crossed-off-action-button:disabled,
+.crossed-off-action-button[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.crossed-off-action-button:disabled:hover,
+.crossed-off-action-button[aria-disabled="true"]:hover {
+  background-color: var(--color-button-bg);
+  color: var(--color-text);
+}
+
+.crossed-off-action-delete:hover {
+  background-color: #e59a93;
+  color: #fff;
+}
+
 .category-group {
   margin-bottom: 14px;
 }

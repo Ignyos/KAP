@@ -135,28 +135,6 @@ function Invoke-BuildScript {
   }
 }
 
-function Clear-DirectoryContents {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path,
-    [switch]$WhatIfMode
-  )
-
-  if (-not (Test-Path -LiteralPath $Path)) {
-    return
-  }
-
-  $children = Get-ChildItem -LiteralPath $Path -Force
-  foreach ($child in $children) {
-    if ($WhatIfMode) {
-      Write-Host "[WhatIf] Would remove $($child.FullName)" -ForegroundColor Yellow
-      continue
-    }
-
-    Remove-Item -LiteralPath $child.FullName -Recurse -Force
-  }
-}
-
 $scriptDir = Split-Path -Parent $PSCommandPath
 Push-Location $scriptDir
 try {
@@ -323,25 +301,6 @@ Return only the updated RELEASE_NOTES.md content.
   else {
     Invoke-Git -Args @("push", "origin", $branchName)
     Invoke-Git -Args @("push", "origin", $tagName)
-
-    $docsPath = Join-Path $repoRoot "docs"
-    Clear-DirectoryContents -Path $docsPath -WhatIfMode:$WhatIfMode
-
-    if (Test-Path -LiteralPath $releaseNotesPath) {
-      if ($WhatIfMode) {
-        Write-Host "[WhatIf] Would remove $releaseNotesPath" -ForegroundColor Yellow
-      }
-      else {
-        Remove-Item -LiteralPath $releaseNotesPath -Force
-      }
-    }
-
-    if ($WhatIfMode) {
-      Write-Host "[WhatIf] Would clean docs contents and remove RELEASE_NOTES.md after push." -ForegroundColor Yellow
-    }
-    else {
-      Write-Host "Post-release cleanup complete: docs contents removed and RELEASE_NOTES.md deleted." -ForegroundColor Green
-    }
   }
 
   Write-Host ""

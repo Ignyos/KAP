@@ -30,7 +30,7 @@
   ];
 
   var state = {
-    expandedSectionId: getSavedExpandedSection(),
+    expandedSectionIds: getSavedExpandedSections(),
     settingsReturnPath: '/'
   };
 
@@ -41,12 +41,34 @@
   var isInstalled = false;
   var installMenuButtonRef = null;
 
-  function getSavedExpandedSection() {
-    return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
+  function getSavedExpandedSections() {
+    var saved = window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTIONS);
+    return saved || [];
   }
 
-  function saveExpandedSection(sectionId) {
-    window.KaPSettings.set(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION, sectionId);
+  function saveExpandedSections(sectionIds) {
+    window.KaPSettings.set(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTIONS, sectionIds);
+  }
+
+  function getSavedMainPageScrollTop() {
+    var value = window.KaPSettings.get(window.KaPSettings.KEYS.MAIN_PAGE_SCROLL_TOP);
+    if (typeof value !== 'number' || !isFinite(value) || value < 0) {
+      return 0;
+    }
+
+    return value;
+  }
+
+  function saveMainPageScrollTop(value) {
+    var safeValue = typeof value === 'number' && isFinite(value) && value > 0 ? Math.round(value) : 0;
+    window.KaPSettings.set(window.KaPSettings.KEYS.MAIN_PAGE_SCROLL_TOP, safeValue);
+  }
+
+  function restoreMainPageScrollTop() {
+    var saved = getSavedMainPageScrollTop();
+    window.requestAnimationFrame(function () {
+      window.scrollTo(0, saved);
+    });
   }
 
   function findSection(id) {
@@ -72,6 +94,12 @@
   }
 
   function onRouteChange(route) {
+    var previousRoute = currentRoute;
+
+    if (previousRoute && previousRoute.view === 'home' && route.view !== 'home') {
+      saveMainPageScrollTop(window.scrollY || 0);
+    }
+
     currentRoute = route;
 
     if (route.view !== 'settings') {
@@ -81,6 +109,8 @@
     if (route.view === 'home') {
       renderHome().catch(function (error) {
         console.error('Error rendering home:', error);
+      }).then(function () {
+        restoreMainPageScrollTop();
       });
     } else if (route.view === 'settings') {
       renderSettingsPage().catch(function (error) {
@@ -124,7 +154,7 @@
 
     for (var j = 0; j < sectionDefinitions.length; j++) {
       var currentSection = sectionDefinitions[j];
-      var isExpanded = state.expandedSectionId === currentSection.id;
+      var isExpanded = state.expandedSectionIds.indexOf(currentSection.id) >= 0;
       
       var accordionSection = createAccordionSection(
         currentSection,
@@ -309,12 +339,13 @@
   }
 
   function handleSectionToggle(sectionId) {
-    if (state.expandedSectionId === sectionId) {
-      state.expandedSectionId = null;
+    var index = state.expandedSectionIds.indexOf(sectionId);
+    if (index >= 0) {
+      state.expandedSectionIds.splice(index, 1);
     } else {
-      state.expandedSectionId = sectionId;
+      state.expandedSectionIds.push(sectionId);
     }
-    saveExpandedSection(state.expandedSectionId);
+    saveExpandedSections(state.expandedSectionIds);
     renderHome();
   }
 
@@ -467,6 +498,7 @@
       title: 'About Kitchen & Pantry',
       companyName: 'Ignyos',
       companyUrl: 'https://ignyos.com',
+      releaseNotesUrl: './RELEASE_NOTES.md',
       releaseVersion: getCurrentReleaseVersion()
     });
   }
