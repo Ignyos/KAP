@@ -1,5 +1,6 @@
 (function () {
-  var isProcessingTemplateItemClick = false;
+  var pendingTargetAddClicksByKey = {};
+  var processingTargetAddByKey = {};
 
   async function showError(message) {
     await window.KaPUI.ShowAlert({ title: 'Error', message: message });
@@ -208,24 +209,46 @@
     });
   }
 
+  function getTargetAddKey(templateRecord, detailItem) {
+    return String((templateRecord && templateRecord.id) || '') + '::' + String((detailItem && detailItem.id) || '');
+  }
+
   async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
-    // Prevent rapid duplicate clicks from causing state sync issues
-    if (isProcessingTemplateItemClick) {
+    var targetKey = getTargetAddKey(templateRecord, detailItem);
+    pendingTargetAddClicksByKey[targetKey] = (pendingTargetAddClicksByKey[targetKey] || 0) + 1;
+
+    if (processingTargetAddByKey[targetKey]) {
       return;
     }
-    isProcessingTemplateItemClick = true;
+
+    processingTargetAddByKey[targetKey] = true;
 
     try {
-      await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
+      while ((pendingTargetAddClicksByKey[targetKey] || 0) > 0) {
+        pendingTargetAddClicksByKey[targetKey] -= 1;
+        var didApply = await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
+        if (didApply === false) {
+          // If target list selection is canceled, clear queued clicks for this item.
+          pendingTargetAddClicksByKey[targetKey] = 0;
+          break;
+        }
+      }
     } finally {
-      isProcessingTemplateItemClick = false;
+      processingTargetAddByKey[targetKey] = false;
     }
   }
 
   async function addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks) {
-    var activeTemplateRecord = templateRecord;
+    var latestTemplateRecord = await window.KaPDB.readByKey(
+      window.KaPStores.STORE_NAMES.LIST_RECORDS,
+      templateRecord.id
+    );
 
-    if (!templateRecord.targetListId) {
+    var activeTemplateRecord = latestTemplateRecord && latestTemplateRecord.type === 'Template'
+      ? latestTemplateRecord
+      : templateRecord;
+
+    if (!activeTemplateRecord.targetListId) {
       var targetListChoice = await window.KaPUI.ShowTemplateTargetListModal({
         title: 'Choose Target List',
         confirmLabel: 'Set And Add Item',
@@ -254,18 +277,18 @@
       });
 
       if (!targetListChoice) {
-        return;
+        return false;
       }
 
       var updatedTemplate = await window.KaPTemplatesService.updateTemplateConfig(
-        templateRecord.id,
-        templateRecord.name,
+        activeTemplateRecord.id,
+        activeTemplateRecord.name,
         targetListChoice.targetListId,
         targetListChoice.targetListName
       );
 
       if (!updatedTemplate || !updatedTemplate.targetListId) {
-        return;
+        return false;
       }
 
       activeTemplateRecord = updatedTemplate;
@@ -292,8 +315,10 @@
       );
 
       await renderDetailInto(container, activeTemplateRecord, hooks);
+      return true;
     } catch (error) {
       await showError(error.message || 'Unable to add item to target list.');
+      return false;
     }
   }
 
