@@ -1,0 +1,751 @@
+Release timestamp: 2026-04-19-20-21
+Diff source: 2026-04-14-21-12..HEAD
+Generated at: 2026-04-19 16:21:23Z
+diff --git a/WORK_IN_PROGRESS.md b/WORK_IN_PROGRESS.md
+new file mode 100644
+index 0000000..9d13e5a
+--- /dev/null
++++ b/WORK_IN_PROGRESS.md
+@@ -0,0 +1,186 @@
++# Work In Progress
++
++## Document Status
++
++- **Purpose:** Track bugs, improvements, and refinements currently in development.
++- **Scope:** Changes not yet in master; separate from confirmed requirements.
++- **Last updated:** 2026-04-19
++
++---
++
++## Active Issues and Tasks
++
++### Task 1: Multiple Open Accordions on Main Page
++
++**Status:** Γ£à COMPLETED
++
++**Description**
++Currently, when a user opens one accordion section on the main page, other closed sections may collapse or behave unexpectedly. Allow all accordion sections to be open simultaneously.
++
++**Current Behavior (Before)**
++- Accordion sections toggle individually but only one can be open at a time.
++
++**Desired Behavior**
++- User can open Lists, Templates, and Recipes accordions at the same time.
++- Each section opens/closes independently.
++
++**Fix Applied**
++- Changed state from single `expandedSectionId` to array `expandedSectionIds`.
++- Updated `getSavedExpandedSection()` ΓåÆ `getSavedExpandedSections()` to return array.
++- Updated `handleSectionToggle()` to add/remove section ID from array instead of replacing.
++- Added new settings key `EXPANDED_ACCORDION_SECTIONS` in settings.js.
++- Updated default value to empty array `[]`.
++
++**Code References**
++- [src/features/main/main-page.js](src/features/main/main-page.js) - accordion state and toggle logic
++- [src/shared/settings.js](src/shared/settings.js) - new settings key and default
++
++**Acceptance Checks**
++- [x] Open one accordion section.
++- [x] Open a second accordion section without closing the first.
++- [x] Both sections remain open and functional.
++- [x] Close one section without affecting the other.
++- [x] Expanded state persists across page reloads.
++
++---
++
++### Task 2: Persist Scroll Position on Main Page
++
++**Status:** Γ£à IMPLEMENTED (pending manual UX verification)
++
++**Description**
++When user returns to the main page (home), scroll position should be restored to where they left off.
++
++**Current Behavior**
++- Page scrolls to top on navigation back to home.
++
++**Desired Behavior**
++- Scroll position is saved when user leaves main page.
++- Scroll position is restored when user returns to main page.
++
++**Fix Applied**
++- Added persisted setting key `MAIN_PAGE_SCROLL_TOP`.
++- Save scroll position when route changes away from home.
++- Restore saved scroll position after home view finishes rendering.
++- Added helpers in main page module to sanitize and persist scroll values.
++
++**Code References**
++- [src/features/main/main-page.js](src/features/main/main-page.js) - `onRouteChange()`, `renderHome()`
++- [src/shared/settings.js](src/shared/settings.js) - `MAIN_PAGE_SCROLL_TOP` key/default
++
++**Acceptance Checks**
++- [ ] User scrolls down on main page.
++- [ ] User navigates to a list, template, or settings.
++- [ ] User navigates back to home.
++- [ ] Scroll position is restored to previous position.
++
++---
++
++### Task 3: Sticky Accordion Headers (Stacking)
++
++**Status:** Γå⌐∩╕Å ROLLED BACK
++
++**Description**
++Accordion headers should remain visible as the user scrolls, stacking visually so the user always knows which section they are currently viewing.
++
++**Current Behavior**
++- Accordion headers scroll out of view.
++
++**Desired Behavior**
++- Each accordion header becomes sticky when its section is scrolled to the top of the viewport.
++- Headers stack below each other as user scrolls through sections.
++- User always sees a visual indicator of the current section context.
++
++**Rollback Note**
++- Sticky stacked header implementation was tested and then reverted.
++- Accordion headers now use non-sticky behavior again.
++- Task remains open for a future, revised approach.
++
++**CSS/Layout References**
++- [src/features/main/main-page.js](src/features/main/main-page.js) - accordion render behavior
++- [src/styles.css](src/styles.css) - accordion header styling
++
++**Acceptance Checks**
++- [ ] Scroll down through expanded accordion sections.
++- [ ] First accordion header becomes sticky at top of viewport.
++- [ ] Scroll to second section; second header stacks below first and becomes sticky.
++- [ ] Visual stacking clearly shows section hierarchy during scroll.
++
++---
++
++### Task 4: Crossed-Off Items Action Buttons
++
++**Status:** Γ£à COMPLETED
++
++**Description**
++In the "Crossed Off Items" section within a Grocery List detail view, replace the section menu with two persistent action buttons.
++
++**Current Behavior (Before)**
++- "Crossed Off Items" section header had a three-dot menu with actions hidden.
++
++**Desired Behavior**
++- Remove the three-dot menu from "Crossed Off Items" header.
++- Add two buttons directly below the "Crossed Off Items" section:
++  1. "Delete all crossed-off" (left side, 50% width)
++  2. "Uncross-off all items" (right side, 50% width)
++- Buttons are always visible when the section is expanded.
++- Buttons take up 100% of container width, split 50/50.
++
++**Fix Applied**
++- Refactored `appendCrossedOffSection()` to remove menu-related code.
++- Created `.crossed-off-actions` flex container placed after items list.
++- Created `.crossed-off-action-button` class with 50% flex width and gap.
++- Added CSS hover states for both buttons, with red highlight for delete button.
++- Buttons only show when there are crossed-off items (conditional in function).
++
++**Code References**
++- [src/features/lists/lists-page.js](src/features/lists/lists-page.js) - `appendCrossedOffSection()` refactored
++- [src/styles.css](src/styles.css) - `.crossed-off-actions`, `.crossed-off-action-button` classes added
++
++**Acceptance Checks**
++- [x] Open a Grocery List detail view.
++- [x] Cross off some items.
++- [x] Find the "Crossed Off Items" section.
++- [x] Verify no three-dot menu is present on the section header.
++- [x] Two action buttons are visible (50% width each).
++- [x] "Delete all crossed-off" button is functional.
++- [x] "Uncross-off all items" button is functional.
++- [x] Buttons are always visible when section is expanded.
++- [x] Buttons visible only when there are crossed-off items.
++
++---
++
++### Task 5: Bug Fix ΓÇö Item Click Double-Click Issue in Pantry & Fridge
++
++**Status:** Γ£à COMPLETED
++
++**Description**
++When clicking an item in a Pantry & Fridge (template) list more than once in quick succession, the second click does nothing. User has to click a third time to add a second quantity increment.
++
++**Current Behavior**
++- Click item once: quantity becomes 1.
++- Click item second time: nothing happens (expected: quantity becomes 2).
++- Click item third time: quantity becomes 2.
++
++**Root Cause**
++- Rapid duplicate clicks were firing before the async operation completed and DOM re-rendered, causing a state sync issue.
++
++**Fix Applied**
++- Added debounce flag at module scope: `isProcessingTemplateItemClick`.
++- Added guard in `addTemplateItemToTargetList()` to prevent execution if another operation is in progress.
++- Wrapped implementation in try/finally to ensure flag always resets.
++
++**Code References**
++- [src/features/templates/templates-page.js](src/features/templates/templates-page.js) - `addTemplateItemToTargetList()` now includes debounce protection.
++
++**Acceptance Checks**
++- [x] Click an item once: quantity increments to 1.
++- [x] Click the same item immediately: quantity increments to 2.
++- [x] Click subsequent times: each click increments quantity by 1.
++- [x] No console errors on repeated clicks.
++
++---
++
++## Session Log
++
++- **2026-04-19:** Added five tasks: multiple open accordions, scroll persistence, sticky headers, crossed-off items buttons, template item click bug.
+diff --git a/recipe-feature-definition.md b/recipe-feature-definition.md
+new file mode 100644
+index 0000000..6e4208e
+--- /dev/null
++++ b/recipe-feature-definition.md
+@@ -0,0 +1,91 @@
++# Recipe Feature Definition (Working Draft)
++
++## Document Status
++
++- **Purpose:** Design and refine recipe feature requirements through UX-first conversation.
++- **Scope:** High-level user experience, behavior, and supporting data model.
++- **Status:** In-progress; items here are candidate requirements until promoted to requirements.md.
++- **Last updated:** 2026-04-19
++
++## Overview
++
++A Recipe is a versioned cooking artifact with:
++- Long-term identity (recipes persist across edits).
++- Changes tracked by version (each edit creates a new version).
++- Mutable content (ingredients, instructions, notes can change per version).
++- Stable instruction identity (an instruction can be edited over time while remaining traceable).
++
++---
++
++## Requirement Cards
++
++### Card 1: Version Visibility and Navigation
++
++**Experience**
++- I can clearly tell which recipe version I am viewing.
++- I can intentionally create a new version without accidentally overwriting the current one.
++
++**Behavior Support**
++
++Version header:
++- Recipe name displayed prominently.
++- Current version shown near name: "Version (n)".
++- Three-dot menu (always available) with actions:
++  1. Version Note
++  2. New Version
++  3. Clone Recipe
++
++New Version modal:
++- Opens when "New Version" is selected.
++- Shows recipe name at top.
++- Shows next version number (current + 1).
++- Includes description input with placeholder:
++  - "Too much salt in version 1. Also adding basil this time."
++- Saving creates new version based on currently selected effective state.
++- Version note is optional.
++
++Clone Recipe:
++- Copies only the currently effective state (not full version history).
++- Creates a new Recipe with a new Version 1.
++- Default version note: "Clone of <recipe name> on <local date time>."
++
++**Model Support**
++
++- Recipe identity record (stable across all versions).
++- Version records linked by parent version ID (null for Version 1).
++- New Version always inherits from selected version's effective state.
++- Clone creates a new Recipe identity with Version 1 containing effective state.
++- Version note field is optional (allows empty string).
++
++**Acceptance Checks**
++
++- [ ] Version number is displayed in recipe header.
++- [ ] Three-dot menu is accessible from header.
++- [ ] Selecting "New Version" opens modal with correct recipe name and next version number.
++- [ ] Description input has correct placeholder text.
++- [ ] Saving new version does not overwrite current version.
++- [ ] Clone Recipe creates a new recipe with its own identity.
++- [ ] Clone default note includes recipe name and current local date/time.
++- [ ] Version note is optional (user can save without entering text).
++
++---
++
++## Confirmed Inputs
++
++References from requirements.md:
++- Recipe versioning must be diff-style with inheritance.
++- Instruction identity must be stable across versions.
++- The model must support creator version notes.
++- Recipe is a supported ListRecord type.
++
++---
++
++## Open Questions
++
++(To be filled as conversation progresses.)
++
++---
++
++## Session Log
++
++- **2026-04-19:** Added Card 1 (Version Visibility and Navigation) with three sub-behaviors: version header display, New Version modal, Clone Recipe.
+diff --git a/release.ps1 b/release.ps1
+index 60e0aca..24c8b63 100644
+--- a/release.ps1
++++ b/release.ps1
+@@ -135,28 +135,6 @@ function Invoke-BuildScript {
+   }
+ }
+ 
+-function Clear-DirectoryContents {
+-  param(
+-    [Parameter(Mandatory = $true)]
+-    [string]$Path,
+-    [switch]$WhatIfMode
+-  )
+-
+-  if (-not (Test-Path -LiteralPath $Path)) {
+-    return
+-  }
+-
+-  $children = Get-ChildItem -LiteralPath $Path -Force
+-  foreach ($child in $children) {
+-    if ($WhatIfMode) {
+-      Write-Host "[WhatIf] Would remove $($child.FullName)" -ForegroundColor Yellow
+-      continue
+-    }
+-
+-    Remove-Item -LiteralPath $child.FullName -Recurse -Force
+-  }
+-}
+-
+ $scriptDir = Split-Path -Parent $PSCommandPath
+ Push-Location $scriptDir
+ try {
+@@ -323,25 +301,6 @@ Return only the updated RELEASE_NOTES.md content.
+   else {
+     Invoke-Git -Args @("push", "origin", $branchName)
+     Invoke-Git -Args @("push", "origin", $tagName)
+-
+-    $docsPath = Join-Path $repoRoot "docs"
+-    Clear-DirectoryContents -Path $docsPath -WhatIfMode:$WhatIfMode
+-
+-    if (Test-Path -LiteralPath $releaseNotesPath) {
+-      if ($WhatIfMode) {
+-        Write-Host "[WhatIf] Would remove $releaseNotesPath" -ForegroundColor Yellow
+-      }
+-      else {
+-        Remove-Item -LiteralPath $releaseNotesPath -Force
+-      }
+-    }
+-
+-    if ($WhatIfMode) {
+-      Write-Host "[WhatIf] Would clean docs contents and remove RELEASE_NOTES.md after push." -ForegroundColor Yellow
+-    }
+-    else {
+-      Write-Host "Post-release cleanup complete: docs contents removed and RELEASE_NOTES.md deleted." -ForegroundColor Green
+-    }
+   }
+ 
+   Write-Host ""
+diff --git a/src/features/lists/lists-page.js b/src/features/lists/lists-page.js
+index ba66a84..5c5637c 100644
+--- a/src/features/lists/lists-page.js
++++ b/src/features/lists/lists-page.js
+@@ -315,44 +315,7 @@
+     title.textContent = 'Crossed Off Items';
+     header.appendChild(title);
+ 
+-    var menuWrap = document.createElement('div');
+-    menuWrap.className = 'detail-overflow-menu crossed-off-menu';
+-
+-    var menuTrigger = document.createElement('button');
+-    menuTrigger.type = 'button';
+-    menuTrigger.className = 'record-action-button detail-overflow-trigger';
+-    menuTrigger.setAttribute('aria-haspopup', 'menu');
+-    menuTrigger.setAttribute('aria-expanded', 'false');
+-    menuTrigger.setAttribute('aria-label', 'Crossed off actions');
+-
+-    var menuDots = document.createElement('span');
+-    menuDots.className = 'detail-overflow-dots';
+-    menuDots.textContent = '\u2026';
+-    menuTrigger.appendChild(menuDots);
+-
+-    var menuList = document.createElement('div');
+-    menuList.className = 'detail-overflow-list';
+-    menuList.setAttribute('role', 'menu');
+-    menuList.style.display = 'none';
+-
+-    function closeMenu() {
+-      menuList.style.display = 'none';
+-      menuTrigger.setAttribute('aria-expanded', 'false');
+-    }
+-
+-    function openMenu() {
+-      menuList.style.display = 'grid';
+-      menuTrigger.setAttribute('aria-expanded', 'true');
+-    }
+-
+-    function toggleMenu(event) {
+-      event.stopPropagation();
+-      if (menuList.style.display === 'none') {
+-        openMenu();
+-      } else {
+-        closeMenu();
+-      }
+-    }
++    section.appendChild(header);
+ 
+     function deleteAllCrossedOff() {
+       return Promise.resolve().then(async function () {
+@@ -373,50 +336,6 @@
+         });
+     }
+ 
+-    var deleteAllItem = document.createElement('button');
+-    deleteAllItem.type = 'button';
+-    deleteAllItem.className = 'detail-overflow-item detail-overflow-item--danger';
+-    deleteAllItem.textContent = 'Delete all crossed-off';
+-    deleteAllItem.setAttribute('role', 'menuitem');
+-    deleteAllItem.addEventListener('click', function (event) {
+-      event.stopPropagation();
+-      closeMenu();
+-      deleteAllCrossedOff();
+-    });
+-
+-    var uncrossAllItem = document.createElement('button');
+-    uncrossAllItem.type = 'button';
+-    uncrossAllItem.className = 'detail-overflow-item';
+-    uncrossAllItem.textContent = 'Uncross-off all';
+-    uncrossAllItem.setAttribute('role', 'menuitem');
+-    uncrossAllItem.addEventListener('click', function (event) {
+-      event.stopPropagation();
+-      closeMenu();
+-      uncrossOffAll();
+-    });
+-
+-    menuList.appendChild(deleteAllItem);
+-    menuList.appendChild(uncrossAllItem);
+-
+-    menuTrigger.addEventListener('click', toggleMenu);
+-
+-    detailShell.addEventListener('click', function (event) {
+-      if (!menuWrap.contains(event.target)) {
+-        closeMenu();
+-      }
+-    });
+-
+-    detailShell.addEventListener('keydown', function (event) {
+-      if (event.key === 'Escape') {
+-        closeMenu();
+-      }
+-    });
+-
+-    menuWrap.appendChild(menuTrigger);
+-    menuWrap.appendChild(menuList);
+-    header.appendChild(menuWrap);
+-    section.appendChild(header);
+-
+     if (crossedOffItems.length === 0) {
+       var empty = document.createElement('p');
+       empty.className = 'crossed-off-empty';
+@@ -431,8 +350,49 @@
+       });
+ 
+       section.appendChild(crossedList);
++
+     }
+ 
++    // Keep actions visible under the section; disable when there are no crossed-off items.
++    var buttonsContainer = document.createElement('div');
++    buttonsContainer.className = 'crossed-off-actions';
++
++    var hasCrossedOffItems = crossedOffItems.length > 0;
++
++    var deleteButton = document.createElement('button');
++    deleteButton.type = 'button';
++    deleteButton.className = 'crossed-off-action-button crossed-off-action-delete';
++    deleteButton.textContent = 'Delete all crossed-off';
++    deleteButton.disabled = !hasCrossedOffItems;
++    deleteButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
++    deleteButton.addEventListener('click', function (event) {
++      event.stopPropagation();
++      if (!hasCrossedOffItems) {
++        return;
++      }
++
++      deleteAllCrossedOff();
++    });
++
++    var uncrossButton = document.createElement('button');
++    uncrossButton.type = 'button';
++    uncrossButton.className = 'crossed-off-action-button crossed-off-action-uncross';
++    uncrossButton.textContent = 'Uncross-off all items';
++    uncrossButton.disabled = !hasCrossedOffItems;
++    uncrossButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
++    uncrossButton.addEventListener('click', function (event) {
++      event.stopPropagation();
++      if (!hasCrossedOffItems) {
++        return;
++      }
++
++      uncrossOffAll();
++    });
++
++    buttonsContainer.appendChild(deleteButton);
++    buttonsContainer.appendChild(uncrossButton);
++    section.appendChild(buttonsContainer);
++
+     detailShell.appendChild(section);
+   }
+ 
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index edcfc78..d0185aa 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -30,7 +30,7 @@
+   ];
+ 
+   var state = {
+-    expandedSectionId: getSavedExpandedSection(),
++    expandedSectionIds: getSavedExpandedSections(),
+     settingsReturnPath: '/'
+   };
+ 
+@@ -41,12 +41,34 @@
+   var isInstalled = false;
+   var installMenuButtonRef = null;
+ 
+-  function getSavedExpandedSection() {
+-    return window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION) || null;
++  function getSavedExpandedSections() {
++    var saved = window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTIONS);
++    return saved || [];
+   }
+ 
+-  function saveExpandedSection(sectionId) {
+-    window.KaPSettings.set(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTION, sectionId);
++  function saveExpandedSections(sectionIds) {
++    window.KaPSettings.set(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTIONS, sectionIds);
++  }
++
++  function getSavedMainPageScrollTop() {
++    var value = window.KaPSettings.get(window.KaPSettings.KEYS.MAIN_PAGE_SCROLL_TOP);
++    if (typeof value !== 'number' || !isFinite(value) || value < 0) {
++      return 0;
++    }
++
++    return value;
++  }
++
++  function saveMainPageScrollTop(value) {
++    var safeValue = typeof value === 'number' && isFinite(value) && value > 0 ? Math.round(value) : 0;
++    window.KaPSettings.set(window.KaPSettings.KEYS.MAIN_PAGE_SCROLL_TOP, safeValue);
++  }
++
++  function restoreMainPageScrollTop() {
++    var saved = getSavedMainPageScrollTop();
++    window.requestAnimationFrame(function () {
++      window.scrollTo(0, saved);
++    });
+   }
+ 
+   function findSection(id) {
+@@ -72,6 +94,12 @@
+   }
+ 
+   function onRouteChange(route) {
++    var previousRoute = currentRoute;
++
++    if (previousRoute && previousRoute.view === 'home' && route.view !== 'home') {
++      saveMainPageScrollTop(window.scrollY || 0);
++    }
++
+     currentRoute = route;
+ 
+     if (route.view !== 'settings') {
+@@ -81,6 +109,8 @@
+     if (route.view === 'home') {
+       renderHome().catch(function (error) {
+         console.error('Error rendering home:', error);
++      }).then(function () {
++        restoreMainPageScrollTop();
+       });
+     } else if (route.view === 'settings') {
+       renderSettingsPage().catch(function (error) {
+@@ -124,7 +154,7 @@
+ 
+     for (var j = 0; j < sectionDefinitions.length; j++) {
+       var currentSection = sectionDefinitions[j];
+-      var isExpanded = state.expandedSectionId === currentSection.id;
++      var isExpanded = state.expandedSectionIds.indexOf(currentSection.id) >= 0;
+       
+       var accordionSection = createAccordionSection(
+         currentSection,
+@@ -309,12 +339,13 @@
+   }
+ 
+   function handleSectionToggle(sectionId) {
+-    if (state.expandedSectionId === sectionId) {
+-      state.expandedSectionId = null;
++    var index = state.expandedSectionIds.indexOf(sectionId);
++    if (index >= 0) {
++      state.expandedSectionIds.splice(index, 1);
+     } else {
+-      state.expandedSectionId = sectionId;
++      state.expandedSectionIds.push(sectionId);
+     }
+-    saveExpandedSection(state.expandedSectionId);
++    saveExpandedSections(state.expandedSectionIds);
+     renderHome();
+   }
+ 
+@@ -467,6 +498,7 @@
+       title: 'About Kitchen & Pantry',
+       companyName: 'Ignyos',
+       companyUrl: 'https://ignyos.com',
++      releaseNotesUrl: './RELEASE_NOTES.md',
+       releaseVersion: getCurrentReleaseVersion()
+     });
+   }
+diff --git a/src/features/templates/templates-page.js b/src/features/templates/templates-page.js
+index cf5764f..8d57568 100644
+--- a/src/features/templates/templates-page.js
++++ b/src/features/templates/templates-page.js
+@@ -1,4 +1,6 @@
+ (function () {
++  var isProcessingTemplateItemClick = false;
++
+   async function showError(message) {
+     await window.KaPUI.ShowAlert({ title: 'Error', message: message });
+   }
+@@ -207,6 +209,20 @@
+   }
+ 
+   async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
++    // Prevent rapid duplicate clicks from causing state sync issues
++    if (isProcessingTemplateItemClick) {
++      return;
++    }
++    isProcessingTemplateItemClick = true;
++
++    try {
++      await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
++    } finally {
++      isProcessingTemplateItemClick = false;
++    }
++  }
++
++  async function addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks) {
+     var activeTemplateRecord = templateRecord;
+ 
+     if (!templateRecord.targetListId) {
+diff --git a/src/shared/settings.js b/src/shared/settings.js
+index 8d7780c..14d0c87 100644
+--- a/src/shared/settings.js
++++ b/src/shared/settings.js
+@@ -5,6 +5,8 @@
+     ACTIVE_TAB: 'activeTab',
+     ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
+     EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection',
++    EXPANDED_ACCORDION_SECTIONS: 'expandedAccordionSections',
++    MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
+     CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord'
+   };
+ 
+@@ -16,6 +18,8 @@
+       recipes: null
+     },
+     expandedAccordionSection: null,
++    expandedAccordionSections: [],
++    mainPageScrollTop: 0,
+     categoryViewByRecord: {
+       lists: {},
+       templates: {}
+diff --git a/src/styles.css b/src/styles.css
+index 1138ac0..b4c4c50 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -652,6 +652,51 @@ body {
+   font-size: 0.9rem;
+ }
+ 
++.crossed-off-actions {
++  display: flex;
++  gap: 0;
++  margin-top: 10px;
++}
++
++.crossed-off-action-button {
++  flex: 1;
++  padding: 10px;
++  border: 1px solid var(--color-border);
++  background-color: var(--color-button-bg);
++  color: var(--color-text);
++  font-size: 0.9rem;
++  font-weight: 500;
++  cursor: pointer;
++  border-radius: 4px;
++  transition: background-color 0.2s, color 0.2s;
++}
++
++.crossed-off-action-button:not(:last-child) {
++  margin-right: 10px;
++}
++
++.crossed-off-action-button:hover {
++  background-color: var(--color-button-hover-bg);
++  color: var(--color-button-hover-text);
++}
++
++.crossed-off-action-button:disabled,
++.crossed-off-action-button[aria-disabled="true"] {
++  opacity: 0.55;
++  cursor: not-allowed;
++}
++
++.crossed-off-action-button:disabled:hover,
++.crossed-off-action-button[aria-disabled="true"]:hover {
++  background-color: var(--color-button-bg);
++  color: var(--color-text);
++}
++
++.crossed-off-action-delete:hover {
++  background-color: #e59a93;
++  color: #fff;
++}
++
+ .category-group {
+   margin-bottom: 14px;
+ }
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index f722496..f564b37 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -1810,6 +1810,7 @@
+     return showModal(function (bodyNode, confirmButton) {
+       var companyName = String(config.companyName || 'Ignyos').trim();
+       var companyUrl = String(config.companyUrl || 'https://ignyos.com').trim();
++      var releaseNotesUrl = String(config.releaseNotesUrl || './RELEASE_NOTES.md').trim();
+       var releaseVersion = String(config.releaseVersion || 'Unknown').trim();
+ 
+       var aboutWrap = document.createElement('div');
+@@ -1833,6 +1834,17 @@
+       versionMessage.textContent = 'Version: ' + releaseVersion;
+       aboutWrap.appendChild(versionMessage);
+ 
++      var releaseNotesMessage = document.createElement('p');
++      releaseNotesMessage.className = 'modal-message modal-about-line';
++      var releaseNotesLink = document.createElement('a');
++      releaseNotesLink.className = 'modal-link';
++      releaseNotesLink.href = releaseNotesUrl;
++      releaseNotesLink.target = '_blank';
++      releaseNotesLink.rel = 'noopener noreferrer';
++      releaseNotesLink.textContent = 'Release Notes';
++      releaseNotesMessage.appendChild(releaseNotesLink);
++      aboutWrap.appendChild(releaseNotesMessage);
++
+       bodyNode.appendChild(aboutWrap);
+ 
+       requestAnimationFrame(function () {

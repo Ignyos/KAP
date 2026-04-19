@@ -1,24 +1,25 @@
-# Release v2026-04-14-21-12
+# Release v2026-04-19-20-21
 
 ## Overview
-This release adds an About experience in the main menu and improves how release version information is displayed in-app. It also updates the release workflow to use UTC-based version timestamps and adds post-push cleanup steps.
+This release improves day-to-day list and pantry workflows by reducing extra clicks and preserving context on the home screen. It also adds lightweight planning documentation for upcoming recipe work.
 
 ## New Features
-- **About Menu Option**: Adds an About action in the main menu for quick access to app information.
-- **About Dialog Content**: Adds an About modal that includes company attribution to Ignyos, a link to Ignyos.com, and the current app version.
+- **Work Tracking Document**: Adds a `WORK_IN_PROGRESS.md` file to track active UX tasks, bug fixes, and rollout status.
+- **Recipe Planning Draft**: Adds `recipe-feature-definition.md` as a working draft for recipe UX, behavior, and model planning.
+- **About Dialog Link**: Adds a Release Notes link in the About dialog for faster access to change history.
 
 ## Improvements
-- **Version Display Format**: Updates displayed release versions to a more readable date-time format.
-- **About Dialog Layout**: Centers About dialog text and improves spacing for clearer presentation.
+- **Main Page Accordions**: Allows multiple accordion sections to stay open at the same time.
+- **Home Screen Context**: Preserves and restores main page scroll position when leaving and returning to home.
+- **Crossed-Off Items Actions**: Replaces the crossed-off overflow menu with always-visible action buttons for deleting all crossed-off items and uncrossing all items.
 
 ## Bug Fixes
-- **No New User-Facing Fixes**: This release focuses on About dialog enhancements and release workflow updates.
+- **Pantry Item Re-Clicking**: Fixes an issue where quickly clicking the same Pantry & Fridge item could ignore the second click before quantity updated.
 
 ## Technical Changes
-- **UTC Release Versioning**: Updates release timestamp generation to use UTC so tags and release versions are consistent across environments.
-- **Post-Push Cleanup Automation**: Adds release workflow cleanup that clears docs content and removes RELEASE_NOTES.md after successful pushes.
-- **Release Notes File Recovery**: Adds automatic recreation of RELEASE_NOTES.md when missing at workflow start.
-- **UI Modal API Extension**: Adds a dedicated `ShowAboutModal` UI helper and wires it into main menu handling.
+- **Settings Persistence Keys**: Adds settings storage keys for expanded accordion sections and main page scroll position.
+- **Release Workflow Cleanup Step**: Removes post-push cleanup that deleted docs contents and `RELEASE_NOTES.md`.
+- **About Modal Config**: Extends About modal configuration to accept and render a release notes URL.
 
 ## Installation
 1. Clone or pull the latest code from the repository
@@ -29,4 +30,6 @@ This release adds an About experience in the main menu and improves how release 
 - LocalStorage and IndexedDB support for data persistence
 
 ## Documentation
-For feature documentation and usage guides, see [application-structure.md](application-structure.md).
+- See `WORK_IN_PROGRESS.md` for active UX tasks and implementation status.
+- See `recipe-feature-definition.md` for recipe feature planning notes.
+- For feature documentation and usage guides, see [application-structure.md](application-structure.md).

@@ -1810,6 +1810,7 @@
     return showModal(function (bodyNode, confirmButton) {
       var companyName = String(config.companyName || 'Ignyos').trim();
       var companyUrl = String(config.companyUrl || 'https://ignyos.com').trim();
+      var releaseNotesUrl = String(config.releaseNotesUrl || './RELEASE_NOTES.md').trim();
       var releaseVersion = String(config.releaseVersion || 'Unknown').trim();
 
       var aboutWrap = document.createElement('div');
@@ -1832,6 +1833,17 @@
       versionMessage.className = 'modal-message modal-about-line';
       versionMessage.textContent = 'Version: ' + releaseVersion;
       aboutWrap.appendChild(versionMessage);
+
+      var releaseNotesMessage = document.createElement('p');
+      releaseNotesMessage.className = 'modal-message modal-about-line';
+      var releaseNotesLink = document.createElement('a');
+      releaseNotesLink.className = 'modal-link';
+      releaseNotesLink.href = releaseNotesUrl;
+      releaseNotesLink.target = '_blank';
+      releaseNotesLink.rel = 'noopener noreferrer';
+      releaseNotesLink.textContent = 'Release Notes';
+      releaseNotesMessage.appendChild(releaseNotesLink);
+      aboutWrap.appendChild(releaseNotesMessage);
 
       bodyNode.appendChild(aboutWrap);
 

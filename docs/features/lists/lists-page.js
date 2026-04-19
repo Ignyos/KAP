@@ -315,44 +315,7 @@
     title.textContent = 'Crossed Off Items';
     header.appendChild(title);
 
-    var menuWrap = document.createElement('div');
-    menuWrap.className = 'detail-overflow-menu crossed-off-menu';
-
-    var menuTrigger = document.createElement('button');
-    menuTrigger.type = 'button';
-    menuTrigger.className = 'record-action-button detail-overflow-trigger';
-    menuTrigger.setAttribute('aria-haspopup', 'menu');
-    menuTrigger.setAttribute('aria-expanded', 'false');
-    menuTrigger.setAttribute('aria-label', 'Crossed off actions');
-
-    var menuDots = document.createElement('span');
-    menuDots.className = 'detail-overflow-dots';
-    menuDots.textContent = '\u2026';
-    menuTrigger.appendChild(menuDots);
-
-    var menuList = document.createElement('div');
-    menuList.className = 'detail-overflow-list';
-    menuList.setAttribute('role', 'menu');
-    menuList.style.display = 'none';
-
-    function closeMenu() {
-      menuList.style.display = 'none';
-      menuTrigger.setAttribute('aria-expanded', 'false');
-    }
-
-    function openMenu() {
-      menuList.style.display = 'grid';
-      menuTrigger.setAttribute('aria-expanded', 'true');
-    }
-
-    function toggleMenu(event) {
-      event.stopPropagation();
-      if (menuList.style.display === 'none') {
-        openMenu();
-      } else {
-        closeMenu();
-      }
-    }
+    section.appendChild(header);
 
     function deleteAllCrossedOff() {
       return Promise.resolve().then(async function () {
@@ -373,50 +336,6 @@
         });
     }
 
-    var deleteAllItem = document.createElement('button');
-    deleteAllItem.type = 'button';
-    deleteAllItem.className = 'detail-overflow-item detail-overflow-item--danger';
-    deleteAllItem.textContent = 'Delete all crossed-off';
-    deleteAllItem.setAttribute('role', 'menuitem');
-    deleteAllItem.addEventListener('click', function (event) {
-      event.stopPropagation();
-      closeMenu();
-      deleteAllCrossedOff();
-    });
-
-    var uncrossAllItem = document.createElement('button');
-    uncrossAllItem.type = 'button';
-    uncrossAllItem.className = 'detail-overflow-item';
-    uncrossAllItem.textContent = 'Uncross-off all';
-    uncrossAllItem.setAttribute('role', 'menuitem');
-    uncrossAllItem.addEventListener('click', function (event) {
-      event.stopPropagation();
-      closeMenu();
-      uncrossOffAll();
-    });
-
-    menuList.appendChild(deleteAllItem);
-    menuList.appendChild(uncrossAllItem);
-
-    menuTrigger.addEventListener('click', toggleMenu);
-
-    detailShell.addEventListener('click', function (event) {
-      if (!menuWrap.contains(event.target)) {
-        closeMenu();
-      }
-    });
-
-    detailShell.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') {
-        closeMenu();
-      }
-    });
-
-    menuWrap.appendChild(menuTrigger);
-    menuWrap.appendChild(menuList);
-    header.appendChild(menuWrap);
-    section.appendChild(header);
-
     if (crossedOffItems.length === 0) {
       var empty = document.createElement('p');
       empty.className = 'crossed-off-empty';
@@ -431,7 +350,48 @@
       });
 
       section.appendChild(crossedList);
+
     }
+
+    // Keep actions visible under the section; disable when there are no crossed-off items.
+    var buttonsContainer = document.createElement('div');
+    buttonsContainer.className = 'crossed-off-actions';
+
+    var hasCrossedOffItems = crossedOffItems.length > 0;
+
+    var deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'crossed-off-action-button crossed-off-action-delete';
+    deleteButton.textContent = 'Delete all crossed-off';
+    deleteButton.disabled = !hasCrossedOffItems;
+    deleteButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
+    deleteButton.addEventListener('click', function (event) {
+      event.stopPropagation();
+      if (!hasCrossedOffItems) {
+        return;
+      }
+
+      deleteAllCrossedOff();
+    });
+
+    var uncrossButton = document.createElement('button');
+    uncrossButton.type = 'button';
+    uncrossButton.className = 'crossed-off-action-button crossed-off-action-uncross';
+    uncrossButton.textContent = 'Uncross-off all items';
+    uncrossButton.disabled = !hasCrossedOffItems;
+    uncrossButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
+    uncrossButton.addEventListener('click', function (event) {
+      event.stopPropagation();
+      if (!hasCrossedOffItems) {
+        return;
+      }
+
+      uncrossOffAll();
+    });
+
+    buttonsContainer.appendChild(deleteButton);
+    buttonsContainer.appendChild(uncrossButton);
+    section.appendChild(buttonsContainer);
 
     detailShell.appendChild(section);
   }

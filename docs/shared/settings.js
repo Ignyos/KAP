@@ -5,6 +5,8 @@
     ACTIVE_TAB: 'activeTab',
     ACTIVE_DETAIL_IDS_BY_TAB: 'activeDetailIdsByTab',
     EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection',
+    EXPANDED_ACCORDION_SECTIONS: 'expandedAccordionSections',
+    MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
     CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord'
   };
 
@@ -16,6 +18,8 @@
       recipes: null
     },
     expandedAccordionSection: null,
+    expandedAccordionSections: [],
+    mainPageScrollTop: 0,
     categoryViewByRecord: {
       lists: {},
       templates: {}

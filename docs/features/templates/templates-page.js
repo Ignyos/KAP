@@ -1,4 +1,6 @@
 (function () {
+  var isProcessingTemplateItemClick = false;
+
   async function showError(message) {
     await window.KaPUI.ShowAlert({ title: 'Error', message: message });
   }
@@ -207,6 +209,20 @@
   }
 
   async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
+    // Prevent rapid duplicate clicks from causing state sync issues
+    if (isProcessingTemplateItemClick) {
+      return;
+    }
+    isProcessingTemplateItemClick = true;
+
+    try {
+      await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
+    } finally {
+      isProcessingTemplateItemClick = false;
+    }
+  }
+
+  async function addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks) {
     var activeTemplateRecord = templateRecord;
 
     if (!templateRecord.targetListId) {
