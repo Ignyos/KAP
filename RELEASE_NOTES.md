@@ -1,25 +1,20 @@
-# Release v2026-04-19-20-21
+# Release v2026-04-19-20-30
 
 ## Overview
-This release improves day-to-day list and pantry workflows by reducing extra clicks and preserving context on the home screen. It also adds lightweight planning documentation for upcoming recipe work.
+This release focuses on improving Pantry & Fridge item click reliability when adding items to a target Grocery List. Rapid repeated clicks now process more consistently.
 
 ## New Features
-- **Work Tracking Document**: Adds a `WORK_IN_PROGRESS.md` file to track active UX tasks, bug fixes, and rollout status.
-- **Recipe Planning Draft**: Adds `recipe-feature-definition.md` as a working draft for recipe UX, behavior, and model planning.
-- **About Dialog Link**: Adds a Release Notes link in the About dialog for faster access to change history.
+- **No New Features**: This release focuses on a targeted Pantry & Fridge interaction fix.
 
 ## Improvements
-- **Main Page Accordions**: Allows multiple accordion sections to stay open at the same time.
-- **Home Screen Context**: Preserves and restores main page scroll position when leaving and returning to home.
-- **Crossed-Off Items Actions**: Replaces the crossed-off overflow menu with always-visible action buttons for deleting all crossed-off items and uncrossing all items.
+- **Pantry & Fridge Click Handling**: Improves repeated click handling so quick taps on the same item are processed in order.
 
 ## Bug Fixes
-- **Pantry Item Re-Clicking**: Fixes an issue where quickly clicking the same Pantry & Fridge item could ignore the second click before quantity updated.
+- **Pantry Item Re-Clicking**: Fixes an issue where the second rapid click on a Pantry & Fridge item could be ignored, requiring a third click to apply the next quantity update.
 
 ## Technical Changes
-- **Settings Persistence Keys**: Adds settings storage keys for expanded accordion sections and main page scroll position.
-- **Release Workflow Cleanup Step**: Removes post-push cleanup that deleted docs contents and `RELEASE_NOTES.md`.
-- **About Modal Config**: Extends About modal configuration to accept and render a release notes URL.
+- **Queued Click Processing**: Replaces single in-progress click blocking with per-item queued click processing for target-list adds.
+- **Template State Refresh**: Reads the latest template record before applying add-to-list actions to avoid stale target-list state.
 
 ## Installation
 1. Clone or pull the latest code from the repository
