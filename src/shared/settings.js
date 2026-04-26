@@ -7,7 +7,8 @@
     EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection',
     EXPANDED_ACCORDION_SECTIONS: 'expandedAccordionSections',
     MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
-    CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord'
+    CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord',
+    TEXT_SIZE: 'textSize'
   };
 
   var defaults = {
@@ -23,7 +24,8 @@
     categoryViewByRecord: {
       lists: {},
       templates: {}
-    }
+    },
+    textSize: 'small'
   };
 
   function getKey(name) {
@@ -49,9 +51,16 @@
     localStorage.setItem(key, JSON.stringify(value));
   }
 
+  var TEXT_SIZE_PX = { small: '16px', medium: '18px', large: '20px' };
+
+  function applyTextSize(size) {
+    document.documentElement.style.fontSize = TEXT_SIZE_PX[size] || TEXT_SIZE_PX.medium;
+  }
+
   window.KaPSettings = {
     KEYS: KEYS,
     get: get,
-    set: set
+    set: set,
+    applyTextSize: applyTextSize
   };
 })();
