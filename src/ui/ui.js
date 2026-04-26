@@ -548,8 +548,18 @@
         confirmButton.classList.add('modal-button--primary');
       }
 
-      if (config.showCancel === false) {
-        cancelButton.hidden = true;
+      var hidingCancel = config.showCancel === false;
+      var hidingConfirm = config.showConfirm === false;
+
+      if (hidingCancel) {
+        cancelButton.style.display = 'none';
+      }
+      if (hidingConfirm) {
+        confirmButton.style.display = 'none';
+      }
+      if (hidingCancel && hidingConfirm) {
+        titleNode.style.gridColumn = '1 / -1';
+        titleNode.style.textAlign = 'center';
       }
 
       var getValue = setupBody(bodyNode, confirmButton, cancelButton);
@@ -2299,7 +2309,7 @@
     return showModal(function (bodyNode, confirmButton) {
       var companyName = String(config.companyName || 'Ignyos').trim();
       var companyUrl = String(config.companyUrl || 'https://ignyos.com').trim();
-      var releaseNotesUrl = String(config.releaseNotesUrl || './RELEASE_NOTES.md').trim();
+      var releaseNotesUrl = String(config.releaseNotesUrl || 'https://github.com/Ignyos/KAP/releases').trim();
       var releaseVersion = String(config.releaseVersion || 'Unknown').trim();
 
       var aboutWrap = document.createElement('div');
@@ -2336,16 +2346,12 @@
 
       bodyNode.appendChild(aboutWrap);
 
-      requestAnimationFrame(function () {
-        confirmButton.focus();
-      });
-
       return function () { return true; };
     }, {
       title: config.title || 'About',
-      confirmLabel: config.confirmLabel || 'OK',
       cancelValue: null,
       showCancel: false,
+      showConfirm: false,
       isDanger: false,
       compact: true
     });

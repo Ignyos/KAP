@@ -655,6 +655,27 @@
     return normalizeVersionRecord(version);
   }
 
+  async function deleteRecipeVersion(recipeId, versionId) {
+    await ensureRecipeHasVersion(recipeId);
+    var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
+    if (!version || version.recipeId !== recipeId) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var versions = await getRecipeVersions(recipeId);
+    if (versions.length <= 1) {
+      throw new Error('At least one version must remain.');
+    }
+
+    var latestVersion = versions[versions.length - 1];
+    if (latestVersion && latestVersion.id === version.id) {
+      throw new Error('Current version cannot be deleted.');
+    }
+
+    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version.id);
+    return true;
+  }
+
   async function cloneRecipe(recipeId, sourceVersionId, cloneName) {
     var sourceRecipe = await requireRecipeById(recipeId);
     var sourceVersion = sourceVersionId
@@ -703,6 +724,7 @@
     getRecipeVersionByNumber: getRecipeVersionByNumber,
     createNewVersion: createNewVersion,
     updateVersionNote: updateVersionNote,
+    deleteRecipeVersion: deleteRecipeVersion,
     cloneRecipe: cloneRecipe
   };
 })();
