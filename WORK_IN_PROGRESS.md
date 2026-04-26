@@ -10,6 +10,59 @@
 
 ## Active Issues and Tasks
 
+### Task 6: Recipe Versions Accordion in Recipe Detail
+
+**Status:** 🚧 IN PROGRESS
+
+**Description**
+Replace recipe version actions hidden in the detail overflow menu with a dedicated Versions accordion directly below the recipe detail header.
+
+**Current Behavior**
+- Recipe detail exposes version actions through the overflow menu.
+- Version selection uses prompt-based entry.
+- Version note is shown in the summary card but not as an always-available editable area.
+- Clone uses a fixed generated name and does not explain clone behavior inline.
+
+**Desired Behavior**
+- Add a Versions accordion directly below the detail header.
+- Collapsed summary row shows `Versions` and `vN (Current) • X total`.
+- Accordion body includes:
+  1. Version dropdown sorted newest-to-oldest.
+  2. Note access action for the selected version.
+  3. New Version primary action.
+  4. Always-available version note editing with explicit Save.
+  5. Clone Recipe action with explanatory tooltip.
+- Remove version-specific actions from the detail overflow menu.
+- Remove separate Edit Recipe action from the detail overflow menu.
+- Keep recipe content editable only when the latest version is selected.
+- Keep Delete confirmation in the detail overflow menu.
+
+**Implementation Notes**
+- Accordion expansion is remembered per recipe for the current browser session.
+- First open for a recipe in a session defaults to expanded.
+- New Version always creates the next numeric version from the currently selected version's effective state.
+- New Version keeps the accordion open and focuses the version note editor.
+- Clone prompts for a name with default `<recipe name> - copy` and preserves the existing clone note behavior.
+- Reviewable version note history is not part of this task and remains a follow-up requirement.
+
+**Acceptance Checks**
+- [ ] Versions accordion renders directly below the recipe detail header.
+- [ ] Overflow menu no longer contains Select Version, Version Note, New Version, Clone Recipe, or Edit.
+- [ ] Version dropdown is sorted newest-to-oldest and loads the selected version immediately.
+- [ ] Older versions render recipe content read-only.
+- [ ] New Version creates the next version from the selected version and focuses the note editor.
+- [ ] Version note can be saved empty and shows `No note yet.` when blank.
+- [ ] Clone Recipe opens with default name `<recipe name> - copy` and explanatory tooltip text.
+- [ ] Delete remains available with confirmation.
+
+**Code References**
+- [src/features/recipes/recipes-page.js](src/features/recipes/recipes-page.js) - recipe detail versions UI
+- [src/features/recipes/recipes-service.js](src/features/recipes/recipes-service.js) - clone naming support and version actions
+- [src/ui/ui.js](src/ui/ui.js) - clone naming modal
+- [src/styles.css](src/styles.css) - recipe versions accordion styling
+
+---
+
 ### Task 1: Multiple Open Accordions on Main Page
 
 **Status:** ✅ COMPLETED
@@ -183,4 +236,5 @@ When clicking an item in a Pantry & Fridge (template) list more than once in qui
 
 ## Session Log
 
+- **2026-04-25:** Added Task 6 for replacing recipe version menu actions with a dedicated Versions accordion in recipe detail.
 - **2026-04-19:** Added five tasks: multiple open accordions, scroll persistence, sticky headers, crossed-off items buttons, template item click bug.

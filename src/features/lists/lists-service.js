@@ -138,7 +138,9 @@
   async function getListItemCount(listId) {
     await requireListById(listId);
     var joinRecords = await readJoinRecordsByListId(listId);
-    return joinRecords.length;
+    return joinRecords.filter(function (joinRecord) {
+      return joinRecord.isCrossedOff !== true;
+    }).length;
   }
 
   async function addItemToList(listId, itemId, name, quantity, description) {
@@ -234,23 +236,6 @@
     return crossedOffItems.length;
   }
 
-  async function uncrossOffAllItems(listId) {
-    await requireListById(listId);
-    var joinRecords = await readJoinRecordsByListId(listId);
-
-    var crossedOffItems = joinRecords.filter(function (record) {
-      return record && record.isCrossedOff === true;
-    });
-
-    await Promise.all(crossedOffItems.map(function (record) {
-      record.isCrossedOff = false;
-      record.crossedOffAt = '';
-      return window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, record);
-    }));
-
-    return crossedOffItems.length;
-  }
-
   async function decrementListItemQuantity(listId, listItemId) {
     await requireListById(listId);
     var existing = await findJoinRecordById(listId, listItemId);
@@ -277,7 +262,6 @@
     incrementListItemQuantity: incrementListItemQuantity,
     decrementListItemQuantity: decrementListItemQuantity,
     setListItemCrossedOff: setListItemCrossedOff,
-    deleteCrossedOffItems: deleteCrossedOffItems,
-    uncrossOffAllItems: uncrossOffAllItems
+    deleteCrossedOffItems: deleteCrossedOffItems
   };
 })();

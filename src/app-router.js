@@ -9,7 +9,7 @@
   function getHashRoutePath() {
     var rawHash = String(window.location.hash || '').replace(/^#/, '');
 
-    // Preferred format: #kap/list/:id, #kap/template/:id, #kap/
+    // Preferred format: #kap/list/:id, #kap/template/:id, #kap/recipe/:id, #kap/
     if (rawHash.indexOf(HASH_PREFIX + '/') === 0) {
       return '/' + rawHash.slice(HASH_PREFIX.length + 1);
     }
@@ -26,7 +26,7 @@
     var hash = getHashRoutePath();
     var match;
 
-    // Match routes: /, /list/:id, /template/:id
+    // Match routes: /, /list/:id, /template/:id, /recipe/:id
     if (hash === '/' || hash === '') {
       return { view: 'home', id: null };
     }
@@ -41,6 +41,12 @@
     match = hash.match(/^\/template\/(.+)$/);
     if (match) {
       return { view: 'template', id: match[1] };
+    }
+
+    // /recipe/:id
+    match = hash.match(/^\/recipe\/(.+)$/);
+    if (match) {
+      return { view: 'recipe', id: match[1] };
     }
 
     // /settings

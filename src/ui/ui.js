@@ -314,11 +314,13 @@
       if (showPill) {
         qtyPillNode.textContent = String(qty);
         qtyPillNode.style.display = '';
-      } else if (hasQtyControls) {
-        qtyPillNode.style.display = 'none';
+        qtyPillNode.style.visibility = 'visible';
+        qtyPillNode.setAttribute('aria-hidden', 'false');
       } else {
-        qtyPillNode.remove();
-        qtyPillNode = null;
+        qtyPillNode.textContent = '';
+        qtyPillNode.style.display = '';
+        qtyPillNode.style.visibility = 'hidden';
+        qtyPillNode.setAttribute('aria-hidden', 'true');
       }
     }
 
@@ -813,6 +815,10 @@
           var selectButton = document.createElement('button');
           selectButton.type = 'button';
           selectButton.className = 'modal-suggestion-main';
+          if (isInCurrentContext) {
+            selectButton.disabled = true;
+            selectButton.setAttribute('aria-disabled', 'true');
+          }
 
           var content = document.createElement('div');
           content.className = 'modal-suggestion-content';
@@ -837,6 +843,10 @@
           }
 
           selectButton.addEventListener('click', function () {
+            if (isInCurrentContext) {
+              return;
+            }
+
             selectedItem = item;
             nameInput.value = item.name;
             if (categoryInput) {
@@ -896,13 +906,17 @@
             ? await options.getAllItems()
             : [];
           selectedItem = null;
-          currentSuggestions = sortItemsByName(currentSuggestions);
+          currentSuggestions = sortItemsByName(currentSuggestions).filter(function (item) {
+            return !isItemInCurrentContext(item.id);
+          });
           renderSuggestions();
           return;
         }
 
         currentSuggestions = await options.searchItems(query);
-        currentSuggestions = sortItemsByName(currentSuggestions);
+        currentSuggestions = sortItemsByName(currentSuggestions).filter(function (item) {
+          return !isItemInCurrentContext(item.id);
+        });
 
         if (selectedItem && normalizeName(selectedItem.name) !== normalizeName(nameInput.value)) {
           selectedItem = null;
@@ -1760,6 +1774,481 @@
     });
   }
 
+  function ShowAddToListModal(config) {
+    // config: { recipeName, ingredients, getAllLists }
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = 'Add to Grocery List';
+      confirmButton.textContent = 'Add';
+      card.setAttribute('aria-label', 'Add to Grocery List');
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      // ---- Ingredients ----
+      var ingredientsLabel = document.createElement('span');
+      ingredientsLabel.className = 'modal-field-label';
+      ingredientsLabel.textContent = 'Ingredients';
+      form.appendChild(ingredientsLabel);
+
+      var ingredientList = document.createElement('div');
+      ingredientList.className = 'modal-checklist';
+
+      var checkboxes = [];
+      (config.ingredients || []).forEach(function (ingredient) {
+        var row = document.createElement('label');
+        row.className = 'modal-checklist-row';
+
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.className = 'modal-checklist-checkbox';
+
+        var nameNode = document.createElement('span');
+        nameNode.className = 'modal-checklist-name';
+        nameNode.textContent = ingredient.name;
+
+        row.appendChild(checkbox);
+        row.appendChild(nameNode);
+        ingredientList.appendChild(row);
+        checkboxes.push({ checkbox: checkbox, ingredient: ingredient });
+      });
+
+      form.appendChild(ingredientList);
+
+      // ---- List mode toggle ----
+      var listLabel = document.createElement('span');
+      listLabel.className = 'modal-field-label';
+      listLabel.textContent = 'Target List';
+      form.appendChild(listLabel);
+
+      var toggleGroup = document.createElement('div');
+      toggleGroup.className = 'modal-toggle-group';
+
+      var existingButton = document.createElement('button');
+      existingButton.type = 'button';
+      existingButton.className = 'modal-toggle-button is-active';
+      existingButton.textContent = 'Existing List';
+
+      var newButton = document.createElement('button');
+      newButton.type = 'button';
+      newButton.className = 'modal-toggle-button';
+      newButton.textContent = 'New List';
+
+      toggleGroup.appendChild(existingButton);
+      toggleGroup.appendChild(newButton);
+      form.appendChild(toggleGroup);
+
+      // ---- Existing list section ----
+      var existingSection = document.createElement('div');
+
+      var targetInputWrapper = document.createElement('div');
+      targetInputWrapper.className = 'modal-input-wrapper';
+
+      var targetInput = document.createElement('input');
+      targetInput.type = 'text';
+      targetInput.className = 'modal-input';
+      targetInput.placeholder = 'Search grocery lists';
+
+      var targetSuggestionsList = document.createElement('div');
+      targetSuggestionsList.className = 'modal-suggestions';
+      targetSuggestionsList.hidden = true;
+
+      targetInputWrapper.appendChild(targetInput);
+      targetInputWrapper.appendChild(targetSuggestionsList);
+      existingSection.appendChild(targetInputWrapper);
+      form.appendChild(existingSection);
+
+      // ---- New list section ----
+      var newSection = document.createElement('div');
+      newSection.hidden = true;
+
+      var newListInput = document.createElement('input');
+      newListInput.type = 'text';
+      newListInput.className = 'modal-input';
+      newListInput.value = config.recipeName || '';
+      newListInput.placeholder = 'New list name';
+      newSection.appendChild(newListInput);
+      form.appendChild(newSection);
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+
+      bodyNode.appendChild(form);
+
+      // ---- State ----
+      var mode = 'existing';
+      var selectedList = null;
+      var currentSuggestions = [];
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        existingButton.classList.toggle('is-active', mode === 'existing');
+        newButton.classList.toggle('is-active', mode === 'new');
+        existingSection.hidden = mode !== 'existing';
+        newSection.hidden = mode !== 'new';
+        errorNode.textContent = '';
+        if (mode === 'existing') {
+          targetInput.focus();
+        } else {
+          newListInput.focus();
+          newListInput.select();
+        }
+      }
+
+      existingButton.addEventListener('click', function () { setMode('existing'); });
+      newButton.addEventListener('click', function () { setMode('new'); });
+
+      // ---- Suggestions ----
+      function renderSuggestions() {
+        targetSuggestionsList.replaceChildren();
+        var query = String(targetInput.value || '').trim().toLowerCase();
+        var filtered = currentSuggestions.filter(function (list) {
+          return !query || String(list.name || '').toLowerCase().indexOf(query) !== -1;
+        });
+
+        if (filtered.length === 0) {
+          targetSuggestionsList.hidden = true;
+          return;
+        }
+
+        targetSuggestionsList.hidden = false;
+        filtered.slice(0, 8).forEach(function (list) {
+          var row = document.createElement('div');
+          row.className = 'modal-suggestion-row';
+
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'modal-suggestion-main';
+
+          var content = document.createElement('div');
+          content.className = 'modal-suggestion-content';
+
+          var nameNode = document.createElement('div');
+          nameNode.className = 'modal-suggestion-name';
+          nameNode.textContent = list.name;
+          content.appendChild(nameNode);
+          btn.appendChild(content);
+
+          btn.addEventListener('click', function () {
+            selectedList = { id: list.id, name: list.name };
+            targetInput.value = list.name;
+            currentSuggestions = [];
+            renderSuggestions();
+            errorNode.textContent = '';
+          });
+
+          row.appendChild(btn);
+          targetSuggestionsList.appendChild(row);
+        });
+      }
+
+      function loadSuggestions() {
+        return Promise.resolve(config.getAllLists ? config.getAllLists() : []).then(function (lists) {
+          currentSuggestions = (lists || []).slice().sort(function (a, b) {
+            return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+          });
+          renderSuggestions();
+        });
+      }
+
+      function closeSuggestions() {
+        currentSuggestions = [];
+        renderSuggestions();
+      }
+
+      targetInput.addEventListener('focus', function () {
+        loadSuggestions().catch(function () {});
+      });
+      targetInput.addEventListener('input', function () {
+        selectedList = null;
+        loadSuggestions().catch(function () {});
+      });
+
+      // ---- Validate & close ----
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('click', onDocumentClick);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function validateAndClose() {
+        errorNode.textContent = '';
+
+        var selectedIngredients = checkboxes
+          .filter(function (item) { return item.checkbox.checked; })
+          .map(function (item) { return item.ingredient; });
+
+        if (selectedIngredients.length === 0) {
+          errorNode.textContent = 'Select at least one ingredient.';
+          return;
+        }
+
+        if (mode === 'new') {
+          var newName = String(newListInput.value || '').trim();
+          if (!newName) {
+            errorNode.textContent = 'List name is required.';
+            newListInput.focus();
+            return;
+          }
+          close({ selectedIngredients: selectedIngredients, isNewList: true, newListName: newName, targetListId: null });
+          return;
+        }
+
+        var typedName = String(targetInput.value || '').trim();
+        if (!typedName) {
+          errorNode.textContent = 'Select a grocery list.';
+          targetInput.focus();
+          return;
+        }
+
+        if (!selectedList || String(selectedList.name || '').trim().toLowerCase() !== typedName.toLowerCase()) {
+          errorNode.textContent = 'Select a list from the suggestions.';
+          targetInput.focus();
+          return;
+        }
+
+        close({ selectedIngredients: selectedIngredients, isNewList: false, newListName: null, targetListId: selectedList.id });
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          if (!targetSuggestionsList.hidden) {
+            closeSuggestions();
+            return;
+          }
+          close(null);
+        }
+      }
+
+      function onDocumentClick(event) {
+        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
+          closeSuggestions();
+        }
+      }
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { close(null); }
+      });
+      cancelButton.addEventListener('click', function () { close(null); });
+      confirmButton.addEventListener('click', function () { validateAndClose(); });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('click', onDocumentClick);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        targetInput.focus();
+        loadSuggestions().catch(function () {});
+      });
+    });
+  }
+
+  function ShowNewVersionModal(config) {
+    // config: { availableVersions, defaultVersionNumber, latestVersionNumber }
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = 'New Version';
+      confirmButton.textContent = 'Create';
+      card.setAttribute('aria-label', 'New Version');
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var baseLabel = document.createElement('label');
+      baseLabel.className = 'modal-field-label';
+      baseLabel.textContent = 'Base new version on';
+      form.appendChild(baseLabel);
+
+      var baseSelect = document.createElement('select');
+      baseSelect.className = 'modal-input';
+
+      var versions = (config.availableVersions || []).slice().sort(function (a, b) {
+        return Number(b.versionNumber || 0) - Number(a.versionNumber || 0);
+      });
+      versions.forEach(function (version) {
+        var option = document.createElement('option');
+        option.value = String(version.versionNumber);
+        var label = 'Version ' + version.versionNumber;
+        if (version.versionNumber === config.latestVersionNumber) {
+          label += ' (Current)';
+        }
+        option.textContent = label;
+        option.selected = version.versionNumber === config.defaultVersionNumber;
+        baseSelect.appendChild(option);
+      });
+
+      form.appendChild(baseSelect);
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          close(null);
+        }
+      }
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      cancelButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      confirmButton.addEventListener('click', function () {
+        close({ baseVersionNumber: Number(baseSelect.value) });
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        baseSelect.focus();
+      });
+    });
+  }
+
+  function ShowRecipeCloneModal(config) {
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = config.title || 'Clone Recipe';
+      confirmButton.textContent = config.confirmLabel || 'Clone';
+      card.setAttribute('aria-label', titleNode.textContent);
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var nameLabel = document.createElement('label');
+      nameLabel.className = 'modal-field-label';
+      nameLabel.textContent = 'Recipe name';
+      form.appendChild(nameLabel);
+
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'modal-input';
+      nameInput.value = config.initialName || '';
+      form.appendChild(nameInput);
+
+      var infoRow = document.createElement('div');
+      infoRow.className = 'modal-inline-info';
+
+      var infoText = document.createElement('p');
+      infoText.className = 'modal-message modal-inline-info-text';
+      infoText.textContent = 'Clones start as a separate recipe with their own history.';
+      infoRow.appendChild(infoText);
+
+      var infoWrap = document.createElement('span');
+      infoWrap.className = 'accordion-info-wrap';
+
+      var infoButton = document.createElement('button');
+      infoButton.type = 'button';
+      infoButton.className = 'accordion-info-icon';
+      infoButton.textContent = '?';
+      infoButton.setAttribute('aria-label', 'About recipe cloning');
+      infoWrap.appendChild(infoButton);
+
+      var infoTooltip = document.createElement('span');
+      infoTooltip.className = 'accordion-info-tooltip';
+      infoTooltip.textContent = config.infoText || '';
+      infoWrap.appendChild(infoTooltip);
+      infoRow.appendChild(infoWrap);
+      form.appendChild(infoRow);
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function validateAndClose() {
+        var trimmedName = String(nameInput.value || '').trim();
+        if (!trimmedName) {
+          errorNode.textContent = 'Recipe name is required.';
+          nameInput.focus();
+          return;
+        }
+
+        close({ name: trimmedName });
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          close(null);
+          return;
+        }
+
+        if (event.key === 'Enter' && event.target === nameInput) {
+          event.preventDefault();
+          validateAndClose();
+        }
+      }
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      cancelButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      confirmButton.addEventListener('click', function () {
+        validateAndClose();
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        nameInput.focus();
+        nameInput.select();
+      });
+    });
+  }
+
   function ShowConfirm(config) {
     return showModal(function (bodyNode, confirmButton, cancelButton) {
       if (config.message) {
@@ -1880,8 +2369,13 @@
     ShowTemplateConfigModal: ShowTemplateConfigModal,
     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,
+    ShowAddToListModal: ShowAddToListModal,
+    ShowNewVersionModal: ShowNewVersionModal,
+    ShowRecipeCloneModal: ShowRecipeCloneModal,
     ShowConfirm: ShowConfirm,
     ShowAlert: ShowAlert,
-    ShowAboutModal: ShowAboutModal
+    ShowAboutModal: ShowAboutModal,
+    SetActiveOverflowMenu: setActiveOverflowMenu,
+    ShouldOpenOverflowUp: shouldOpenOverflowUp
   };
 })();

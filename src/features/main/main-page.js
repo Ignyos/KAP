@@ -17,15 +17,9 @@
     {
       id: 'recipes',
       label: 'Recipes',
-      isComingSoon: true,
-      getAllFn: function () { return Promise.resolve([]); },
-      renderDetailFn: function () { return Promise.resolve(); },
-      createFn: function () {
-        return window.KaPUI.ShowAlert({
-          title: 'Recipes',
-          message: 'Recipes are coming soon.'
-        });
-      }
+      getAllFn: function () { return window.KaPRecipesService.getAllRecipes(); },
+      renderDetailFn: function (container, record, hooks) { return window.KaPRecipesPage.renderDetailInto(container, record, hooks); },
+      createFn: function () { return window.KaPRecipesPage.createRecipe(); }
     }
   ];
 
@@ -90,6 +84,10 @@
       return '/template/' + route.id;
     }
 
+    if (route.view === 'recipe' && route.id) {
+      return '/recipe/' + route.id;
+    }
+
     return '/';
   }
 
@@ -123,6 +121,10 @@
     } else if (route.view === 'template' && route.id) {
       renderTemplateDetail(route.id).catch(function (error) {
         console.error('Error rendering template detail:', error);
+      });
+    } else if (route.view === 'recipe' && route.id) {
+      renderRecipeDetail(route.id).catch(function (error) {
+        console.error('Error rendering recipe detail:', error);
       });
     }
   }
@@ -366,6 +368,8 @@
       window.KaPRouter.navigate('/list/' + record.id);
     } else if (section.id === 'templates') {
       window.KaPRouter.navigate('/template/' + record.id);
+    } else if (section.id === 'recipes') {
+      window.KaPRouter.navigate('/recipe/' + record.id);
     }
   }
 
@@ -391,6 +395,19 @@
       renderDetailPage(record, 'templates');
     } catch (error) {
       console.error('Error loading template:', error);
+      window.KaPRouter.navigate('/');
+    }
+  }
+
+  async function renderRecipeDetail(recipeId) {
+    try {
+      var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeId);
+      if (!record || record.type !== 'Recipe') {
+        throw new Error('Recipe not found');
+      }
+      renderDetailPage(record, 'recipes');
+    } catch (error) {
+      console.error('Error loading recipe:', error);
       window.KaPRouter.navigate('/');
     }
   }
