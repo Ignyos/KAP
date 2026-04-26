@@ -1,0 +1,3269 @@
+Release timestamp: 2026-04-26-15-09
+Diff source: 2026-04-19-20-30..HEAD
+Generated at: 2026-04-26 11:09:04Z
+diff --git a/RELEASE_NOTES.md b/RELEASE_NOTES.md
+index 0222c24..e69de29 100644
+--- a/RELEASE_NOTES.md
++++ b/RELEASE_NOTES.md
+@@ -1,30 +0,0 @@
+-# Release v2026-04-19-20-30
+-
+-## Overview
+-This release focuses on improving Pantry & Fridge item click reliability when adding items to a target Grocery List. Rapid repeated clicks now process more consistently.
+-
+-## New Features
+-- **No New Features**: This release focuses on a targeted Pantry & Fridge interaction fix.
+-
+-## Improvements
+-- **Pantry & Fridge Click Handling**: Improves repeated click handling so quick taps on the same item are processed in order.
+-
+-## Bug Fixes
+-- **Pantry Item Re-Clicking**: Fixes an issue where the second rapid click on a Pantry & Fridge item could be ignored, requiring a third click to apply the next quantity update.
+-
+-## Technical Changes
+-- **Queued Click Processing**: Replaces single in-progress click blocking with per-item queued click processing for target-list adds.
+-- **Template State Refresh**: Reads the latest template record before applying add-to-list actions to avoid stale target-list state.
+-
+-## Installation
+-1. Clone or pull the latest code from the repository
+-2. Open src/index.html or docs/index.html in a web browser
+-
+-## Requirements
+-- Modern web browser with ES5 JavaScript support
+-- LocalStorage and IndexedDB support for data persistence
+-
+-## Documentation
+-- See `WORK_IN_PROGRESS.md` for active UX tasks and implementation status.
+-- See `recipe-feature-definition.md` for recipe feature planning notes.
+-- For feature documentation and usage guides, see [application-structure.md](application-structure.md).
+diff --git a/WORK_IN_PROGRESS.md b/WORK_IN_PROGRESS.md
+index 9d13e5a..f250bfb 100644
+--- a/WORK_IN_PROGRESS.md
++++ b/WORK_IN_PROGRESS.md
+@@ -10,6 +10,59 @@
+ 
+ ## Active Issues and Tasks
+ 
++### Task 6: Recipe Versions Accordion in Recipe Detail
++
++**Status:** ≡ƒÜº IN PROGRESS
++
++**Description**
++Replace recipe version actions hidden in the detail overflow menu with a dedicated Versions accordion directly below the recipe detail header.
++
++**Current Behavior**
++- Recipe detail exposes version actions through the overflow menu.
++- Version selection uses prompt-based entry.
++- Version note is shown in the summary card but not as an always-available editable area.
++- Clone uses a fixed generated name and does not explain clone behavior inline.
++
++**Desired Behavior**
++- Add a Versions accordion directly below the detail header.
++- Collapsed summary row shows `Versions` and `vN (Current) ΓÇó X total`.
++- Accordion body includes:
++  1. Version dropdown sorted newest-to-oldest.
++  2. Note access action for the selected version.
++  3. New Version primary action.
++  4. Always-available version note editing with explicit Save.
++  5. Clone Recipe action with explanatory tooltip.
++- Remove version-specific actions from the detail overflow menu.
++- Remove separate Edit Recipe action from the detail overflow menu.
++- Keep recipe content editable only when the latest version is selected.
++- Keep Delete confirmation in the detail overflow menu.
++
++**Implementation Notes**
++- Accordion expansion is remembered per recipe for the current browser session.
++- First open for a recipe in a session defaults to expanded.
++- New Version always creates the next numeric version from the currently selected version's effective state.
++- New Version keeps the accordion open and focuses the version note editor.
++- Clone prompts for a name with default `<recipe name> - copy` and preserves the existing clone note behavior.
++- Reviewable version note history is not part of this task and remains a follow-up requirement.
++
++**Acceptance Checks**
++- [ ] Versions accordion renders directly below the recipe detail header.
++- [ ] Overflow menu no longer contains Select Version, Version Note, New Version, Clone Recipe, or Edit.
++- [ ] Version dropdown is sorted newest-to-oldest and loads the selected version immediately.
++- [ ] Older versions render recipe content read-only.
++- [ ] New Version creates the next version from the selected version and focuses the note editor.
++- [ ] Version note can be saved empty and shows `No note yet.` when blank.
++- [ ] Clone Recipe opens with default name `<recipe name> - copy` and explanatory tooltip text.
++- [ ] Delete remains available with confirmation.
++
++**Code References**
++- [src/features/recipes/recipes-page.js](src/features/recipes/recipes-page.js) - recipe detail versions UI
++- [src/features/recipes/recipes-service.js](src/features/recipes/recipes-service.js) - clone naming support and version actions
++- [src/ui/ui.js](src/ui/ui.js) - clone naming modal
++- [src/styles.css](src/styles.css) - recipe versions accordion styling
++
++---
++
+ ### Task 1: Multiple Open Accordions on Main Page
+ 
+ **Status:** Γ£à COMPLETED
+@@ -183,4 +236,5 @@ When clicking an item in a Pantry & Fridge (template) list more than once in qui
+ 
+ ## Session Log
+ 
++- **2026-04-25:** Added Task 6 for replacing recipe version menu actions with a dedicated Versions accordion in recipe detail.
+ - **2026-04-19:** Added five tasks: multiple open accordions, scroll persistence, sticky headers, crossed-off items buttons, template item click bug.
+diff --git a/src/app-router.js b/src/app-router.js
+index 6abf1d2..625a88c 100644
+--- a/src/app-router.js
++++ b/src/app-router.js
+@@ -9,7 +9,7 @@
+   function getHashRoutePath() {
+     var rawHash = String(window.location.hash || '').replace(/^#/, '');
+ 
+-    // Preferred format: #kap/list/:id, #kap/template/:id, #kap/
++    // Preferred format: #kap/list/:id, #kap/template/:id, #kap/recipe/:id, #kap/
+     if (rawHash.indexOf(HASH_PREFIX + '/') === 0) {
+       return '/' + rawHash.slice(HASH_PREFIX.length + 1);
+     }
+@@ -26,7 +26,7 @@
+     var hash = getHashRoutePath();
+     var match;
+ 
+-    // Match routes: /, /list/:id, /template/:id
++    // Match routes: /, /list/:id, /template/:id, /recipe/:id
+     if (hash === '/' || hash === '') {
+       return { view: 'home', id: null };
+     }
+@@ -43,6 +43,12 @@
+       return { view: 'template', id: match[1] };
+     }
+ 
++    // /recipe/:id
++    match = hash.match(/^\/recipe\/(.+)$/);
++    if (match) {
++      return { view: 'recipe', id: match[1] };
++    }
++
+     // /settings
+     if (hash === '/settings') {
+       return { view: 'settings', id: null };
+diff --git a/src/data/db.js b/src/data/db.js
+index 47a9c02..9c84753 100644
+--- a/src/data/db.js
++++ b/src/data/db.js
+@@ -1,6 +1,6 @@
+ (function () {
+   var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 3;
++  var DATABASE_VERSION = 5;
+ 
+   var state = {
+     db: null
+diff --git a/src/data/stores.js b/src/data/stores.js
+index 028969b..35897b6 100644
+--- a/src/data/stores.js
++++ b/src/data/stores.js
+@@ -3,7 +3,9 @@
+     LIST_RECORDS: 'listRecords',
+     ITEMS: 'items',
+     LIST_RECORD_ITEMS: 'listRecordItems',
+-    CATEGORIES: 'categories'
++    CATEGORIES: 'categories',
++    RECIPE_VERSIONS: 'recipeVersions',
++    RECIPE_INSTRUCTIONS: 'recipeInstructions'
+   };
+ 
+   var INDEX_NAMES = {
+@@ -12,7 +14,11 @@
+     ITEMS_BY_NAME: 'by_name',
+     LIST_RECORD_ITEMS_BY_LIST_RECORD_ID: 'by_list_record_id',
+     LIST_RECORD_ITEMS_BY_ITEM_ID: 'by_item_id',
+-    CATEGORIES_BY_NAME: 'by_name'
++    CATEGORIES_BY_NAME: 'by_name',
++    RECIPE_VERSIONS_BY_RECIPE_ID: 'by_recipe_id',
++    RECIPE_VERSIONS_BY_RECIPE_AND_VERSION: 'by_recipe_and_version',
++    RECIPE_INSTRUCTIONS_BY_RECIPE_ID: 'by_recipe_id',
++    RECIPE_INSTRUCTIONS_BY_RECIPE_AND_STEP: 'by_recipe_and_step'
+   };
+ 
+   function ensureStore(db, transaction, storeName, options) {
+@@ -43,6 +49,14 @@
+ 
+     var categoriesStore = ensureStore(db, transaction, STORE_NAMES.CATEGORIES, { keyPath: 'id' });
+     ensureIndex(categoriesStore, INDEX_NAMES.CATEGORIES_BY_NAME, 'name', { unique: false });
++
++    var recipeVersionsStore = ensureStore(db, transaction, STORE_NAMES.RECIPE_VERSIONS, { keyPath: 'id' });
++    ensureIndex(recipeVersionsStore, INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_ID, 'recipeId', { unique: false });
++    ensureIndex(recipeVersionsStore, INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_AND_VERSION, ['recipeId', 'versionNumber'], { unique: true });
++
++    var recipeInstructionsStore = ensureStore(db, transaction, STORE_NAMES.RECIPE_INSTRUCTIONS, { keyPath: 'id' });
++    ensureIndex(recipeInstructionsStore, INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_ID, 'recipeId', { unique: false });
++    ensureIndex(recipeInstructionsStore, INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_AND_STEP, ['recipeId', 'stepNumber'], { unique: false });
+   }
+ 
+   window.KaPStores = {
+diff --git a/src/features/lists/lists-page.js b/src/features/lists/lists-page.js
+index 5c5637c..152f85d 100644
+--- a/src/features/lists/lists-page.js
++++ b/src/features/lists/lists-page.js
+@@ -299,6 +299,10 @@
+   }
+ 
+   async function appendCrossedOffSection(container, listRecord, crossedOffItems, hooks) {
++    if (!crossedOffItems || crossedOffItems.length === 0) {
++      return;
++    }
++
+     var detailShell = container.querySelector('.detail-shell');
+     if (!detailShell) {
+       return;
+@@ -315,8 +319,6 @@
+     title.textContent = 'Crossed Off Items';
+     header.appendChild(title);
+ 
+-    section.appendChild(header);
+-
+     function deleteAllCrossedOff() {
+       return Promise.resolve().then(async function () {
+         await window.KaPListsService.deleteCrossedOffItems(listRecord.id);
+@@ -326,72 +328,26 @@
+       });
+     }
+ 
+-    function uncrossOffAll() {
+-      return window.KaPListsService.uncrossOffAllItems(listRecord.id)
+-        .then(async function () {
+-          await renderDetailInto(container, listRecord, hooks);
+-        })
+-        .catch(async function (error) {
+-          await showError(error.message || 'Unable to uncross-off items.');
+-        });
+-    }
+-
+-    if (crossedOffItems.length === 0) {
+-      var empty = document.createElement('p');
+-      empty.className = 'crossed-off-empty';
+-      empty.textContent = 'No crossed-off items.';
+-      section.appendChild(empty);
+-    } else {
+-      var crossedList = document.createElement('div');
+-      crossedList.className = 'detail-item-list crossed-off-item-list';
+-
+-      crossedOffItems.forEach(function (detailItem) {
+-        crossedList.appendChild(buildListDetailItemRow(listRecord, detailItem, container, hooks));
+-      });
+-
+-      section.appendChild(crossedList);
+-
+-    }
+-
+-    // Keep actions visible under the section; disable when there are no crossed-off items.
+-    var buttonsContainer = document.createElement('div');
+-    buttonsContainer.className = 'crossed-off-actions';
+-
+-    var hasCrossedOffItems = crossedOffItems.length > 0;
+-
+     var deleteButton = document.createElement('button');
+     deleteButton.type = 'button';
+     deleteButton.className = 'crossed-off-action-button crossed-off-action-delete';
+-    deleteButton.textContent = 'Delete all crossed-off';
+-    deleteButton.disabled = !hasCrossedOffItems;
+-    deleteButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
++    deleteButton.textContent = 'Clear Crossed-Off';
+     deleteButton.addEventListener('click', function (event) {
+       event.stopPropagation();
+-      if (!hasCrossedOffItems) {
+-        return;
+-      }
+-
+       deleteAllCrossedOff();
+     });
++    header.appendChild(deleteButton);
+ 
+-    var uncrossButton = document.createElement('button');
+-    uncrossButton.type = 'button';
+-    uncrossButton.className = 'crossed-off-action-button crossed-off-action-uncross';
+-    uncrossButton.textContent = 'Uncross-off all items';
+-    uncrossButton.disabled = !hasCrossedOffItems;
+-    uncrossButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
+-    uncrossButton.addEventListener('click', function (event) {
+-      event.stopPropagation();
+-      if (!hasCrossedOffItems) {
+-        return;
+-      }
++    section.appendChild(header);
++
++    var crossedList = document.createElement('div');
++    crossedList.className = 'detail-item-list crossed-off-item-list';
+ 
+-      uncrossOffAll();
++    crossedOffItems.forEach(function (detailItem) {
++      crossedList.appendChild(buildListDetailItemRow(listRecord, detailItem, container, hooks));
+     });
+ 
+-    buttonsContainer.appendChild(deleteButton);
+-    buttonsContainer.appendChild(uncrossButton);
+-    section.appendChild(buttonsContainer);
++    section.appendChild(crossedList);
+ 
+     detailShell.appendChild(section);
+   }
+diff --git a/src/features/lists/lists-service.js b/src/features/lists/lists-service.js
+index c7d5884..e26ed35 100644
+--- a/src/features/lists/lists-service.js
++++ b/src/features/lists/lists-service.js
+@@ -138,7 +138,9 @@
+   async function getListItemCount(listId) {
+     await requireListById(listId);
+     var joinRecords = await readJoinRecordsByListId(listId);
+-    return joinRecords.length;
++    return joinRecords.filter(function (joinRecord) {
++      return joinRecord.isCrossedOff !== true;
++    }).length;
+   }
+ 
+   async function addItemToList(listId, itemId, name, quantity, description) {
+@@ -234,23 +236,6 @@
+     return crossedOffItems.length;
+   }
+ 
+-  async function uncrossOffAllItems(listId) {
+-    await requireListById(listId);
+-    var joinRecords = await readJoinRecordsByListId(listId);
+-
+-    var crossedOffItems = joinRecords.filter(function (record) {
+-      return record && record.isCrossedOff === true;
+-    });
+-
+-    await Promise.all(crossedOffItems.map(function (record) {
+-      record.isCrossedOff = false;
+-      record.crossedOffAt = '';
+-      return window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, record);
+-    }));
+-
+-    return crossedOffItems.length;
+-  }
+-
+   async function decrementListItemQuantity(listId, listItemId) {
+     await requireListById(listId);
+     var existing = await findJoinRecordById(listId, listItemId);
+@@ -277,7 +262,6 @@
+     incrementListItemQuantity: incrementListItemQuantity,
+     decrementListItemQuantity: decrementListItemQuantity,
+     setListItemCrossedOff: setListItemCrossedOff,
+-    deleteCrossedOffItems: deleteCrossedOffItems,
+-    uncrossOffAllItems: uncrossOffAllItems
++    deleteCrossedOffItems: deleteCrossedOffItems
+   };
+ })();
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index d0185aa..b7caabe 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -17,15 +17,9 @@
+     {
+       id: 'recipes',
+       label: 'Recipes',
+-      isComingSoon: true,
+-      getAllFn: function () { return Promise.resolve([]); },
+-      renderDetailFn: function () { return Promise.resolve(); },
+-      createFn: function () {
+-        return window.KaPUI.ShowAlert({
+-          title: 'Recipes',
+-          message: 'Recipes are coming soon.'
+-        });
+-      }
++      getAllFn: function () { return window.KaPRecipesService.getAllRecipes(); },
++      renderDetailFn: function (container, record, hooks) { return window.KaPRecipesPage.renderDetailInto(container, record, hooks); },
++      createFn: function () { return window.KaPRecipesPage.createRecipe(); }
+     }
+   ];
+ 
+@@ -90,6 +84,10 @@
+       return '/template/' + route.id;
+     }
+ 
++    if (route.view === 'recipe' && route.id) {
++      return '/recipe/' + route.id;
++    }
++
+     return '/';
+   }
+ 
+@@ -124,6 +122,10 @@
+       renderTemplateDetail(route.id).catch(function (error) {
+         console.error('Error rendering template detail:', error);
+       });
++    } else if (route.view === 'recipe' && route.id) {
++      renderRecipeDetail(route.id).catch(function (error) {
++        console.error('Error rendering recipe detail:', error);
++      });
+     }
+   }
+ 
+@@ -366,6 +368,8 @@
+       window.KaPRouter.navigate('/list/' + record.id);
+     } else if (section.id === 'templates') {
+       window.KaPRouter.navigate('/template/' + record.id);
++    } else if (section.id === 'recipes') {
++      window.KaPRouter.navigate('/recipe/' + record.id);
+     }
+   }
+ 
+@@ -395,6 +399,19 @@
+     }
+   }
+ 
++  async function renderRecipeDetail(recipeId) {
++    try {
++      var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeId);
++      if (!record || record.type !== 'Recipe') {
++        throw new Error('Recipe not found');
++      }
++      renderDetailPage(record, 'recipes');
++    } catch (error) {
++      console.error('Error loading recipe:', error);
++      window.KaPRouter.navigate('/');
++    }
++  }
++
+   async function renderDetailPage(record, sectionId) {
+     var section = findSection(sectionId);
+     var contentContainer = document.getElementById('main-content');
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+new file mode 100644
+index 0000000..3d7a197
+--- /dev/null
++++ b/src/features/recipes/recipes-page.js
+@@ -0,0 +1,1168 @@
++(function () {
++  var VERSION_ACCORDION_STATE_KEY = 'kap.recipeVersionAccordionState';
++  var DESCRIPTION_ACCORDION_STATE_KEY = 'kap.recipeDescriptionAccordionState';
++  var LAST_VIEWED_VERSION_KEY = 'kap.recipeLastViewedVersion';
++  var versionNoteFocusTargets = {};
++
++  async function showError(message) {
++    await window.KaPUI.ShowAlert({ title: 'Error', message: message });
++  }
++
++  function readAccordionState(storageKey) {
++    try {
++      var raw = sessionStorage.getItem(storageKey);
++      if (!raw) {
++        return {};
++      }
++
++      var parsed = JSON.parse(raw);
++      return parsed && typeof parsed === 'object' ? parsed : {};
++    } catch (error) {
++      return {};
++    }
++  }
++
++  function writeAccordionState(storageKey, state) {
++    try {
++      sessionStorage.setItem(storageKey, JSON.stringify(state || {}));
++    } catch (error) {
++      // Ignore session persistence failures and keep the current in-memory render behavior.
++    }
++  }
++
++  function isAccordionExpanded(storageKey, recipeId) {
++    var state = readAccordionState(storageKey);
++    if (Object.prototype.hasOwnProperty.call(state, recipeId)) {
++      return !!state[recipeId];
++    }
++
++    return false;
++  }
++
++  function setAccordionExpanded(storageKey, recipeId, isExpanded) {
++    var state = readAccordionState(storageKey);
++    state[recipeId] = !!isExpanded;
++    writeAccordionState(storageKey, state);
++  }
++
++  function isVersionAccordionExpanded(recipeId) {
++    return isAccordionExpanded(VERSION_ACCORDION_STATE_KEY, recipeId);
++  }
++
++  function setVersionAccordionExpanded(recipeId, isExpanded) {
++    setAccordionExpanded(VERSION_ACCORDION_STATE_KEY, recipeId, isExpanded);
++  }
++
++  function isDescriptionAccordionExpanded(recipeId) {
++    return isAccordionExpanded(DESCRIPTION_ACCORDION_STATE_KEY, recipeId);
++  }
++
++  function setDescriptionAccordionExpanded(recipeId, isExpanded) {
++    setAccordionExpanded(DESCRIPTION_ACCORDION_STATE_KEY, recipeId, isExpanded);
++  }
++
++  var recipeEditModeStates = {};
++
++  function isRecipeInEditMode(recipeId, versionNumber) {
++    return recipeEditModeStates[recipeId] === Number(versionNumber);
++  }
++
++  function setRecipeEditMode(recipeId, versionNumber) {
++    recipeEditModeStates[recipeId] = Number(versionNumber);
++  }
++
++  function clearRecipeEditMode(recipeId) {
++    delete recipeEditModeStates[recipeId];
++  }
++
++  function getLastViewedVersionNumber(recipeId) {
++    try {
++      var raw = sessionStorage.getItem(LAST_VIEWED_VERSION_KEY);
++      var state = raw ? JSON.parse(raw) : {};
++      var value = state && typeof state === 'object' ? state[recipeId] : undefined;
++      return typeof value === 'number' ? value : null;
++    } catch (error) {
++      return null;
++    }
++  }
++
++  function setLastViewedVersionNumber(recipeId, versionNumber) {
++    try {
++      var raw = sessionStorage.getItem(LAST_VIEWED_VERSION_KEY);
++      var state = (raw ? JSON.parse(raw) : null) || {};
++      state[recipeId] = Number(versionNumber);
++      sessionStorage.setItem(LAST_VIEWED_VERSION_KEY, JSON.stringify(state));
++    } catch (error) {
++      // Ignore session persistence failures.
++    }
++  }
++
++  function markVersionNoteForFocus(recipeId, versionNumber) {
++    versionNoteFocusTargets[recipeId] = Number(versionNumber || 0);
++  }
++
++  function shouldFocusVersionNote(recipeId, versionNumber) {
++    return Number(versionNoteFocusTargets[recipeId] || 0) === Number(versionNumber || 0);
++  }
++
++  function clearVersionNoteFocus(recipeId) {
++    delete versionNoteFocusTargets[recipeId];
++  }
++
++  async function createRecipe() {
++    var name = await window.KaPUI.ShowPrompt({
++      title: 'New Recipe',
++      placeholder: 'Recipe name',
++      confirmLabel: 'Create'
++    });
++    if (name === null) {
++      return;
++    }
++
++    try {
++      await window.KaPRecipesService.createRecipe(name);
++    } catch (error) {
++      await showError(error.message || 'Unable to create recipe.');
++    }
++  }
++
++  async function renameRecipe(record) {
++    var nextName = await window.KaPUI.ShowPrompt({
++      title: 'Edit Recipe',
++      placeholder: 'Recipe name',
++      value: record.name,
++      confirmLabel: 'Save'
++    });
++    if (nextName === null) {
++      return null;
++    }
++
++    try {
++      return await window.KaPRecipesService.renameRecipe(record.id, nextName);
++    } catch (error) {
++      await showError(error.message || 'Unable to update recipe.');
++      return null;
++    }
++  }
++
++  async function deleteRecipe(record) {
++    var confirmed = await window.KaPUI.ShowConfirm({
++      title: 'Delete Recipe',
++      message: 'Delete "' + record.name + '"?',
++      confirmLabel: 'Delete',
++      isDanger: true
++    });
++    if (!confirmed) {
++      return false;
++    }
++
++    try {
++      await window.KaPRecipesService.deleteRecipe(record.id);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to delete recipe.');
++      return false;
++    }
++  }
++
++  async function createNextVersion(recipeRecord, activeVersion) {
++    try {
++      var createdVersion = await window.KaPRecipesService.createNewVersion(
++        recipeRecord.id,
++        '',
++        activeVersion ? activeVersion.id : ''
++      );
++      return createdVersion;
++    } catch (error) {
++      await showError(error.message || 'Unable to create new version.');
++      return null;
++    }
++  }
++
++  async function cloneRecipeFromActiveVersion(recipeRecord, activeVersion, cloneName) {
++    try {
++      var clonedRecord = await window.KaPRecipesService.cloneRecipe(
++        recipeRecord.id,
++        activeVersion ? activeVersion.id : '',
++        cloneName
++      );
++      return clonedRecord;
++    } catch (error) {
++      await showError(error.message || 'Unable to clone recipe.');
++      return null;
++    }
++  }
++
++  async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems) {
++    var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
++      title: 'Add Ingredient',
++      currentContextLabel: 'recipe',
++      detailItems: detailItems
++    }));
++
++    if (result === null) {
++      return;
++    }
++
++    try {
++      await window.KaPRecipesService.addItemToRecipe(
++        recipeRecord.id,
++        result.item.id,
++        result.name,
++        result.quantity,
++        result.description
++      );
++
++      await window.KaPItemsService.setItemCategory(
++        result.item.id,
++        result.categoryId || '',
++        result.categoryName || '',
++        result.name
++      );
++    } catch (error) {
++      await showError(error.message || 'Unable to add ingredient.');
++    }
++  }
++
++  async function editRecipeItemWithPrompt(recipeRecord, detailItem) {
++    var result = await window.KaPUI.ShowDiscoveryItemModal({
++      title: 'Edit Ingredient',
++      confirmLabel: 'Save',
++      itemNamePlaceholder: 'Ingredient name',
++      categoryPlaceholder: 'Search or type category',
++      descriptionPlaceholder: 'Ingredient notes',
++      initialName: detailItem.name,
++      initialCategoryId: detailItem.categoryId,
++      initialCategoryName: detailItem.categoryName,
++      initialDescription: detailItem.description,
++      showQuantityField: false,
++      showCategoryField: true,
++      getAllCategories: function () {
++        return window.KaPCategoriesService.getAllCategories();
++      },
++      searchCategories: function (query) {
++        return window.KaPCategoriesService.searchCategories(query);
++      },
++      resolveExactCategory: function (name) {
++        return window.KaPCategoriesService.resolveExactCategory(name);
++      },
++      createCategory: function (name) {
++        return window.KaPCategoriesService.createCategory(name);
++      },
++      deleteCategory: function (category) {
++        return window.KaPCategoriesService.deleteCategory(category.id);
++      },
++      enableSuggestions: false
++    });
++
++    if (result === null) {
++      return;
++    }
++
++    try {
++      await window.KaPRecipesService.updateRecipeItem(
++        recipeRecord.id,
++        detailItem.id,
++        result.name,
++        detailItem.quantity,
++        result.description
++      );
++
++      if (detailItem.itemId) {
++        await window.KaPItemsService.setItemCategory(
++          detailItem.itemId,
++          result.categoryId || '',
++          result.categoryName || '',
++          result.name
++        );
++      }
++    } catch (error) {
++      await showError(error.message || 'Unable to update ingredient.');
++    }
++  }
++
++  async function removeRecipeItemWithConfirm(recipeRecord, detailItem) {
++    var itemName = detailItem.name || 'this ingredient';
++    var confirmed = await window.KaPUI.ShowConfirm({
++      title: 'Remove Ingredient',
++      message: 'Remove "' + itemName + '" from this recipe?',
++      confirmLabel: 'Remove',
++      isDanger: true
++    });
++
++    if (!confirmed) {
++      return;
++    }
++
++    try {
++      await window.KaPRecipesService.removeItemFromRecipe(recipeRecord.id, detailItem.id);
++    } catch (error) {
++      await showError(error.message || 'Unable to remove ingredient.');
++    }
++  }
++
++  async function addInstructionWithPrompt(recipeRecord) {
++    var stepText = await window.KaPUI.ShowPrompt({
++      title: 'Add Step',
++      placeholder: 'Describe this cooking step',
++      confirmLabel: 'Add'
++    });
++
++    if (stepText === null) {
++      return false;
++    }
++
++    try {
++      await window.KaPRecipesService.addInstructionToRecipe(recipeRecord.id, stepText);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to add instruction.');
++      return false;
++    }
++  }
++
++  async function editInstructionWithPrompt(recipeRecord, instruction) {
++    var nextText = await window.KaPUI.ShowPrompt({
++      title: 'Edit Step ' + instruction.stepNumber,
++      placeholder: 'Describe this cooking step',
++      value: instruction.text,
++      confirmLabel: 'Save'
++    });
++
++    if (nextText === null) {
++      return false;
++    }
++
++    try {
++      await window.KaPRecipesService.updateRecipeInstruction(recipeRecord.id, instruction.id, nextText);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to update instruction.');
++      return false;
++    }
++  }
++
++  async function removeInstructionWithConfirm(recipeRecord, instruction) {
++    var confirmed = await window.KaPUI.ShowConfirm({
++      title: 'Remove Step',
++      message: 'Remove step ' + instruction.stepNumber + '?',
++      confirmLabel: 'Remove',
++      isDanger: true
++    });
++
++    if (!confirmed) {
++      return false;
++    }
++
++    try {
++      await window.KaPRecipesService.removeRecipeInstruction(recipeRecord.id, instruction.id);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to remove instruction.');
++      return false;
++    }
++  }
++
++  async function moveInstruction(recipeRecord, instruction, direction) {
++    try {
++      await window.KaPRecipesService.moveRecipeInstruction(recipeRecord.id, instruction.id, direction);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to move instruction.');
++      return false;
++    }
++  }
++
++  function sortByNameAscending(records) {
++    return (records || []).slice().sort(function (a, b) {
++      return String(a.name || '').localeCompare(String(b.name || ''), undefined, {
++        sensitivity: 'base'
++      });
++    });
++  }
++
++  function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionNumber) {
++    return window.KaPUI.NewDetailItemRow(detailItem, {
++      onIncrement: async function () {
++        var updated = await window.KaPRecipesService.incrementRecipeItemQuantity(recipeRecord.id, detailItem.id);
++        detailItem.quantity = updated.quantity;
++        return updated.quantity;
++      },
++      onDecrement: async function () {
++        var updated = await window.KaPRecipesService.decrementRecipeItemQuantity(recipeRecord.id, detailItem.id);
++        detailItem.quantity = updated.quantity;
++        return updated.quantity;
++      },
++      onEdit: async function () {
++        await editRecipeItemWithPrompt(recipeRecord, detailItem);
++        await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
++      },
++      onRemove: async function () {
++        await removeRecipeItemWithConfirm(recipeRecord, detailItem);
++        await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
++      }
++    });
++  }
++
++  function buildReadOnlyRecipeDetailItemRow(detailItem) {
++    var row = window.KaPUI.NewDetailItemRow(detailItem, null);
++    var actionsNode = row.querySelector('.detail-item-actions');
++    if (actionsNode) {
++      actionsNode.style.display = 'none';
++    }
++
++    return row;
++  }
++
++  function getDetailItemsFromVersionSnapshot(activeVersion) {
++    var snapshotItems = (activeVersion && activeVersion.snapshotItems) || [];
++    return snapshotItems.map(function (snapshotItem, index) {
++      return {
++        id: String(snapshotItem.itemId || '') + '::' + String(index),
++        listRecordId: activeVersion.recipeId,
++        itemId: snapshotItem.itemId || '',
++        name: snapshotItem.name || 'Unknown Item',
++        quantity: snapshotItem.quantity,
++        description: snapshotItem.description || '',
++        categoryId: snapshotItem.categoryId || '',
++        categoryName: snapshotItem.categoryName || '',
++        item: null
++      };
++    });
++  }
++
++  function getInstructionItemsFromVersionSnapshot(activeVersion) {
++    var snapshotInstructions = (activeVersion && activeVersion.snapshotInstructions) || [];
++    return snapshotInstructions
++      .slice()
++      .sort(function (a, b) {
++        return Number(a.stepNumber || 0) - Number(b.stepNumber || 0);
++      })
++      .map(function (snapshotInstruction, index) {
++        return {
++          id: snapshotInstruction.instructionId || ('snapshot-step-' + String(index)),
++          stepNumber: Number(snapshotInstruction.stepNumber || index + 1),
++          text: snapshotInstruction.text || ''
++        };
++      });
++  }
++
++  async function chooseVersionNumber(record, activeVersion, availableVersions) {
++    var versionInput = await window.KaPUI.ShowPrompt({
++      title: 'View Version',
++      placeholder: 'Enter version number',
++      value: activeVersion ? String(activeVersion.versionNumber) : '',
++      confirmLabel: 'View'
++    });
++
++    if (versionInput === null) {
++      return null;
++    }
++
++    var parsedVersionNumber = Number(String(versionInput || '').trim());
++    if (!Number.isInteger(parsedVersionNumber) || parsedVersionNumber <= 0) {
++      await showError('Version number must be a positive integer.');
++      return null;
++    }
++
++    var hasVersion = (availableVersions || []).some(function (version) {
++      return Number(version.versionNumber || 0) === parsedVersionNumber;
++    });
++
++    if (!hasVersion) {
++      await showError('Version ' + parsedVersionNumber + ' does not exist for this recipe.');
++      return null;
++    }
++
++    return parsedVersionNumber;
++  }
++
++  function findVersionIndex(availableVersions, activeVersion) {
++    return (availableVersions || []).findIndex(function (version) {
++      return activeVersion && version.id === activeVersion.id;
++    });
++  }
++
++  async function promptCloneRecipeName(recipeRecord) {
++    return window.KaPUI.ShowRecipeCloneModal({
++      title: 'Clone Recipe',
++      initialName: recipeRecord.name + ' - copy',
++      confirmLabel: 'Clone',
++      infoText: 'Cloning a recipe is like making a new copy without the history. For example, you might have a Chicken Tortilla Soup and a vegan friendly variation.'
++    });
++  }
++
++  function buildAccordionSection(title, isExpanded, onToggle, buildHeaderActions, buildHeaderLead) {
++    var section = document.createElement('section');
++    section.className = 'recipe-accordion-card';
++
++    var header = document.createElement('div');
++    header.className = 'recipe-accordion-header';
++    header.setAttribute('role', 'button');
++    header.setAttribute('tabindex', '0');
++    header.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
++    header.addEventListener('click', function (event) {
++      if (event.target.closest('.recipe-accordion-header-actions') || event.target.closest('.recipe-accordion-header-control')) {
++        return;
++      }
++
++      onToggle();
++    });
++    header.addEventListener('keydown', function (event) {
++      if (event.target.closest('.recipe-accordion-header-actions') || event.target.closest('.recipe-accordion-header-control')) {
++        return;
++      }
++
++      if (event.key === 'Enter' || event.key === ' ') {
++        event.preventDefault();
++        onToggle();
++      }
++    });
++
++    if (typeof buildHeaderLead === 'function') {
++      var headerLead = buildHeaderLead();
++      if (headerLead) {
++        headerLead.classList.add('recipe-accordion-header-control');
++        header.appendChild(headerLead);
++      }
++    }
++
++    if (!header.querySelector('.recipe-accordion-header-control')) {
++      var headerLabel = document.createElement('span');
++      headerLabel.className = 'recipe-accordion-title';
++      headerLabel.textContent = title;
++      header.appendChild(headerLabel);
++    }
++
++    if (typeof buildHeaderActions === 'function') {
++      var headerActions = buildHeaderActions();
++      if (headerActions) {
++        headerActions.classList.add('recipe-accordion-header-actions');
++        header.appendChild(headerActions);
++      }
++    }
++
++    section.appendChild(header);
++
++    var content = document.createElement('div');
++    content.className = 'recipe-accordion-content' + (isExpanded ? ' is-expanded' : '');
++    if (!isExpanded) {
++      content.hidden = true;
++    }
++
++    section.appendChild(content);
++
++    return {
++      section: section,
++      content: content
++    };
++  }
++
++  function appendVersionsAccordionSection(container, record, hooks, availableVersions, activeVersion, latestVersion, isViewingLatestVersion) {
++    var detailShell = container.querySelector('.detail-shell');
++    var detailHeader = container.querySelector('.detail-header');
++    if (!detailShell || !detailHeader || !activeVersion) {
++      return;
++    }
++
++    var isExpanded = isVersionAccordionExpanded(record.id);
++    var versionSelect = document.createElement('select');
++    versionSelect.className = 'recipe-version-select';
++    versionSelect.setAttribute('aria-label', 'Select recipe version');
++    availableVersions.slice().sort(function (left, right) {
++      return Number(right.versionNumber || 0) - Number(left.versionNumber || 0);
++    }).forEach(function (version) {
++      var option = document.createElement('option');
++      option.value = String(version.versionNumber);
++      option.textContent = 'Version ' + version.versionNumber + (latestVersion && version.id === latestVersion.id ? ' (Current)' : '');
++      option.selected = version.id === activeVersion.id;
++      versionSelect.appendChild(option);
++    });
++
++    versionSelect.addEventListener('click', function (event) {
++      event.stopPropagation();
++    });
++    versionSelect.addEventListener('keydown', function (event) {
++      event.stopPropagation();
++    });
++    versionSelect.addEventListener('change', async function () {
++      await renderDetailInto(container, record, hooks, Number(versionSelect.value));
++    });
++
++    var accordion = buildAccordionSection('Versions', isExpanded, function () {
++      setVersionAccordionExpanded(record.id, !isExpanded);
++      renderDetailInto(container, record, hooks, activeVersion.versionNumber);
++    }, function () {
++      var actions = document.createElement('div');
++
++      var newVersionButton = document.createElement('button');
++      newVersionButton.type = 'button';
++      newVersionButton.className = 'accordion-new-button';
++      newVersionButton.textContent = '+ New Version';
++      newVersionButton.addEventListener('click', async function (event) {
++        event.stopPropagation();
++
++        var latestVersionNumber = latestVersion ? latestVersion.versionNumber : null;
++        var choice = await window.KaPUI.ShowNewVersionModal({
++          availableVersions: availableVersions,
++          defaultVersionNumber: activeVersion ? activeVersion.versionNumber : latestVersionNumber,
++          latestVersionNumber: latestVersionNumber
++        });
++        if (!choice) {
++          return;
++        }
++
++        var baseVersion = availableVersions.find(function (v) {
++          return Number(v.versionNumber) === choice.baseVersionNumber;
++        });
++        var createdVersion = await createNextVersion(record, baseVersion || activeVersion);
++        if (createdVersion) {
++          setVersionAccordionExpanded(record.id, true);
++          markVersionNoteForFocus(record.id, createdVersion.versionNumber);
++          await renderDetailInto(container, record, hooks, createdVersion.versionNumber);
++        }
++      });
++      newVersionButton.addEventListener('keydown', function (event) {
++        event.stopPropagation();
++      });
++      actions.appendChild(newVersionButton);
++
++      return actions;
++    }, function () {
++      if (!isExpanded) {
++        return null;
++      }
++
++      return versionSelect;
++    });
++    var section = accordion.section;
++    var content = accordion.content;
++
++    var noteSection = document.createElement('div');
++    noteSection.className = 'recipe-version-note-section';
++
++    var originalVersionNote = activeVersion.versionNote || '';
++
++    var saveNoteButton = document.createElement('button');
++    saveNoteButton.type = 'button';
++    saveNoteButton.className = 'recipe-version-save-button';
++    saveNoteButton.textContent = 'Save';
++    saveNoteButton.disabled = true;
++
++    var noteInput = document.createElement('textarea');
++    noteInput.className = 'recipe-version-note-input';
++    noteInput.rows = 4;
++    noteInput.placeholder = 'Optional note about this version';
++    noteInput.value = originalVersionNote;
++    noteSection.appendChild(noteInput);
++
++    var saveStatus = document.createElement('span');
++    saveStatus.className = 'recipe-version-save-status';
++    saveStatus.setAttribute('aria-live', 'polite');
++
++    function updateVersionNoteSaveState() {
++      var isDirty = noteInput.value !== originalVersionNote;
++      saveNoteButton.disabled = !isDirty;
++      saveStatus.textContent = isDirty ? 'Unsaved changes' : 'Saved';
++      saveStatus.classList.toggle('is-dirty', isDirty);
++    }
++
++    noteInput.addEventListener('input', updateVersionNoteSaveState);
++
++    saveNoteButton.addEventListener('click', async function () {
++      try {
++        await window.KaPRecipesService.updateVersionNote(record.id, activeVersion.id, noteInput.value);
++        setVersionAccordionExpanded(record.id, true);
++        originalVersionNote = noteInput.value;
++        activeVersion.versionNote = originalVersionNote;
++        updateVersionNoteSaveState();
++      } catch (error) {
++        await showError(error.message || 'Unable to update version note.');
++      }
++    });
++
++    updateVersionNoteSaveState();
++
++    content.appendChild(noteSection);
++
++    var cloneRow = document.createElement('div');
++    cloneRow.className = 'recipe-version-clone-row';
++
++    var cloneButton = document.createElement('button');
++    cloneButton.type = 'button';
++    cloneButton.className = 'recipe-version-secondary-button';
++    cloneButton.textContent = 'Clone Recipe';
++    cloneButton.addEventListener('click', async function () {
++      var cloneConfig = await promptCloneRecipeName(record);
++      if (!cloneConfig) {
++        return;
++      }
++
++      var cloned = await cloneRecipeFromActiveVersion(record, activeVersion, cloneConfig.name);
++      if (cloned) {
++        hooks.onBack();
++      }
++    });
++    cloneRow.appendChild(cloneButton);
++
++    var cloneInfoWrap = document.createElement('span');
++    cloneInfoWrap.className = 'accordion-info-wrap';
++
++    var cloneInfoButton = document.createElement('button');
++    cloneInfoButton.type = 'button';
++    cloneInfoButton.className = 'accordion-info-icon';
++    cloneInfoButton.textContent = '?';
++    cloneInfoButton.setAttribute('aria-label', 'About recipe cloning');
++    cloneInfoButton.addEventListener('click', function (event) {
++      event.stopPropagation();
++    });
++    cloneInfoButton.addEventListener('keydown', function (event) {
++      event.stopPropagation();
++    });
++    cloneInfoWrap.appendChild(cloneInfoButton);
++
++    var cloneInfoTooltip = document.createElement('span');
++    cloneInfoTooltip.className = 'accordion-info-tooltip';
++    cloneInfoTooltip.textContent = 'Cloning a recipe is like making a new copy without the history. For example, you might have a Chicken Tortilla Soup and a vegan friendly variation.';
++    cloneInfoWrap.appendChild(cloneInfoTooltip);
++    cloneRow.appendChild(cloneInfoWrap);
++
++    var saveActions = document.createElement('div');
++    saveActions.className = 'recipe-version-save-actions';
++    saveActions.appendChild(saveStatus);
++    saveActions.appendChild(saveNoteButton);
++    cloneRow.appendChild(saveActions);
++
++    content.appendChild(cloneRow);
++    section.appendChild(content);
++
++    detailShell.insertBefore(section, detailHeader.nextSibling);
++
++    if (shouldFocusVersionNote(record.id, activeVersion.versionNumber)) {
++      requestAnimationFrame(function () {
++        noteInput.focus();
++        noteInput.setSelectionRange(noteInput.value.length, noteInput.value.length);
++      });
++      clearVersionNoteFocus(record.id);
++    }
++  }
++
++  function appendDescriptionAccordionSection(container, record, hooks, selectedVersionNumber, canEditDescription) {
++    var detailShell = container.querySelector('.detail-shell');
++    var versionsSection = detailShell ? detailShell.querySelector('.recipe-accordion-card') : null;
++    if (!detailShell || !versionsSection) {
++      return;
++    }
++
++    var isExpanded = isDescriptionAccordionExpanded(record.id);
++    var accordion = buildAccordionSection('Description', isExpanded, function () {
++      setDescriptionAccordionExpanded(record.id, !isExpanded);
++      renderDetailInto(container, record, hooks, selectedVersionNumber);
++    });
++    var section = accordion.section;
++    var content = accordion.content;
++
++    if (canEditDescription) {
++      var originalDescription = record.description || '';
++
++      var descriptionInput = document.createElement('textarea');
++      descriptionInput.className = 'recipe-version-note-input';
++      descriptionInput.rows = 4;
++      descriptionInput.placeholder = 'Optional recipe description';
++      descriptionInput.value = originalDescription;
++
++      var saveStatus = document.createElement('span');
++      saveStatus.className = 'recipe-version-save-status';
++      saveStatus.setAttribute('aria-live', 'polite');
++
++      var saveButton = document.createElement('button');
++      saveButton.type = 'button';
++      saveButton.className = 'recipe-version-save-button';
++      saveButton.textContent = 'Save';
++      saveButton.disabled = true;
++
++      function updateDescriptionSaveState() {
++        var isDirty = descriptionInput.value !== originalDescription;
++        saveButton.disabled = !isDirty;
++        saveStatus.textContent = isDirty ? 'Unsaved changes' : 'Saved';
++        saveStatus.classList.toggle('is-dirty', isDirty);
++      }
++
++      descriptionInput.addEventListener('input', updateDescriptionSaveState);
++
++      saveButton.addEventListener('click', async function () {
++        try {
++          await window.KaPRecipesService.updateRecipeDescription(record.id, descriptionInput.value);
++          setDescriptionAccordionExpanded(record.id, true);
++          originalDescription = descriptionInput.value;
++          record.description = originalDescription;
++          updateDescriptionSaveState();
++        } catch (error) {
++          await showError(error.message || 'Unable to update recipe description.');
++        }
++      });
++
++      updateDescriptionSaveState();
++      content.appendChild(descriptionInput);
++
++      var saveRow = document.createElement('div');
++      saveRow.className = 'recipe-version-clone-row';
++
++      var saveActions = document.createElement('div');
++      saveActions.className = 'recipe-version-save-actions';
++      saveActions.appendChild(saveStatus);
++      saveActions.appendChild(saveButton);
++      saveRow.appendChild(saveActions);
++      content.appendChild(saveRow);
++    } else {
++      var readOnlyText = document.createElement('p');
++      readOnlyText.className = 'recipe-description-readonly';
++      readOnlyText.textContent = record.description || 'No description yet.';
++      content.appendChild(readOnlyText);
++    }
++
++    detailShell.insertBefore(section, versionsSection.nextSibling);
++  }
++
++  function appendIngredientsSection(container, recipeRecord, detailItems, isViewingLatestVersion, hooks, selectedVersionNumber) {
++    var detailShell = container.querySelector('.detail-shell');
++    var detailList = container.querySelector('[data-detail-item-list]');
++    if (!detailShell || !detailList) {
++      return;
++    }
++
++    var emptyStateCard = detailShell.querySelector(':scope > .empty-state-card');
++    if (emptyStateCard) {
++      emptyStateCard.remove();
++    }
++
++    var section = document.createElement('section');
++    section.className = 'recipe-ingredients-section';
++
++    var header = document.createElement('div');
++    header.className = 'recipe-ingredients-header';
++
++    var title = document.createElement('h3');
++    title.className = 'recipe-ingredients-title';
++    title.textContent = 'Ingredients';
++    header.appendChild(title);
++
++    if (isViewingLatestVersion) {
++      var addButton = document.createElement('button');
++      addButton.type = 'button';
++      addButton.className = 'accordion-new-button';
++      addButton.textContent = '+ Add Item';
++      addButton.addEventListener('click', async function () {
++        await addRecipeItemWithDiscoveryModal(recipeRecord, detailItems);
++        await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
++      });
++      header.appendChild(addButton);
++    }
++
++    section.appendChild(header);
++
++    if (!detailItems || detailItems.length === 0) {
++      var empty = document.createElement('p');
++      empty.className = 'recipe-ingredients-empty';
++      empty.textContent = 'No ingredients yet.';
++      section.appendChild(empty);
++    } else {
++      section.appendChild(detailList);
++    }
++
++    detailShell.appendChild(section);
++  }
++
++  async function appendInstructionsSection(container, recipeRecord, instructions, isViewingLatestVersion, hooks, selectedVersionNumber) {
++    var detailShell = container.querySelector('.detail-shell');
++    if (!detailShell) {
++      return;
++    }
++
++    var section = document.createElement('section');
++    section.className = 'recipe-instructions-section';
++
++    var header = document.createElement('div');
++    header.className = 'recipe-instructions-header';
++
++    var title = document.createElement('h3');
++    title.className = 'recipe-instructions-title';
++    title.textContent = 'Instructions';
++    header.appendChild(title);
++
++    if (isViewingLatestVersion) {
++      var addButton = document.createElement('button');
++      addButton.type = 'button';
++      addButton.className = 'accordion-new-button';
++      addButton.textContent = '+ Add Step';
++      addButton.addEventListener('click', async function () {
++        var changed = await addInstructionWithPrompt(recipeRecord);
++        if (changed) {
++          await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
++        }
++      });
++      header.appendChild(addButton);
++    }
++
++    section.appendChild(header);
++
++    if (!instructions || instructions.length === 0) {
++      var empty = document.createElement('p');
++      empty.className = 'recipe-instructions-empty';
++      empty.textContent = 'No steps yet.';
++      section.appendChild(empty);
++      detailShell.appendChild(section);
++      return;
++    }
++
++    var list = document.createElement('div');
++    list.className = 'recipe-instruction-list';
++
++    instructions.forEach(function (instruction) {
++      var row = document.createElement('div');
++      row.className = 'recipe-instruction-row';
++
++      var numberNode = document.createElement('span');
++      numberNode.className = 'recipe-instruction-number';
++      numberNode.textContent = String(instruction.stepNumber) + '.';
++
++      var textNode = document.createElement('div');
++      textNode.className = 'recipe-instruction-text';
++      textNode.textContent = instruction.text;
++
++      row.appendChild(numberNode);
++      row.appendChild(textNode);
++
++      if (isViewingLatestVersion) {
++        var menuWrap = document.createElement('div');
++        menuWrap.className = 'detail-overflow-menu recipe-instruction-menu';
++
++        var menuTrigger = document.createElement('button');
++        menuTrigger.type = 'button';
++        menuTrigger.className = 'record-action-button detail-overflow-trigger';
++        menuTrigger.setAttribute('aria-haspopup', 'menu');
++        menuTrigger.setAttribute('aria-expanded', 'false');
++        menuTrigger.setAttribute('aria-label', 'Step actions');
++
++        var menuDots = document.createElement('span');
++        menuDots.className = 'detail-overflow-dots';
++        menuDots.textContent = '\u2026';
++        menuTrigger.appendChild(menuDots);
++
++        var menuList = document.createElement('div');
++        menuList.className = 'detail-overflow-list';
++        menuList.setAttribute('role', 'menu');
++
++        function setMenuOpen(isOpen) {
++          menuList.style.display = isOpen ? 'grid' : 'none';
++          menuTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
++          window.KaPUI.SetActiveOverflowMenu(menuWrap, setMenuOpen, isOpen);
++          if (isOpen) {
++            menuList.classList.remove('detail-overflow-list--up');
++            if (window.KaPUI.ShouldOpenOverflowUp(menuTrigger, menuList)) {
++              menuList.classList.add('detail-overflow-list--up');
++            }
++          }
++        }
++
++        setMenuOpen(false);
++
++        var menuActions = [
++          { label: 'Move Up', onClick: async function () { var changed = await moveInstruction(recipeRecord, instruction, 'up'); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
++          { label: 'Move Down', onClick: async function () { var changed = await moveInstruction(recipeRecord, instruction, 'down'); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
++          { label: 'Edit', onClick: async function () { var changed = await editInstructionWithPrompt(recipeRecord, instruction); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
++          { label: 'Remove', isDanger: true, onClick: async function () { var changed = await removeInstructionWithConfirm(recipeRecord, instruction); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } }
++        ];
++
++        menuActions.forEach(function (action) {
++          var item = document.createElement('button');
++          item.type = 'button';
++          item.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
++          item.textContent = action.label;
++          item.setAttribute('role', 'menuitem');
++          item.addEventListener('click', function () {
++            setMenuOpen(false);
++            action.onClick();
++          });
++          menuList.appendChild(item);
++        });
++
++        menuTrigger.addEventListener('click', function (event) {
++          event.stopPropagation();
++          var isOpen = menuList.style.display !== 'none';
++          setMenuOpen(!isOpen);
++        });
++
++        menuWrap.appendChild(menuTrigger);
++        menuWrap.appendChild(menuList);
++        row.appendChild(menuWrap);
++      }
++
++      list.appendChild(row);
++    });
++
++    section.appendChild(list);
++    detailShell.appendChild(section);
++  }
++
++  async function renderInto(container, hooks) {
++    var records = await window.KaPRecipesService.getAllRecipes();
++
++    window.KaPUI.ReplaceMainContent(container, {
++      emptyStateText: 'No recipes yet.',
++      records: records,
++      rowBuilder: function (record) {
++        return window.KaPUI.NewListRecordRow(record, function () {
++          hooks.onOpen(record);
++        });
++      }
++    });
++  }
++
++  async function renderDetailInto(container, record, hooks, selectedVersionNumber) {
++    if (!selectedVersionNumber) {
++      clearRecipeEditMode(record.id);
++    }
++
++    var availableVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
++    var latestVersion = availableVersions.length > 0 ? availableVersions[availableVersions.length - 1] : null;
++    var resolvedVersionNumber = selectedVersionNumber || getLastViewedVersionNumber(record.id);
++    var activeVersion = resolvedVersionNumber
++      ? await window.KaPRecipesService.getRecipeVersionByNumber(record.id, resolvedVersionNumber)
++      : latestVersion;
++
++    if (!activeVersion) {
++      activeVersion = latestVersion;
++    }
++
++    if (activeVersion) {
++      setLastViewedVersionNumber(record.id, activeVersion.versionNumber);
++    }
++
++    var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
++    var isInEditMode = !isViewingLatestVersion && isRecipeInEditMode(record.id, activeVersion ? activeVersion.versionNumber : null);
++    var detailItems = (isViewingLatestVersion || isInEditMode)
++      ? await window.KaPRecipesService.getRecipeItems(record.id)
++      : getDetailItemsFromVersionSnapshot(activeVersion);
++    var instructions = (isViewingLatestVersion || isInEditMode)
++      ? await window.KaPRecipesService.getRecipeInstructions(record.id)
++      : getInstructionItemsFromVersionSnapshot(activeVersion);
++
++    var sortedItems = sortByNameAscending(detailItems);
++    var titleText = record.name;
++
++    window.KaPUI.ReplaceDetailContent(container, {
++      title: titleText,
++      onBack: hooks.onBack,
++      onAddItem: null,
++      detailItems: sortedItems,
++      itemRowBuilder: function (detailItem) {
++        if (!isViewingLatestVersion && !isInEditMode) {
++          return buildReadOnlyRecipeDetailItemRow(detailItem);
++        }
++
++        return buildRecipeDetailItemRow(record, detailItem, container, hooks, activeVersion ? activeVersion.versionNumber : undefined);
++      },
++      actions: [
++        {
++          label: 'Add To Grocery List',
++          onClick: async function () {
++            var ingredients = isViewingLatestVersion
++              ? await window.KaPRecipesService.getRecipeItems(record.id)
++              : getDetailItemsFromVersionSnapshot(activeVersion);
++
++            if (!ingredients || ingredients.length === 0) {
++              await showError('This recipe has no ingredients to add.');
++              return;
++            }
++
++            var result = await window.KaPUI.ShowAddToListModal({
++              recipeName: record.name,
++              ingredients: ingredients,
++              getAllLists: function () {
++                return window.KaPListsService.getAllLists();
++              }
++            });
++
++            if (!result) {
++              return;
++            }
++
++            try {
++              var targetListId = result.targetListId;
++              if (result.isNewList) {
++                var newList = await window.KaPListsService.createList(result.newListName);
++                targetListId = newList.id;
++              }
++
++              await Promise.all(result.selectedIngredients.map(function (ingredient) {
++                return window.KaPListsService.addItemToList(
++                  targetListId,
++                  ingredient.itemId,
++                  ingredient.name,
++                  ingredient.quantity,
++                  ingredient.description
++                );
++              }));
++            } catch (error) {
++              await showError(error.message || 'Unable to add ingredients to list.');
++            }
++          }
++        },
++        !isViewingLatestVersion ? {
++          label: isInEditMode ? 'View Only' : 'Edit',
++          onClick: function () {
++            if (isInEditMode) {
++              clearRecipeEditMode(record.id);
++            } else {
++              setRecipeEditMode(record.id, activeVersion.versionNumber);
++            }
++            renderDetailInto(container, record, hooks, activeVersion.versionNumber);
++          }
++        } : null,
++        {
++          label: 'Delete',
++          isDanger: true,
++          onClick: async function () {
++            var deleted = await deleteRecipe(record);
++            if (deleted) {
++              hooks.onDeleted();
++            }
++          }
++        }
++      ].filter(function (a) { return a !== null; })
++    });
++
++    appendVersionsAccordionSection(container, record, hooks, availableVersions, activeVersion, latestVersion, isViewingLatestVersion);
++    appendDescriptionAccordionSection(
++      container,
++      record,
++      hooks,
++      activeVersion ? activeVersion.versionNumber : null,
++      isViewingLatestVersion || isInEditMode
++    );
++    appendIngredientsSection(
++      container,
++      record,
++      detailItems,
++      isViewingLatestVersion || isInEditMode,
++      hooks,
++      activeVersion ? activeVersion.versionNumber : null
++    );
++
++    await appendInstructionsSection(
++      container,
++      record,
++      instructions,
++      isViewingLatestVersion || isInEditMode,
++      hooks,
++      activeVersion ? activeVersion.versionNumber : null
++    );
++  }
++
++  window.KaPRecipesPage = {
++    createRecipe: createRecipe,
++    renderInto: renderInto,
++    renderDetailInto: renderDetailInto
++  };
++})();
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+new file mode 100644
+index 0000000..3b0e480
+--- /dev/null
++++ b/src/features/recipes/recipes-service.js
+@@ -0,0 +1,708 @@
++(function () {
++  var RECIPE_TYPE = 'Recipe';
++
++  function nowIso() {
++    return new Date().toISOString();
++  }
++
++  function ensureValidRecipeName(name) {
++    var trimmed = (name || '').trim();
++    if (!trimmed) {
++      throw new Error('Recipe name is required.');
++    }
++
++    return trimmed;
++  }
++
++  function ensureValidInstructionText(text) {
++    var trimmed = String(text || '').trim();
++    if (!trimmed) {
++      throw new Error('Instruction text is required.');
++    }
++
++    return trimmed;
++  }
++
++  function normalizeRecipeDescription(description) {
++    return window.KaPItemEntryRules.normalizeDescription(description);
++  }
++
++  function sortByNameAscending(records) {
++    return (records || []).slice().sort(function (a, b) {
++      return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), undefined, {
++        sensitivity: 'base'
++      });
++    });
++  }
++
++  function sortByVersionNumberAscending(records) {
++    return (records || []).slice().sort(function (a, b) {
++      return Number((a && a.versionNumber) || 0) - Number((b && b.versionNumber) || 0);
++    });
++  }
++
++  function sortByStepNumberAscending(records) {
++    return (records || []).slice().sort(function (a, b) {
++      return Number((a && a.stepNumber) || 0) - Number((b && b.stepNumber) || 0);
++    });
++  }
++
++  function cloneSnapshotItems(snapshotItems) {
++    return (snapshotItems || []).map(function (entry) {
++      return {
++        itemId: String((entry && entry.itemId) || ''),
++        name: String((entry && entry.name) || ''),
++        quantity: entry && entry.quantity == null ? null : Number(entry.quantity),
++        description: String((entry && entry.description) || ''),
++        categoryId: String((entry && entry.categoryId) || ''),
++        categoryName: String((entry && entry.categoryName) || '')
++      };
++    });
++  }
++
++  function cloneSnapshotInstructions(snapshotInstructions) {
++    return sortByStepNumberAscending((snapshotInstructions || []).map(function (entry) {
++      return {
++        instructionId: String((entry && entry.instructionId) || ''),
++        stepNumber: Number((entry && entry.stepNumber) || 0),
++        text: String((entry && entry.text) || '').trim()
++      };
++    }));
++  }
++
++  function normalizeVersionRecord(record) {
++    if (!record) {
++      return null;
++    }
++
++    return {
++      id: record.id,
++      recipeId: record.recipeId,
++      versionNumber: Number(record.versionNumber || 0),
++      parentVersionId: String(record.parentVersionId || ''),
++      createdDate: String(record.createdDate || ''),
++      updatedDate: String(record.updatedDate || ''),
++      versionNote: String(record.versionNote || ''),
++      snapshotItems: cloneSnapshotItems(record.snapshotItems),
++      snapshotInstructions: cloneSnapshotInstructions(record.snapshotInstructions)
++    };
++  }
++
++  async function requireRecipeById(recipeId) {
++    var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeId);
++    if (!record || record.type !== RECIPE_TYPE) {
++      throw new Error('Recipe not found.');
++    }
++
++    return record;
++  }
++
++  async function requireItemById(itemId) {
++    var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
++    if (!item) {
++      throw new Error('Item not found.');
++    }
++
++    return item;
++  }
++
++  async function touchRecipe(recipeId) {
++    var recipe = await requireRecipeById(recipeId);
++    recipe.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipe);
++    return recipe;
++  }
++
++  async function readJoinRecordsByRecipeId(recipeId) {
++    return window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS,
++      window.KaPStores.INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID,
++      recipeId
++    );
++  }
++
++  async function readInstructionRecordsByRecipeId(recipeId) {
++    return window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS,
++      window.KaPStores.INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_ID,
++      recipeId
++    );
++  }
++
++  async function findJoinRecordById(recipeId, recipeItemId) {
++    var joinRecords = await readJoinRecordsByRecipeId(recipeId);
++    return joinRecords.find(function (record) {
++      return record.id === recipeItemId;
++    }) || null;
++  }
++
++  async function findInstructionById(recipeId, instructionId) {
++    var instructionRecords = await readInstructionRecordsByRecipeId(recipeId);
++    return instructionRecords.find(function (instruction) {
++      return instruction.id === instructionId;
++    }) || null;
++  }
++
++  function resequenceInstructions(instructionRecords) {
++    return (instructionRecords || []).map(function (instruction, index) {
++      return {
++        id: instruction.id,
++        recipeId: instruction.recipeId,
++        stepNumber: index + 1,
++        text: ensureValidInstructionText(instruction.text),
++        createdDate: instruction.createdDate || nowIso(),
++        updatedDate: nowIso()
++      };
++    });
++  }
++
++  async function persistInstructionList(instructionRecords) {
++    for (var i = 0; i < instructionRecords.length; i++) {
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instructionRecords[i]);
++    }
++  }
++
++  async function getAllRecipes() {
++    var records = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.LIST_RECORDS,
++      window.KaPStores.INDEX_NAMES.LIST_RECORDS_BY_TYPE,
++      RECIPE_TYPE
++    );
++
++    return sortByNameAscending(records);
++  }
++
++  async function getRecipeItems(recipeId) {
++    await requireRecipeById(recipeId);
++    var joinRecords = await readJoinRecordsByRecipeId(recipeId);
++    var detailItems = await Promise.all(
++      joinRecords.map(async function (joinRecord) {
++        var item = joinRecord.itemId
++          ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId)
++          : null;
++
++        if (!joinRecord.name && item && item.name) {
++          joinRecord.name = item.name;
++          await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
++        }
++
++        return {
++          id: joinRecord.id,
++          listRecordId: joinRecord.listRecordId,
++          itemId: joinRecord.itemId,
++          name: joinRecord.name || (item && item.name) || 'Unknown Item',
++          quantity: joinRecord.quantity,
++          description: joinRecord.description,
++          categoryId: (item && item.categoryId) || '',
++          categoryName: (item && item.categoryName) || '',
++          item: item || null
++        };
++      })
++    );
++
++    return sortByNameAscending(detailItems);
++  }
++
++  async function getRecipeInstructions(recipeId) {
++    await requireRecipeById(recipeId);
++    var instructionRecords = await readInstructionRecordsByRecipeId(recipeId);
++    return sortByStepNumberAscending(instructionRecords).map(function (instruction) {
++      return {
++        id: instruction.id,
++        recipeId: instruction.recipeId,
++        stepNumber: Number(instruction.stepNumber || 0),
++        text: String(instruction.text || ''),
++        createdDate: String(instruction.createdDate || ''),
++        updatedDate: String(instruction.updatedDate || '')
++      };
++    });
++  }
++
++  async function getRecipeVersions(recipeId) {
++    await ensureRecipeHasVersion(recipeId);
++
++    var versions = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_VERSIONS,
++      window.KaPStores.INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_ID,
++      recipeId
++    );
++
++    return sortByVersionNumberAscending(versions).map(normalizeVersionRecord);
++  }
++
++  async function getLatestRecipeVersion(recipeId) {
++    var versions = await getRecipeVersions(recipeId);
++    return versions.length > 0 ? versions[versions.length - 1] : null;
++  }
++
++  async function getRecipeVersionByNumber(recipeId, versionNumber) {
++    await ensureRecipeHasVersion(recipeId);
++    var matching = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_VERSIONS,
++      window.KaPStores.INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_AND_VERSION,
++      [recipeId, Number(versionNumber)]
++    );
++
++    return normalizeVersionRecord((matching || [])[0] || null);
++  }
++
++  async function syncLatestVersionSnapshot(recipeId) {
++    await ensureRecipeHasVersion(recipeId);
++    var latestVersion = await getLatestRecipeVersion(recipeId);
++    if (!latestVersion) {
++      return null;
++    }
++
++    var detailItems = await getRecipeItems(recipeId);
++    var instructionRecords = await getRecipeInstructions(recipeId);
++
++    latestVersion.snapshotItems = detailItems.map(function (detailItem) {
++      return {
++        itemId: detailItem.itemId || '',
++        name: detailItem.name || '',
++        quantity: detailItem.quantity,
++        description: detailItem.description || '',
++        categoryId: detailItem.categoryId || '',
++        categoryName: detailItem.categoryName || ''
++      };
++    });
++
++    latestVersion.snapshotInstructions = instructionRecords.map(function (instruction) {
++      return {
++        instructionId: instruction.id,
++        stepNumber: Number(instruction.stepNumber || 0),
++        text: instruction.text || ''
++      };
++    });
++
++    latestVersion.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, latestVersion);
++    await touchRecipe(recipeId);
++    return normalizeVersionRecord(latestVersion);
++  }
++
++  async function createInitialRecipeVersion(recipeRecord) {
++    var versionRecord = {
++      id: window.KaPIds.NewId(),
++      recipeId: recipeRecord.id,
++      versionNumber: 1,
++      parentVersionId: '',
++      createdDate: recipeRecord.createdDate,
++      updatedDate: recipeRecord.updatedDate,
++      versionNote: '',
++      snapshotItems: [],
++      snapshotInstructions: []
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionRecord);
++    return versionRecord;
++  }
++
++  async function ensureRecipeHasVersion(recipeId) {
++    var recipeRecord = await requireRecipeById(recipeId);
++    var versions = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_VERSIONS,
++      window.KaPStores.INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_ID,
++      recipeId
++    );
++
++    if ((versions || []).length > 0) {
++      return;
++    }
++
++    await createInitialRecipeVersion(recipeRecord);
++    await syncLatestVersionSnapshot(recipeId);
++  }
++
++  async function createRecipe(name) {
++    var safeName = ensureValidRecipeName(name);
++    var timestamp = nowIso();
++
++    var record = {
++      id: window.KaPIds.NewId(),
++      name: safeName,
++      description: '',
++      type: RECIPE_TYPE,
++      createdDate: timestamp,
++      updatedDate: timestamp
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    await createInitialRecipeVersion(record);
++    return record;
++  }
++
++  async function renameRecipe(id, nextName) {
++    var safeName = ensureValidRecipeName(nextName);
++    var record = await requireRecipeById(id);
++
++    record.name = safeName;
++    record.updatedDate = nowIso();
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return record;
++  }
++
++  async function updateRecipeDescription(id, nextDescription) {
++    var record = await requireRecipeById(id);
++    record.description = normalizeRecipeDescription(nextDescription);
++    record.updatedDate = nowIso();
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return record;
++  }
++
++  async function deleteRecipe(id) {
++    await requireRecipeById(id);
++
++    var versions = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_VERSIONS,
++      window.KaPStores.INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_ID,
++      id
++    );
++    var joinRecords = await readJoinRecordsByRecipeId(id);
++    var instructionRecords = await readInstructionRecordsByRecipeId(id);
++
++    await Promise.all(joinRecords.map(function (joinRecord) {
++      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord.id);
++    }));
++
++    await Promise.all(instructionRecords.map(function (instruction) {
++      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instruction.id);
++    }));
++
++    await Promise.all(versions.map(function (version) {
++      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version.id);
++    }));
++
++    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
++  }
++
++  async function getRecipeItemCount(recipeId) {
++    await requireRecipeById(recipeId);
++    var joinRecords = await readJoinRecordsByRecipeId(recipeId);
++    return joinRecords.length;
++  }
++
++  async function getRecipeInstructionCount(recipeId) {
++    await requireRecipeById(recipeId);
++    var instructionRecords = await readInstructionRecordsByRecipeId(recipeId);
++    return instructionRecords.length;
++  }
++
++  async function addItemToRecipe(recipeId, itemId, name, quantity, description) {
++    await requireRecipeById(recipeId);
++    var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
++    var joinRecords = await readJoinRecordsByRecipeId(recipeId);
++    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
++
++    if (existingByName) {
++      existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
++      await syncLatestVersionSnapshot(recipeId);
++      return existingByName;
++    }
++
++    await requireItemById(itemId);
++    var joinRecord = {
++      id: window.KaPIds.NewId(),
++      listRecordId: recipeId,
++      itemId: itemId,
++      name: safeName,
++      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
++      description: window.KaPItemEntryRules.normalizeDescription(description)
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
++    await syncLatestVersionSnapshot(recipeId);
++    return joinRecord;
++  }
++
++  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description) {
++    await requireRecipeById(recipeId);
++    var existing = await findJoinRecordById(recipeId, recipeItemId);
++    if (!existing) {
++      throw new Error('Recipe item not found.');
++    }
++
++    existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
++    existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    existing.description = window.KaPItemEntryRules.normalizeDescription(description);
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    await syncLatestVersionSnapshot(recipeId);
++    return existing;
++  }
++
++  async function removeItemFromRecipe(recipeId, recipeItemId) {
++    await requireRecipeById(recipeId);
++    var existing = await findJoinRecordById(recipeId, recipeItemId);
++    if (!existing) {
++      return;
++    }
++
++    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing.id);
++    await syncLatestVersionSnapshot(recipeId);
++  }
++
++  async function incrementRecipeItemQuantity(recipeId, recipeItemId) {
++    await requireRecipeById(recipeId);
++    var existing = await findJoinRecordById(recipeId, recipeItemId);
++    if (!existing) {
++      throw new Error('Recipe item not found.');
++    }
++
++    var current = existing.quantity == null ? 1 : existing.quantity;
++    existing.quantity = current + 1;
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    await syncLatestVersionSnapshot(recipeId);
++    return existing;
++  }
++
++  async function decrementRecipeItemQuantity(recipeId, recipeItemId) {
++    await requireRecipeById(recipeId);
++    var existing = await findJoinRecordById(recipeId, recipeItemId);
++    if (!existing) {
++      throw new Error('Recipe item not found.');
++    }
++
++    var current = existing.quantity == null ? 1 : existing.quantity;
++    existing.quantity = Math.max(1, current - 1);
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
++    await syncLatestVersionSnapshot(recipeId);
++    return existing;
++  }
++
++  async function addInstructionToRecipe(recipeId, text) {
++    await requireRecipeById(recipeId);
++    var safeText = ensureValidInstructionText(text);
++    var instructions = await getRecipeInstructions(recipeId);
++    var nextStepNumber = instructions.length + 1;
++
++    var instruction = {
++      id: window.KaPIds.NewId(),
++      recipeId: recipeId,
++      stepNumber: nextStepNumber,
++      text: safeText,
++      createdDate: nowIso(),
++      updatedDate: nowIso()
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instruction);
++    await syncLatestVersionSnapshot(recipeId);
++    return instruction;
++  }
++
++  async function updateRecipeInstruction(recipeId, instructionId, text) {
++    await requireRecipeById(recipeId);
++    var existing = await findInstructionById(recipeId, instructionId);
++    if (!existing) {
++      throw new Error('Instruction not found.');
++    }
++
++    existing.text = ensureValidInstructionText(text);
++    existing.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, existing);
++    await syncLatestVersionSnapshot(recipeId);
++    return existing;
++  }
++
++  async function removeRecipeInstruction(recipeId, instructionId) {
++    await requireRecipeById(recipeId);
++    var existing = await findInstructionById(recipeId, instructionId);
++    if (!existing) {
++      return;
++    }
++
++    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instructionId);
++    var remaining = await readInstructionRecordsByRecipeId(recipeId);
++    var resequenced = resequenceInstructions(sortByStepNumberAscending(remaining));
++    await persistInstructionList(resequenced);
++    await syncLatestVersionSnapshot(recipeId);
++  }
++
++  async function moveRecipeInstruction(recipeId, instructionId, direction) {
++    await requireRecipeById(recipeId);
++    var instructions = await getRecipeInstructions(recipeId);
++    var currentIndex = instructions.findIndex(function (instruction) {
++      return instruction.id === instructionId;
++    });
++
++    if (currentIndex < 0) {
++      throw new Error('Instruction not found.');
++    }
++
++    var delta = direction === 'up' ? -1 : 1;
++    var targetIndex = currentIndex + delta;
++    if (targetIndex < 0 || targetIndex >= instructions.length) {
++      return instructions;
++    }
++
++    var moved = instructions[currentIndex];
++    instructions[currentIndex] = instructions[targetIndex];
++    instructions[targetIndex] = moved;
++
++    var resequenced = resequenceInstructions(instructions);
++    await persistInstructionList(resequenced);
++    await syncLatestVersionSnapshot(recipeId);
++    return sortByStepNumberAscending(resequenced);
++  }
++
++  async function replaceRecipeItemsFromSnapshot(recipeId, snapshotItems) {
++    var currentJoinRecords = await readJoinRecordsByRecipeId(recipeId);
++    await Promise.all(currentJoinRecords.map(function (joinRecord) {
++      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord.id);
++    }));
++
++    var clonedItems = cloneSnapshotItems(snapshotItems);
++    for (var i = 0; i < clonedItems.length; i++) {
++      var snapshotItem = clonedItems[i];
++      var itemId = snapshotItem.itemId;
++      var existingItem = itemId
++        ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId)
++        : null;
++
++      if (!existingItem) {
++        var createdItem = await window.KaPItemsService.createItem(
++          snapshotItem.name,
++          snapshotItem.description,
++          snapshotItem.categoryId,
++          snapshotItem.categoryName
++        );
++        itemId = createdItem.id;
++      }
++
++      var joinRecord = {
++        id: window.KaPIds.NewId(),
++        listRecordId: recipeId,
++        itemId: itemId,
++        name: snapshotItem.name,
++        quantity: snapshotItem.quantity,
++        description: snapshotItem.description
++      };
++
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
++    }
++  }
++
++  async function replaceRecipeInstructionsFromSnapshot(recipeId, snapshotInstructions) {
++    var existingInstructions = await readInstructionRecordsByRecipeId(recipeId);
++    await Promise.all(existingInstructions.map(function (instruction) {
++      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instruction.id);
++    }));
++
++    var clonedInstructions = cloneSnapshotInstructions(snapshotInstructions);
++    for (var i = 0; i < clonedInstructions.length; i++) {
++      var snapshotInstruction = clonedInstructions[i];
++      var instructionRecord = {
++        id: snapshotInstruction.instructionId || window.KaPIds.NewId(),
++        recipeId: recipeId,
++        stepNumber: Number(snapshotInstruction.stepNumber || i + 1),
++        text: ensureValidInstructionText(snapshotInstruction.text),
++        createdDate: nowIso(),
++        updatedDate: nowIso()
++      };
++
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instructionRecord);
++    }
++
++    var persistedInstructions = await readInstructionRecordsByRecipeId(recipeId);
++    var resequenced = resequenceInstructions(sortByStepNumberAscending(persistedInstructions));
++    await persistInstructionList(resequenced);
++  }
++
++  async function createNewVersion(recipeId, versionNote, sourceVersionId) {
++    await ensureRecipeHasVersion(recipeId);
++    var sourceVersion = sourceVersionId
++      ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, sourceVersionId)
++      : await getLatestRecipeVersion(recipeId);
++
++    if (!sourceVersion || sourceVersion.recipeId !== recipeId) {
++      throw new Error('Recipe version not found.');
++    }
++
++    var latestVersion = await getLatestRecipeVersion(recipeId);
++    var nextVersionNumber = Number((latestVersion && latestVersion.versionNumber) || 0) + 1;
++    var nextVersion = {
++      id: window.KaPIds.NewId(),
++      recipeId: recipeId,
++      versionNumber: nextVersionNumber,
++      parentVersionId: sourceVersion.id,
++      createdDate: nowIso(),
++      updatedDate: nowIso(),
++      versionNote: String(versionNote || '').trim(),
++      snapshotItems: cloneSnapshotItems(sourceVersion.snapshotItems),
++      snapshotInstructions: cloneSnapshotInstructions(sourceVersion.snapshotInstructions)
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, nextVersion);
++    await replaceRecipeItemsFromSnapshot(recipeId, nextVersion.snapshotItems);
++    await replaceRecipeInstructionsFromSnapshot(recipeId, nextVersion.snapshotInstructions);
++    await syncLatestVersionSnapshot(recipeId);
++    return getRecipeVersionByNumber(recipeId, nextVersionNumber);
++  }
++
++  async function updateVersionNote(recipeId, versionId, noteText) {
++    await ensureRecipeHasVersion(recipeId);
++    var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
++    if (!version || version.recipeId !== recipeId) {
++      throw new Error('Recipe version not found.');
++    }
++
++    version.versionNote = String(noteText || '').trim();
++    version.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version);
++    return normalizeVersionRecord(version);
++  }
++
++  async function cloneRecipe(recipeId, sourceVersionId, cloneName) {
++    var sourceRecipe = await requireRecipeById(recipeId);
++    var sourceVersion = sourceVersionId
++      ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, sourceVersionId)
++      : await getLatestRecipeVersion(recipeId);
++
++    if (!sourceVersion || sourceVersion.recipeId !== sourceRecipe.id) {
++      throw new Error('Recipe version not found.');
++    }
++
++    var clonedRecipe = await createRecipe(cloneName || (sourceRecipe.name + ' - copy'));
++    await replaceRecipeItemsFromSnapshot(clonedRecipe.id, sourceVersion.snapshotItems);
++    await replaceRecipeInstructionsFromSnapshot(clonedRecipe.id, sourceVersion.snapshotInstructions);
++
++    var clonedVersion = await syncLatestVersionSnapshot(clonedRecipe.id);
++    if (clonedVersion) {
++      clonedVersion.versionNote = 'Clone of ' + sourceRecipe.name + ' on ' + new Date().toLocaleString() + '.';
++      clonedVersion.updatedDate = nowIso();
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, clonedVersion);
++    }
++
++    return clonedRecipe;
++  }
++
++  window.KaPRecipesService = {
++    getAllRecipes: getAllRecipes,
++    createRecipe: createRecipe,
++    renameRecipe: renameRecipe,
++    updateRecipeDescription: updateRecipeDescription,
++    deleteRecipe: deleteRecipe,
++    getRecipeItemCount: getRecipeItemCount,
++    getRecipeInstructionCount: getRecipeInstructionCount,
++    getRecipeItems: getRecipeItems,
++    getRecipeInstructions: getRecipeInstructions,
++    addItemToRecipe: addItemToRecipe,
++    updateRecipeItem: updateRecipeItem,
++    removeItemFromRecipe: removeItemFromRecipe,
++    incrementRecipeItemQuantity: incrementRecipeItemQuantity,
++    decrementRecipeItemQuantity: decrementRecipeItemQuantity,
++    addInstructionToRecipe: addInstructionToRecipe,
++    updateRecipeInstruction: updateRecipeInstruction,
++    removeRecipeInstruction: removeRecipeInstruction,
++    moveRecipeInstruction: moveRecipeInstruction,
++    getRecipeVersions: getRecipeVersions,
++    getLatestRecipeVersion: getLatestRecipeVersion,
++    getRecipeVersionByNumber: getRecipeVersionByNumber,
++    createNewVersion: createNewVersion,
++    updateVersionNote: updateVersionNote,
++    cloneRecipe: cloneRecipe
++  };
++})();
+\ No newline at end of file
+diff --git a/src/index.html b/src/index.html
+index 01be2c8..5b12a44 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -4,7 +4,6 @@
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Kitchen & Pantry</title>
+-  <link rel="manifest" href="./manifest.webmanifest" />
+   <link rel="icon" type="image/svg+xml" href="./assets/icon-192.svg" />
+   <link rel="apple-touch-icon" href="./assets/icon-192.svg" />
+   <link rel="stylesheet" href="./styles.css?v=2026-04-19-20-30" />
+@@ -124,6 +123,8 @@
+   <script src="./features/lists/lists-page.js?v=2026-04-19-20-30"></script>
+   <script src="./features/templates/templates-service.js?v=2026-04-19-20-30"></script>
+   <script src="./features/templates/templates-page.js?v=2026-04-19-20-30"></script>
++  <script src="./features/recipes/recipes-service.js?v=2026-04-19-20-30"></script>
++  <script src="./features/recipes/recipes-page.js?v=2026-04-19-20-30"></script>
+   <script src="./features/settings/settings-page.js?v=2026-04-19-20-30"></script>
+   <script src="./features/main/main-page.js?v=2026-04-19-20-30"></script>
+   <script src="./app-router.js?v=2026-04-19-20-30"></script>
+diff --git a/src/main.js b/src/main.js
+index 08b650f..34c2073 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -1,7 +1,26 @@
++function ensureManifestLink() {
++  var isHttpLike = window.location.protocol === 'http:' || window.location.protocol === 'https:';
++  if (!isHttpLike) {
++    return;
++  }
++
++  if (document.querySelector('link[rel="manifest"]')) {
++    return;
++  }
++
++  var link = document.createElement('link');
++  link.rel = 'manifest';
++  link.href = './manifest.webmanifest';
++  document.head.appendChild(link);
++}
++
+ document.addEventListener('DOMContentLoaded', async function () {
++  ensureManifestLink();
+   await AppInit.initialize();
+ 
+-  if ('serviceWorker' in navigator && window.isSecureContext) {
++  var supportsServiceWorker = 'serviceWorker' in navigator;
++  var isSupportedProtocol = window.location.protocol === 'http:' || window.location.protocol === 'https:';
++  if (supportsServiceWorker && isSupportedProtocol && window.isSecureContext) {
+     navigator.serviceWorker.register('./service-worker.js').catch(function (error) {
+       console.error('Service worker registration failed:', error);
+     });
+diff --git a/src/styles.css b/src/styles.css
+index b4c4c50..4bbe33c 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -652,27 +652,18 @@ body {
+   font-size: 0.9rem;
+ }
+ 
+-.crossed-off-actions {
+-  display: flex;
+-  gap: 0;
+-  margin-top: 10px;
+-}
+-
+ .crossed-off-action-button {
+-  flex: 1;
+-  padding: 10px;
++  padding: 4px 10px;
++  margin-left: auto;
+   border: 1px solid var(--color-border);
+   background-color: var(--color-button-bg);
+   color: var(--color-text);
+-  font-size: 0.9rem;
++  font-size: 0.85rem;
+   font-weight: 500;
+   cursor: pointer;
+   border-radius: 4px;
+   transition: background-color 0.2s, color 0.2s;
+-}
+-
+-.crossed-off-action-button:not(:last-child) {
+-  margin-right: 10px;
++  white-space: nowrap;
+ }
+ 
+ .crossed-off-action-button:hover {
+@@ -697,6 +688,303 @@ body {
+   color: #fff;
+ }
+ 
++.recipe-ingredients-section,
++.recipe-instructions-section {
++  margin-top: 10px;
++  border-top: 1px solid var(--color-border);
++  padding-top: 12px;
++}
++
++.recipe-ingredients-header,
++.recipe-instructions-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 10px;
++  margin-bottom: 8px;
++}
++
++.recipe-ingredients-title,
++.recipe-instructions-title {
++  margin: 0;
++  font-size: 1rem;
++  font-weight: 600;
++  color: var(--color-text);
++}
++
++.recipe-accordion-card {
++  margin: 2px 0 16px 0;
++  border: 1px solid var(--color-border);
++  border-radius: 10px;
++  background: var(--color-surface);
++  overflow: visible;
++}
++
++.recipe-accordion-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  width: 100%;
++  border: 0;
++  background: var(--color-surface-light);
++  color: var(--color-text);
++  padding: 14px 16px;
++  cursor: pointer;
++  text-align: left;
++  transition: background-color 0.2s ease;
++  border-radius: 10px 10px 0 0;
++}
++
++.recipe-accordion-header-actions {
++  margin-left: auto;
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.recipe-accordion-header:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.recipe-accordion-header:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: -2px;
++}
++
++.recipe-accordion-title {
++  display: inline-flex;
++  align-items: center;
++}
++
++.recipe-accordion-title {
++  font-size: 1rem;
++  font-weight: 600;
++  color: var(--color-text);
++}
++
++.recipe-accordion-content {
++  display: none;
++  gap: 14px;
++  padding: 14px 16px;
++}
++
++.recipe-accordion-content.is-expanded {
++  display: grid;
++}
++
++.recipe-version-select,
++.recipe-version-save-button,
++.recipe-version-secondary-button {
++  border: 1px solid var(--color-border);
++  background: var(--color-bg);
++  color: var(--color-text);
++  border-radius: 8px;
++  padding: 6px 10px;
++  font-size: 0.86rem;
++  cursor: pointer;
++}
++
++.recipe-version-select {
++  min-width: 180px;
++}
++
++.recipe-version-save-button,
++.recipe-version-secondary-button {
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.recipe-version-save-button:hover,
++.recipe-version-secondary-button:hover,
++.recipe-version-select:hover {
++  border-color: var(--color-brand);
++}
++
++.recipe-version-note-section {
++  display: grid;
++  gap: 8px;
++}
++
++.recipe-version-note-input {
++  width: 100%;
++  min-height: 104px;
++  resize: vertical;
++  border: 1px solid var(--color-border);
++  border-radius: 10px;
++  padding: 10px 12px;
++  background: var(--color-bg);
++  color: var(--color-text);
++  font-size: 0.92rem;
++  line-height: 1.4;
++}
++
++.recipe-version-clone-row {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  flex-wrap: wrap;
++}
++
++.recipe-version-save-actions {
++  margin-left: auto;
++  display: inline-flex;
++  align-items: center;
++  gap: 10px;
++}
++
++.recipe-version-save-status {
++  color: var(--color-muted);
++  font-size: 0.85rem;
++  font-weight: 600;
++}
++
++.recipe-version-save-status.is-dirty {
++  color: var(--color-brand-strong);
++}
++
++.recipe-description-readonly {
++  margin: 0;
++  color: var(--color-text);
++  font-size: 0.92rem;
++  line-height: 1.4;
++}
++
++
++
++.modal-inline-info {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.modal-inline-info-text {
++  margin: 0;
++}
++
++.modal-checklist {
++  display: grid;
++  border: 1px solid var(--color-border);
++  border-radius: 8px;
++  overflow-y: auto;
++  max-height: 210px;
++}
++
++.modal-checklist-row {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  padding: 9px 12px;
++  cursor: pointer;
++  transition: background-color 0.15s;
++}
++
++.modal-checklist-row:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.modal-checklist-row:not(:last-child) {
++  border-bottom: 1px solid var(--color-border);
++}
++
++.modal-checklist-checkbox {
++  flex-shrink: 0;
++  width: 16px;
++  height: 16px;
++  cursor: pointer;
++  accent-color: var(--color-brand);
++}
++
++.modal-checklist-name {
++  font-size: 0.95rem;
++  color: var(--color-text);
++}
++
++.modal-toggle-group {
++  display: flex;
++  border: 1px solid var(--color-border);
++  border-radius: 8px;
++  overflow: hidden;
++}
++
++.modal-toggle-button {
++  flex: 1;
++  padding: 8px 12px;
++  border: none;
++  background: var(--color-bg);
++  color: var(--color-muted);
++  font-size: 0.9rem;
++  font-weight: 500;
++  cursor: pointer;
++  transition: background-color 0.15s, color 0.15s;
++}
++
++.modal-toggle-button:not(:last-child) {
++  border-right: 1px solid var(--color-border);
++}
++
++.modal-toggle-button.is-active {
++  background: var(--color-surface-light);
++  color: var(--color-text);
++}
++
++.modal-toggle-button:hover:not(.is-active) {
++  background: var(--color-surface-light-hover);
++  color: var(--color-text);
++}
++
++
++
++@media (max-width: 640px) {
++  .recipe-accordion-header {
++    flex-wrap: wrap;
++    gap: 6px;
++  }
++}
++
++.recipe-ingredients-empty,
++.recipe-instructions-empty {
++  margin: 0;
++  color: var(--color-muted);
++  font-size: 0.9rem;
++}
++
++.recipe-instruction-list {
++  display: grid;
++  gap: 8px;
++}
++
++.recipe-instruction-row {
++  display: grid;
++  grid-template-columns: auto 1fr auto;
++  gap: 10px;
++  align-items: center;
++  border: 1px solid var(--color-border);
++  border-radius: 8px;
++  padding: 10px 12px;
++  background: var(--color-surface-light);
++}
++
++.recipe-instruction-menu {
++  align-self: center;
++}
++
++.recipe-instruction-number {
++  color: var(--color-muted);
++  font-size: 0.9rem;
++  font-weight: 600;
++  min-width: 20px;
++}
++
++.recipe-instruction-text {
++  color: var(--color-text);
++  font-size: 0.94rem;
++  line-height: 1.35;
++}
++
++
++
+ .category-group {
+   margin-bottom: 14px;
+ }
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index f564b37..676982d 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -314,11 +314,13 @@
+       if (showPill) {
+         qtyPillNode.textContent = String(qty);
+         qtyPillNode.style.display = '';
+-      } else if (hasQtyControls) {
+-        qtyPillNode.style.display = 'none';
++        qtyPillNode.style.visibility = 'visible';
++        qtyPillNode.setAttribute('aria-hidden', 'false');
+       } else {
+-        qtyPillNode.remove();
+-        qtyPillNode = null;
++        qtyPillNode.textContent = '';
++        qtyPillNode.style.display = '';
++        qtyPillNode.style.visibility = 'hidden';
++        qtyPillNode.setAttribute('aria-hidden', 'true');
+       }
+     }
+ 
+@@ -813,6 +815,10 @@
+           var selectButton = document.createElement('button');
+           selectButton.type = 'button';
+           selectButton.className = 'modal-suggestion-main';
++          if (isInCurrentContext) {
++            selectButton.disabled = true;
++            selectButton.setAttribute('aria-disabled', 'true');
++          }
+ 
+           var content = document.createElement('div');
+           content.className = 'modal-suggestion-content';
+@@ -837,6 +843,10 @@
+           }
+ 
+           selectButton.addEventListener('click', function () {
++            if (isInCurrentContext) {
++              return;
++            }
++
+             selectedItem = item;
+             nameInput.value = item.name;
+             if (categoryInput) {
+@@ -896,13 +906,17 @@
+             ? await options.getAllItems()
+             : [];
+           selectedItem = null;
+-          currentSuggestions = sortItemsByName(currentSuggestions);
++          currentSuggestions = sortItemsByName(currentSuggestions).filter(function (item) {
++            return !isItemInCurrentContext(item.id);
++          });
+           renderSuggestions();
+           return;
+         }
+ 
+         currentSuggestions = await options.searchItems(query);
+-        currentSuggestions = sortItemsByName(currentSuggestions);
++        currentSuggestions = sortItemsByName(currentSuggestions).filter(function (item) {
++          return !isItemInCurrentContext(item.id);
++        });
+ 
+         if (selectedItem && normalizeName(selectedItem.name) !== normalizeName(nameInput.value)) {
+           selectedItem = null;
+@@ -1760,6 +1774,481 @@
+     });
+   }
+ 
++  function ShowAddToListModal(config) {
++    // config: { recipeName, ingredients, getAllLists }
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'Add to Grocery List';
++      confirmButton.textContent = 'Add';
++      card.setAttribute('aria-label', 'Add to Grocery List');
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      // ---- Ingredients ----
++      var ingredientsLabel = document.createElement('span');
++      ingredientsLabel.className = 'modal-field-label';
++      ingredientsLabel.textContent = 'Ingredients';
++      form.appendChild(ingredientsLabel);
++
++      var ingredientList = document.createElement('div');
++      ingredientList.className = 'modal-checklist';
++
++      var checkboxes = [];
++      (config.ingredients || []).forEach(function (ingredient) {
++        var row = document.createElement('label');
++        row.className = 'modal-checklist-row';
++
++        var checkbox = document.createElement('input');
++        checkbox.type = 'checkbox';
++        checkbox.checked = true;
++        checkbox.className = 'modal-checklist-checkbox';
++
++        var nameNode = document.createElement('span');
++        nameNode.className = 'modal-checklist-name';
++        nameNode.textContent = ingredient.name;
++
++        row.appendChild(checkbox);
++        row.appendChild(nameNode);
++        ingredientList.appendChild(row);
++        checkboxes.push({ checkbox: checkbox, ingredient: ingredient });
++      });
++
++      form.appendChild(ingredientList);
++
++      // ---- List mode toggle ----
++      var listLabel = document.createElement('span');
++      listLabel.className = 'modal-field-label';
++      listLabel.textContent = 'Target List';
++      form.appendChild(listLabel);
++
++      var toggleGroup = document.createElement('div');
++      toggleGroup.className = 'modal-toggle-group';
++
++      var existingButton = document.createElement('button');
++      existingButton.type = 'button';
++      existingButton.className = 'modal-toggle-button is-active';
++      existingButton.textContent = 'Existing List';
++
++      var newButton = document.createElement('button');
++      newButton.type = 'button';
++      newButton.className = 'modal-toggle-button';
++      newButton.textContent = 'New List';
++
++      toggleGroup.appendChild(existingButton);
++      toggleGroup.appendChild(newButton);
++      form.appendChild(toggleGroup);
++
++      // ---- Existing list section ----
++      var existingSection = document.createElement('div');
++
++      var targetInputWrapper = document.createElement('div');
++      targetInputWrapper.className = 'modal-input-wrapper';
++
++      var targetInput = document.createElement('input');
++      targetInput.type = 'text';
++      targetInput.className = 'modal-input';
++      targetInput.placeholder = 'Search grocery lists';
++
++      var targetSuggestionsList = document.createElement('div');
++      targetSuggestionsList.className = 'modal-suggestions';
++      targetSuggestionsList.hidden = true;
++
++      targetInputWrapper.appendChild(targetInput);
++      targetInputWrapper.appendChild(targetSuggestionsList);
++      existingSection.appendChild(targetInputWrapper);
++      form.appendChild(existingSection);
++
++      // ---- New list section ----
++      var newSection = document.createElement('div');
++      newSection.hidden = true;
++
++      var newListInput = document.createElement('input');
++      newListInput.type = 'text';
++      newListInput.className = 'modal-input';
++      newListInput.value = config.recipeName || '';
++      newListInput.placeholder = 'New list name';
++      newSection.appendChild(newListInput);
++      form.appendChild(newSection);
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++
++      bodyNode.appendChild(form);
++
++      // ---- State ----
++      var mode = 'existing';
++      var selectedList = null;
++      var currentSuggestions = [];
++
++      function setMode(nextMode) {
++        mode = nextMode;
++        existingButton.classList.toggle('is-active', mode === 'existing');
++        newButton.classList.toggle('is-active', mode === 'new');
++        existingSection.hidden = mode !== 'existing';
++        newSection.hidden = mode !== 'new';
++        errorNode.textContent = '';
++        if (mode === 'existing') {
++          targetInput.focus();
++        } else {
++          newListInput.focus();
++          newListInput.select();
++        }
++      }
++
++      existingButton.addEventListener('click', function () { setMode('existing'); });
++      newButton.addEventListener('click', function () { setMode('new'); });
++
++      // ---- Suggestions ----
++      function renderSuggestions() {
++        targetSuggestionsList.replaceChildren();
++        var query = String(targetInput.value || '').trim().toLowerCase();
++        var filtered = currentSuggestions.filter(function (list) {
++          return !query || String(list.name || '').toLowerCase().indexOf(query) !== -1;
++        });
++
++        if (filtered.length === 0) {
++          targetSuggestionsList.hidden = true;
++          return;
++        }
++
++        targetSuggestionsList.hidden = false;
++        filtered.slice(0, 8).forEach(function (list) {
++          var row = document.createElement('div');
++          row.className = 'modal-suggestion-row';
++
++          var btn = document.createElement('button');
++          btn.type = 'button';
++          btn.className = 'modal-suggestion-main';
++
++          var content = document.createElement('div');
++          content.className = 'modal-suggestion-content';
++
++          var nameNode = document.createElement('div');
++          nameNode.className = 'modal-suggestion-name';
++          nameNode.textContent = list.name;
++          content.appendChild(nameNode);
++          btn.appendChild(content);
++
++          btn.addEventListener('click', function () {
++            selectedList = { id: list.id, name: list.name };
++            targetInput.value = list.name;
++            currentSuggestions = [];
++            renderSuggestions();
++            errorNode.textContent = '';
++          });
++
++          row.appendChild(btn);
++          targetSuggestionsList.appendChild(row);
++        });
++      }
++
++      function loadSuggestions() {
++        return Promise.resolve(config.getAllLists ? config.getAllLists() : []).then(function (lists) {
++          currentSuggestions = (lists || []).slice().sort(function (a, b) {
++            return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
++          });
++          renderSuggestions();
++        });
++      }
++
++      function closeSuggestions() {
++        currentSuggestions = [];
++        renderSuggestions();
++      }
++
++      targetInput.addEventListener('focus', function () {
++        loadSuggestions().catch(function () {});
++      });
++      targetInput.addEventListener('input', function () {
++        selectedList = null;
++        loadSuggestions().catch(function () {});
++      });
++
++      // ---- Validate & close ----
++      function close(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.removeEventListener('click', onDocumentClick);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      function validateAndClose() {
++        errorNode.textContent = '';
++
++        var selectedIngredients = checkboxes
++          .filter(function (item) { return item.checkbox.checked; })
++          .map(function (item) { return item.ingredient; });
++
++        if (selectedIngredients.length === 0) {
++          errorNode.textContent = 'Select at least one ingredient.';
++          return;
++        }
++
++        if (mode === 'new') {
++          var newName = String(newListInput.value || '').trim();
++          if (!newName) {
++            errorNode.textContent = 'List name is required.';
++            newListInput.focus();
++            return;
++          }
++          close({ selectedIngredients: selectedIngredients, isNewList: true, newListName: newName, targetListId: null });
++          return;
++        }
++
++        var typedName = String(targetInput.value || '').trim();
++        if (!typedName) {
++          errorNode.textContent = 'Select a grocery list.';
++          targetInput.focus();
++          return;
++        }
++
++        if (!selectedList || String(selectedList.name || '').trim().toLowerCase() !== typedName.toLowerCase()) {
++          errorNode.textContent = 'Select a list from the suggestions.';
++          targetInput.focus();
++          return;
++        }
++
++        close({ selectedIngredients: selectedIngredients, isNewList: false, newListName: null, targetListId: selectedList.id });
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') {
++          if (!targetSuggestionsList.hidden) {
++            closeSuggestions();
++            return;
++          }
++          close(null);
++        }
++      }
++
++      function onDocumentClick(event) {
++        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
++          closeSuggestions();
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) { close(null); }
++      });
++      cancelButton.addEventListener('click', function () { close(null); });
++      confirmButton.addEventListener('click', function () { validateAndClose(); });
++
++      document.addEventListener('keydown', onKeyDown);
++      document.addEventListener('click', onDocumentClick);
++      document.body.appendChild(node);
++
++      requestAnimationFrame(function () {
++        targetInput.focus();
++        loadSuggestions().catch(function () {});
++      });
++    });
++  }
++
++  function ShowNewVersionModal(config) {
++    // config: { availableVersions, defaultVersionNumber, latestVersionNumber }
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'New Version';
++      confirmButton.textContent = 'Create';
++      card.setAttribute('aria-label', 'New Version');
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var baseLabel = document.createElement('label');
++      baseLabel.className = 'modal-field-label';
++      baseLabel.textContent = 'Base new version on';
++      form.appendChild(baseLabel);
++
++      var baseSelect = document.createElement('select');
++      baseSelect.className = 'modal-input';
++
++      var versions = (config.availableVersions || []).slice().sort(function (a, b) {
++        return Number(b.versionNumber || 0) - Number(a.versionNumber || 0);
++      });
++      versions.forEach(function (version) {
++        var option = document.createElement('option');
++        option.value = String(version.versionNumber);
++        var label = 'Version ' + version.versionNumber;
++        if (version.versionNumber === config.latestVersionNumber) {
++          label += ' (Current)';
++        }
++        option.textContent = label;
++        option.selected = version.versionNumber === config.defaultVersionNumber;
++        baseSelect.appendChild(option);
++      });
++
++      form.appendChild(baseSelect);
++      bodyNode.appendChild(form);
++
++      function close(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') {
++          close(null);
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) {
++          close(null);
++        }
++      });
++
++      cancelButton.addEventListener('click', function () {
++        close(null);
++      });
++
++      confirmButton.addEventListener('click', function () {
++        close({ baseVersionNumber: Number(baseSelect.value) });
++      });
++
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++
++      requestAnimationFrame(function () {
++        baseSelect.focus();
++      });
++    });
++  }
++
++  function ShowRecipeCloneModal(config) {
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = config.title || 'Clone Recipe';
++      confirmButton.textContent = config.confirmLabel || 'Clone';
++      card.setAttribute('aria-label', titleNode.textContent);
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var nameLabel = document.createElement('label');
++      nameLabel.className = 'modal-field-label';
++      nameLabel.textContent = 'Recipe name';
++      form.appendChild(nameLabel);
++
++      var nameInput = document.createElement('input');
++      nameInput.type = 'text';
++      nameInput.className = 'modal-input';
++      nameInput.value = config.initialName || '';
++      form.appendChild(nameInput);
++
++      var infoRow = document.createElement('div');
++      infoRow.className = 'modal-inline-info';
++
++      var infoText = document.createElement('p');
++      infoText.className = 'modal-message modal-inline-info-text';
++      infoText.textContent = 'Clones start as a separate recipe with their own history.';
++      infoRow.appendChild(infoText);
++
++      var infoWrap = document.createElement('span');
++      infoWrap.className = 'accordion-info-wrap';
++
++      var infoButton = document.createElement('button');
++      infoButton.type = 'button';
++      infoButton.className = 'accordion-info-icon';
++      infoButton.textContent = '?';
++      infoButton.setAttribute('aria-label', 'About recipe cloning');
++      infoWrap.appendChild(infoButton);
++
++      var infoTooltip = document.createElement('span');
++      infoTooltip.className = 'accordion-info-tooltip';
++      infoTooltip.textContent = config.infoText || '';
++      infoWrap.appendChild(infoTooltip);
++      infoRow.appendChild(infoWrap);
++      form.appendChild(infoRow);
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++      bodyNode.appendChild(form);
++
++      function close(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      function validateAndClose() {
++        var trimmedName = String(nameInput.value || '').trim();
++        if (!trimmedName) {
++          errorNode.textContent = 'Recipe name is required.';
++          nameInput.focus();
++          return;
++        }
++
++        close({ name: trimmedName });
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') {
++          close(null);
++          return;
++        }
++
++        if (event.key === 'Enter' && event.target === nameInput) {
++          event.preventDefault();
++          validateAndClose();
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) {
++          close(null);
++        }
++      });
++
++      cancelButton.addEventListener('click', function () {
++        close(null);
++      });
++
++      confirmButton.addEventListener('click', function () {
++        validateAndClose();
++      });
++
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++
++      requestAnimationFrame(function () {
++        nameInput.focus();
++        nameInput.select();
++      });
++    });
++  }
++
+   function ShowConfirm(config) {
+     return showModal(function (bodyNode, confirmButton, cancelButton) {
+       if (config.message) {
+@@ -1880,8 +2369,13 @@
+     ShowTemplateConfigModal: ShowTemplateConfigModal,
+     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
+     ShowPrompt: ShowPrompt,
++    ShowAddToListModal: ShowAddToListModal,
++    ShowNewVersionModal: ShowNewVersionModal,
++    ShowRecipeCloneModal: ShowRecipeCloneModal,
+     ShowConfirm: ShowConfirm,
+     ShowAlert: ShowAlert,
+-    ShowAboutModal: ShowAboutModal
++    ShowAboutModal: ShowAboutModal,
++    SetActiveOverflowMenu: setActiveOverflowMenu,
++    ShouldOpenOverflowUp: shouldOpenOverflowUp
+   };
+ })();

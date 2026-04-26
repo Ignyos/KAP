@@ -299,6 +299,10 @@
   }
 
   async function appendCrossedOffSection(container, listRecord, crossedOffItems, hooks) {
+    if (!crossedOffItems || crossedOffItems.length === 0) {
+      return;
+    }
+
     var detailShell = container.querySelector('.detail-shell');
     if (!detailShell) {
       return;
@@ -315,8 +319,6 @@
     title.textContent = 'Crossed Off Items';
     header.appendChild(title);
 
-    section.appendChild(header);
-
     function deleteAllCrossedOff() {
       return Promise.resolve().then(async function () {
         await window.KaPListsService.deleteCrossedOffItems(listRecord.id);
@@ -326,72 +328,26 @@
       });
     }
 
-    function uncrossOffAll() {
-      return window.KaPListsService.uncrossOffAllItems(listRecord.id)
-        .then(async function () {
-          await renderDetailInto(container, listRecord, hooks);
-        })
-        .catch(async function (error) {
-          await showError(error.message || 'Unable to uncross-off items.');
-        });
-    }
-
-    if (crossedOffItems.length === 0) {
-      var empty = document.createElement('p');
-      empty.className = 'crossed-off-empty';
-      empty.textContent = 'No crossed-off items.';
-      section.appendChild(empty);
-    } else {
-      var crossedList = document.createElement('div');
-      crossedList.className = 'detail-item-list crossed-off-item-list';
-
-      crossedOffItems.forEach(function (detailItem) {
-        crossedList.appendChild(buildListDetailItemRow(listRecord, detailItem, container, hooks));
-      });
-
-      section.appendChild(crossedList);
-
-    }
-
-    // Keep actions visible under the section; disable when there are no crossed-off items.
-    var buttonsContainer = document.createElement('div');
-    buttonsContainer.className = 'crossed-off-actions';
-
-    var hasCrossedOffItems = crossedOffItems.length > 0;
-
     var deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'crossed-off-action-button crossed-off-action-delete';
-    deleteButton.textContent = 'Delete all crossed-off';
-    deleteButton.disabled = !hasCrossedOffItems;
-    deleteButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
+    deleteButton.textContent = 'Clear Crossed-Off';
     deleteButton.addEventListener('click', function (event) {
       event.stopPropagation();
-      if (!hasCrossedOffItems) {
-        return;
-      }
-
       deleteAllCrossedOff();
     });
+    header.appendChild(deleteButton);
 
-    var uncrossButton = document.createElement('button');
-    uncrossButton.type = 'button';
-    uncrossButton.className = 'crossed-off-action-button crossed-off-action-uncross';
-    uncrossButton.textContent = 'Uncross-off all items';
-    uncrossButton.disabled = !hasCrossedOffItems;
-    uncrossButton.setAttribute('aria-disabled', hasCrossedOffItems ? 'false' : 'true');
-    uncrossButton.addEventListener('click', function (event) {
-      event.stopPropagation();
-      if (!hasCrossedOffItems) {
-        return;
-      }
+    section.appendChild(header);
 
-      uncrossOffAll();
+    var crossedList = document.createElement('div');
+    crossedList.className = 'detail-item-list crossed-off-item-list';
+
+    crossedOffItems.forEach(function (detailItem) {
+      crossedList.appendChild(buildListDetailItemRow(listRecord, detailItem, container, hooks));
     });
 
-    buttonsContainer.appendChild(deleteButton);
-    buttonsContainer.appendChild(uncrossButton);
-    section.appendChild(buttonsContainer);
+    section.appendChild(crossedList);
 
     detailShell.appendChild(section);
   }
