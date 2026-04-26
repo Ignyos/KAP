@@ -193,6 +193,26 @@
     }
   }
 
+  async function deleteSelectedVersion(recipeRecord, activeVersion) {
+    var confirmed = await window.KaPUI.ShowConfirm({
+      title: 'Delete Version',
+      message: 'Delete version ' + activeVersion.versionNumber + '? Other version numbers will not change.',
+      confirmLabel: 'Delete',
+      isDanger: true
+    });
+    if (!confirmed) {
+      return false;
+    }
+
+    try {
+      await window.KaPRecipesService.deleteRecipeVersion(recipeRecord.id, activeVersion.id);
+      return true;
+    } catch (error) {
+      await showError(error.message || 'Unable to delete version.');
+      return false;
+    }
+  }
+
   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems) {
     var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
       title: 'Add Ingredient',
@@ -663,7 +683,13 @@
     function updateVersionNoteSaveState() {
       var isDirty = noteInput.value !== originalVersionNote;
       saveNoteButton.disabled = !isDirty;
-      saveStatus.textContent = isDirty ? 'Unsaved changes' : 'Saved';
+      if (isDirty) {
+        saveStatus.textContent = 'Unsaved changes';
+      } else if (!noteInput.value) {
+        saveStatus.textContent = 'No note yet.';
+      } else {
+        saveStatus.textContent = 'Saved';
+      }
       saveStatus.classList.toggle('is-dirty', isDirty);
     }
 
@@ -704,6 +730,22 @@
       }
     });
     cloneRow.appendChild(cloneButton);
+
+    if (!isViewingLatestVersion) {
+      var deleteVersionButton = document.createElement('button');
+      deleteVersionButton.type = 'button';
+      deleteVersionButton.className = 'recipe-version-secondary-button record-action-button--danger';
+      deleteVersionButton.textContent = 'Delete Version';
+      deleteVersionButton.addEventListener('click', async function () {
+        var deleted = await deleteSelectedVersion(record, activeVersion);
+        if (deleted) {
+          clearRecipeEditMode(record.id);
+          setVersionAccordionExpanded(record.id, true);
+          await renderDetailInto(container, record, hooks, latestVersion ? latestVersion.versionNumber : null);
+        }
+      });
+      cloneRow.appendChild(deleteVersionButton);
+    }
 
     var cloneInfoWrap = document.createElement('span');
     cloneInfoWrap.className = 'accordion-info-wrap';
@@ -1041,12 +1083,9 @@
 
     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
     var isInEditMode = !isViewingLatestVersion && isRecipeInEditMode(record.id, activeVersion ? activeVersion.versionNumber : null);
-    var detailItems = (isViewingLatestVersion || isInEditMode)
-      ? await window.KaPRecipesService.getRecipeItems(record.id)
-      : getDetailItemsFromVersionSnapshot(activeVersion);
-    var instructions = (isViewingLatestVersion || isInEditMode)
-      ? await window.KaPRecipesService.getRecipeInstructions(record.id)
-      : getInstructionItemsFromVersionSnapshot(activeVersion);
+    var canEdit = isViewingLatestVersion || isInEditMode;
+    var detailItems = await window.KaPRecipesService.getRecipeItems(record.id);
+    var instructions = await window.KaPRecipesService.getRecipeInstructions(record.id);
 
     var sortedItems = sortByNameAscending(detailItems);
     var titleText = record.name;
@@ -1057,7 +1096,7 @@
       onAddItem: null,
       detailItems: sortedItems,
       itemRowBuilder: function (detailItem) {
-        if (!isViewingLatestVersion && !isInEditMode) {
+        if (!canEdit) {
           return buildReadOnlyRecipeDetailItemRow(detailItem);
         }
 
@@ -1067,10 +1106,7 @@
         {
           label: 'Add To Grocery List',
           onClick: async function () {
-            var ingredients = isViewingLatestVersion
-              ? await window.KaPRecipesService.getRecipeItems(record.id)
-              : getDetailItemsFromVersionSnapshot(activeVersion);
-
+            var ingredients = detailItems;
             if (!ingredients || ingredients.length === 0) {
               await showError('This recipe has no ingredients to add.');
               return;
@@ -1139,13 +1175,13 @@
       record,
       hooks,
       activeVersion ? activeVersion.versionNumber : null,
-      isViewingLatestVersion || isInEditMode
+        canEdit
     );
     appendIngredientsSection(
       container,
       record,
       detailItems,
-      isViewingLatestVersion || isInEditMode,
+        canEdit,
       hooks,
       activeVersion ? activeVersion.versionNumber : null
     );
@@ -1154,7 +1190,7 @@
       container,
       record,
       instructions,
-      isViewingLatestVersion || isInEditMode,
+        canEdit,
       hooks,
       activeVersion ? activeVersion.versionNumber : null
     );

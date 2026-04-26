@@ -1,0 +1,813 @@
+Release timestamp: 2026-04-26-22-04
+Diff source: 2026-04-26-15-09..HEAD
+Generated at: 2026-04-26 18:04:17Z
+diff --git a/RELEASE_NOTES.md b/RELEASE_NOTES.md
+index ba7783e..e69de29 100644
+--- a/RELEASE_NOTES.md
++++ b/RELEASE_NOTES.md
+@@ -1,40 +0,0 @@
+-# Release v2026-04-26-15-09
+-
+-## Overview
+-This release introduces full Recipes support, including recipe detail pages, version history workflows, and ingredient-to-list actions. It also improves item management behavior and clarifies crossed-off list handling.
+-
+-## New Features
+-- **Recipes Section**: Adds a fully functional Recipes area on the home page, including recipe creation and recipe detail navigation.
+-- **Recipe Detail Experience**: Adds editable ingredients and instructions for current versions, plus read-only viewing for historical snapshots by default.
+-- **Recipe Versioning**: Adds version records, version selection, new version creation, version notes, and recipe cloning from selected versions.
+-- **Versions Accordion UI**: Adds a dedicated versions accordion with version picker, note editing, and clone guidance directly in recipe detail.
+-- **Add To Grocery List**: Adds a modal flow to send selected recipe ingredients to an existing list or a newly created grocery list.
+-
+-## Improvements
+-- **Instruction Actions UI**: Moves per-step instruction actions into a compact overflow menu for cleaner instruction rows.
+-- **Ingredient Selection Quality**: Excludes ingredients already on the current recipe from Add Ingredient suggestions.
+-- **Ingredient Row Alignment**: Keeps quantity spacing consistent so ingredient names align in both view-only and editable states.
+-- **Crossed-Off Section Behavior**: Shows the crossed-off area only when crossed-off items exist and simplifies its action to Clear Crossed-Off.
+-
+-## Bug Fixes
+-- **Instruction Reordering**: Fixes Move Up and Move Down behavior so instruction order updates correctly.
+-- **Repeated Item Selection Prevention**: Prevents selecting duplicate existing ingredients from the Add Ingredient suggestion dropdown.
+-
+-## Technical Changes
+-- **Data Model**: Updates IndexedDB schema to version 5 and adds recipeVersions and recipeInstructions stores with supporting indexes.
+-- **Routing**: Adds recipe route parsing and navigation support for /recipe/:id paths.
+-- **UI API Surface**: Adds shared modal APIs for new version, recipe clone, and add-to-list workflows, plus shared overflow menu helpers.
+-- **PWA Bootstrapping**: Moves manifest link creation to runtime for supported protocols and tightens service worker registration checks.
+-
+-## Installation
+-1. Clone or pull the latest code from the repository.
+-2. Open src/index.html or docs/index.html in a web browser.
+-
+-## Requirements
+-- Modern web browser with ES5 JavaScript support.
+-- LocalStorage and IndexedDB support for data persistence.
+-
+-## Documentation
+-- See WORK_IN_PROGRESS.md for active UX tasks and implementation status.
+-- See recipe-feature-definition.md for recipe feature planning notes.
+-- For feature documentation and usage guides, see application-structure.md.
+diff --git a/UI_DESUGN.md b/UI_DESUGN.md
+deleted file mode 100644
+index e4d6e81..0000000
+--- a/UI_DESUGN.md
++++ /dev/null
+@@ -1,38 +0,0 @@
+-## UI Design (Minimal)
+-
+-Scope for now: Main page only.
+-
+-### Main Page Structure
+-
+-1. Sticky header at the top that always stays visible.
+-2. Header text: Kitchen & Pantry
+-3. Directly under header: horizontal tab row with three tabs:
+-	 - Lists
+-	 - Templates
+-	 - Recipes
+-4. Content area under tabs updates based on selected tab.
+-
+-### Selected Tab Content
+-
+-When a tab is selected, the top row of the content area shows:
+-
+-- Left side: subheading
+-- Right side: create button
+-
+-Expected labels by tab:
+-
+-- Lists tab:
+-	- Subheading: My Lists
+-	- Button: + New List
+-- Templates tab:
+-	- Subheading: My Templates
+-	- Button: + New Template
+-- Recipes tab:
+-	- Subheading: My Recipes
+-	- Button: + New Recipe
+-
+-### Notes
+-
+-- Keep this intentionally minimal.
+-- No additional layout, styling, or interaction requirements are defined yet.
+-
+diff --git a/WORK_IN_PROGRESS.md b/WORK_IN_PROGRESS.md
+deleted file mode 100644
+index f250bfb..0000000
+--- a/WORK_IN_PROGRESS.md
++++ /dev/null
+@@ -1,240 +0,0 @@
+-# Work In Progress
+-
+-## Document Status
+-
+-- **Purpose:** Track bugs, improvements, and refinements currently in development.
+-- **Scope:** Changes not yet in master; separate from confirmed requirements.
+-- **Last updated:** 2026-04-19
+-
+----
+-
+-## Active Issues and Tasks
+-
+-### Task 6: Recipe Versions Accordion in Recipe Detail
+-
+-**Status:** ≡ƒÜº IN PROGRESS
+-
+-**Description**
+-Replace recipe version actions hidden in the detail overflow menu with a dedicated Versions accordion directly below the recipe detail header.
+-
+-**Current Behavior**
+-- Recipe detail exposes version actions through the overflow menu.
+-- Version selection uses prompt-based entry.
+-- Version note is shown in the summary card but not as an always-available editable area.
+-- Clone uses a fixed generated name and does not explain clone behavior inline.
+-
+-**Desired Behavior**
+-- Add a Versions accordion directly below the detail header.
+-- Collapsed summary row shows `Versions` and `vN (Current) ΓÇó X total`.
+-- Accordion body includes:
+-  1. Version dropdown sorted newest-to-oldest.
+-  2. Note access action for the selected version.
+-  3. New Version primary action.
+-  4. Always-available version note editing with explicit Save.
+-  5. Clone Recipe action with explanatory tooltip.
+-- Remove version-specific actions from the detail overflow menu.
+-- Remove separate Edit Recipe action from the detail overflow menu.
+-- Keep recipe content editable only when the latest version is selected.
+-- Keep Delete confirmation in the detail overflow menu.
+-
+-**Implementation Notes**
+-- Accordion expansion is remembered per recipe for the current browser session.
+-- First open for a recipe in a session defaults to expanded.
+-- New Version always creates the next numeric version from the currently selected version's effective state.
+-- New Version keeps the accordion open and focuses the version note editor.
+-- Clone prompts for a name with default `<recipe name> - copy` and preserves the existing clone note behavior.
+-- Reviewable version note history is not part of this task and remains a follow-up requirement.
+-
+-**Acceptance Checks**
+-- [ ] Versions accordion renders directly below the recipe detail header.
+-- [ ] Overflow menu no longer contains Select Version, Version Note, New Version, Clone Recipe, or Edit.
+-- [ ] Version dropdown is sorted newest-to-oldest and loads the selected version immediately.
+-- [ ] Older versions render recipe content read-only.
+-- [ ] New Version creates the next version from the selected version and focuses the note editor.
+-- [ ] Version note can be saved empty and shows `No note yet.` when blank.
+-- [ ] Clone Recipe opens with default name `<recipe name> - copy` and explanatory tooltip text.
+-- [ ] Delete remains available with confirmation.
+-
+-**Code References**
+-- [src/features/recipes/recipes-page.js](src/features/recipes/recipes-page.js) - recipe detail versions UI
+-- [src/features/recipes/recipes-service.js](src/features/recipes/recipes-service.js) - clone naming support and version actions
+-- [src/ui/ui.js](src/ui/ui.js) - clone naming modal
+-- [src/styles.css](src/styles.css) - recipe versions accordion styling
+-
+----
+-
+-### Task 1: Multiple Open Accordions on Main Page
+-
+-**Status:** Γ£à COMPLETED
+-
+-**Description**
+-Currently, when a user opens one accordion section on the main page, other closed sections may collapse or behave unexpectedly. Allow all accordion sections to be open simultaneously.
+-
+-**Current Behavior (Before)**
+-- Accordion sections toggle individually but only one can be open at a time.
+-
+-**Desired Behavior**
+-- User can open Lists, Templates, and Recipes accordions at the same time.
+-- Each section opens/closes independently.
+-
+-**Fix Applied**
+-- Changed state from single `expandedSectionId` to array `expandedSectionIds`.
+-- Updated `getSavedExpandedSection()` ΓåÆ `getSavedExpandedSections()` to return array.
+-- Updated `handleSectionToggle()` to add/remove section ID from array instead of replacing.
+-- Added new settings key `EXPANDED_ACCORDION_SECTIONS` in settings.js.
+-- Updated default value to empty array `[]`.
+-
+-**Code References**
+-- [src/features/main/main-page.js](src/features/main/main-page.js) - accordion state and toggle logic
+-- [src/shared/settings.js](src/shared/settings.js) - new settings key and default
+-
+-**Acceptance Checks**
+-- [x] Open one accordion section.
+-- [x] Open a second accordion section without closing the first.
+-- [x] Both sections remain open and functional.
+-- [x] Close one section without affecting the other.
+-- [x] Expanded state persists across page reloads.
+-
+----
+-
+-### Task 2: Persist Scroll Position on Main Page
+-
+-**Status:** Γ£à IMPLEMENTED (pending manual UX verification)
+-
+-**Description**
+-When user returns to the main page (home), scroll position should be restored to where they left off.
+-
+-**Current Behavior**
+-- Page scrolls to top on navigation back to home.
+-
+-**Desired Behavior**
+-- Scroll position is saved when user leaves main page.
+-- Scroll position is restored when user returns to main page.
+-
+-**Fix Applied**
+-- Added persisted setting key `MAIN_PAGE_SCROLL_TOP`.
+-- Save scroll position when route changes away from home.
+-- Restore saved scroll position after home view finishes rendering.
+-- Added helpers in main page module to sanitize and persist scroll values.
+-
+-**Code References**
+-- [src/features/main/main-page.js](src/features/main/main-page.js) - `onRouteChange()`, `renderHome()`
+-- [src/shared/settings.js](src/shared/settings.js) - `MAIN_PAGE_SCROLL_TOP` key/default
+-
+-**Acceptance Checks**
+-- [ ] User scrolls down on main page.
+-- [ ] User navigates to a list, template, or settings.
+-- [ ] User navigates back to home.
+-- [ ] Scroll position is restored to previous position.
+-
+----
+-
+-### Task 3: Sticky Accordion Headers (Stacking)
+-
+-**Status:** Γå⌐∩╕Å ROLLED BACK
+-
+-**Description**
+-Accordion headers should remain visible as the user scrolls, stacking visually so the user always knows which section they are currently viewing.
+-
+-**Current Behavior**
+-- Accordion headers scroll out of view.
+-
+-**Desired Behavior**
+-- Each accordion header becomes sticky when its section is scrolled to the top of the viewport.
+-- Headers stack below each other as user scrolls through sections.
+-- User always sees a visual indicator of the current section context.
+-
+-**Rollback Note**
+-- Sticky stacked header implementation was tested and then reverted.
+-- Accordion headers now use non-sticky behavior again.
+-- Task remains open for a future, revised approach.
+-
+-**CSS/Layout References**
+-- [src/features/main/main-page.js](src/features/main/main-page.js) - accordion render behavior
+-- [src/styles.css](src/styles.css) - accordion header styling
+-
+-**Acceptance Checks**
+-- [ ] Scroll down through expanded accordion sections.
+-- [ ] First accordion header becomes sticky at top of viewport.
+-- [ ] Scroll to second section; second header stacks below first and becomes sticky.
+-- [ ] Visual stacking clearly shows section hierarchy during scroll.
+-
+----
+-
+-### Task 4: Crossed-Off Items Action Buttons
+-
+-**Status:** Γ£à COMPLETED
+-
+-**Description**
+-In the "Crossed Off Items" section within a Grocery List detail view, replace the section menu with two persistent action buttons.
+-
+-**Current Behavior (Before)**
+-- "Crossed Off Items" section header had a three-dot menu with actions hidden.
+-
+-**Desired Behavior**
+-- Remove the three-dot menu from "Crossed Off Items" header.
+-- Add two buttons directly below the "Crossed Off Items" section:
+-  1. "Delete all crossed-off" (left side, 50% width)
+-  2. "Uncross-off all items" (right side, 50% width)
+-- Buttons are always visible when the section is expanded.
+-- Buttons take up 100% of container width, split 50/50.
+-
+-**Fix Applied**
+-- Refactored `appendCrossedOffSection()` to remove menu-related code.
+-- Created `.crossed-off-actions` flex container placed after items list.
+-- Created `.crossed-off-action-button` class with 50% flex width and gap.
+-- Added CSS hover states for both buttons, with red highlight for delete button.
+-- Buttons only show when there are crossed-off items (conditional in function).
+-
+-**Code References**
+-- [src/features/lists/lists-page.js](src/features/lists/lists-page.js) - `appendCrossedOffSection()` refactored
+-- [src/styles.css](src/styles.css) - `.crossed-off-actions`, `.crossed-off-action-button` classes added
+-
+-**Acceptance Checks**
+-- [x] Open a Grocery List detail view.
+-- [x] Cross off some items.
+-- [x] Find the "Crossed Off Items" section.
+-- [x] Verify no three-dot menu is present on the section header.
+-- [x] Two action buttons are visible (50% width each).
+-- [x] "Delete all crossed-off" button is functional.
+-- [x] "Uncross-off all items" button is functional.
+-- [x] Buttons are always visible when section is expanded.
+-- [x] Buttons visible only when there are crossed-off items.
+-
+----
+-
+-### Task 5: Bug Fix ΓÇö Item Click Double-Click Issue in Pantry & Fridge
+-
+-**Status:** Γ£à COMPLETED
+-
+-**Description**
+-When clicking an item in a Pantry & Fridge (template) list more than once in quick succession, the second click does nothing. User has to click a third time to add a second quantity increment.
+-
+-**Current Behavior**
+-- Click item once: quantity becomes 1.
+-- Click item second time: nothing happens (expected: quantity becomes 2).
+-- Click item third time: quantity becomes 2.
+-
+-**Root Cause**
+-- Rapid duplicate clicks were firing before the async operation completed and DOM re-rendered, causing a state sync issue.
+-
+-**Fix Applied**
+-- Added debounce flag at module scope: `isProcessingTemplateItemClick`.
+-- Added guard in `addTemplateItemToTargetList()` to prevent execution if another operation is in progress.
+-- Wrapped implementation in try/finally to ensure flag always resets.
+-
+-**Code References**
+-- [src/features/templates/templates-page.js](src/features/templates/templates-page.js) - `addTemplateItemToTargetList()` now includes debounce protection.
+-
+-**Acceptance Checks**
+-- [x] Click an item once: quantity increments to 1.
+-- [x] Click the same item immediately: quantity increments to 2.
+-- [x] Click subsequent times: each click increments quantity by 1.
+-- [x] No console errors on repeated clicks.
+-
+----
+-
+-## Session Log
+-
+-- **2026-04-25:** Added Task 6 for replacing recipe version menu actions with a dedicated Versions accordion in recipe detail.
+-- **2026-04-19:** Added five tasks: multiple open accordions, scroll persistence, sticky headers, crossed-off items buttons, template item click bug.
+diff --git a/requirements.md b/requirements.md
+deleted file mode 100644
+index 921dd3f..0000000
+--- a/requirements.md
++++ /dev/null
+@@ -1,218 +0,0 @@
+-# Requirements
+-
+-This document records only confirmed requirements needed for the application to function.
+-
+-## Document Status
+-
+-- Status: Draft
+-- Scope: Functional baseline only
+-- Last updated: 2026-04-02
+-
+-## Objective
+-
+-Define the minimum confirmed requirements for a browser-based application hosted as a static GitHub Pages site with browser-based persistence.
+-
+-## Purpose Definition
+-
+-The application is a place to:
+-
+-- Store and create shopping lists.
+-- Store and create shopping list templates.
+-- Create food recipes with versioning.
+-
+-The primary user is anyone who wants to manage shopping lists and/or create and refine recipes.
+-
+-## In Scope
+-
+-- Requirements necessary for the application to run as a static site
+-- Requirements necessary for the application to persist data in the browser
+-
+-## Out of Scope
+-
+-- Unconfirmed product features
+-- Unconfirmed user workflows
+-- Unconfirmed implementation details beyond confirmed hosting and persistence constraints
+-
+-## Functional Requirements
+-
+-### Platform and Persistence
+-
+-- The application must be deployable as a static site on GitHub Pages.
+-- The application must run in the browser.
+-- The application must use IndexedDB in the browser for persistence.
+-
+-### Shopping Lists
+-
+-- As a user, I can add a new list by providing a list name with no items.
+-- As a user, I can edit an existing list name.
+-- As a user, I can add and remove items in an existing list.
+-- As a user, I can set an optional integer quantity when adding or editing a list item.
+-- As a user, I can delete an existing list.
+-
+-### Shopping List Templates
+-
+-- As a user, I can add a new list template by providing a template name with no items.
+-- As a user, I can edit an existing list template name.
+-- As a user, I can add and remove items in an existing list template.
+-- As a user, I can update item quantities in an existing list template using optional integer values.
+-- As a user, I can delete an existing list template.
+-
+-### Shared Data Model
+-
+-- The data model for shopping lists and shopping list templates must use a shared item catalog with join tables.
+-- The Item record set must function as a shared catalog that is reused across List, Template, and Recipe records.
+-- Item definition updates must propagate to lists and templates that reference the updated item.
+-- Quantity must be stored on the relationship record (ListRecord-Item), not on Item.
+-- Quantity for list/template items is optional; when provided it must be an integer.
+-- The shared entity type discriminator must include List, Template, and Recipe.
+-- Description must be supported on ListRecord, Item, and ListRecord-Item.
+-- UnitOfMeasure is deferred for the current list/template milestone and is not required for item records in this phase.
+-
+-### Item Discovery and Reuse
+-
+-- As a user, I get item suggestions from the shared Item catalog while typing a new item name.
+-- As a user, I can select an existing suggested item to link it to the current List, Template, or Recipe context.
+-- As a user, I can create a new Item when no suitable suggestion exists.
+-- New Items must be persisted to the shared Item catalog for future suggestions and reuse.
+-
+-### Recipe Versioning
+-
+-- Recipe versioning must be diff-style, where each version inherits from prior versions unless explicitly changed.
+-- The initial recipe version must store its base state as Added change records.
+-- Ingredient changes must be tracked per version with Added, Modified, and Removed change types.
+-- Instruction changes must be tracked per version with Added, Modified, and Removed change types.
+-- Instruction identity must be stable across versions so an instruction can be modified over time.
+-- Instruction order must be version-specific.
+-- The model must support creator version notes that explain why a version changed.
+-- The model must support end-user recipe notes that resolve as-of the selected version.
+-
+-## Feature Definitions
+-
+-### Shopping Lists
+-
+-#### Feature
+-
+-- Name: List Manager
+-- Necessary function: Users must be able to create, modify, and delete lists.
+-
+-#### Minimum User Actions
+-
+-- As a user, I can add a new list by naming a new list with no items.
+-- As a user, I can edit an existing list by editing the list name and adding or removing list items.
+-- As a user, while adding a list item, I can search and select an existing Item from suggestions or create a new Item.
+-- As a user, I can delete an existing list.
+-
+-#### Data Model (Confirmed)
+-
+-- ListRecord: Id<guid>, Name<string>, Description<string>, Type<enum: List|Template|Recipe>, CreatedDate<dateTime>, UpdatedDate<dateTime>
+-- Item: Id<guid>, Name<string>, Description<string>
+-- ListRecord-Item: ListRecordId<guid>, ItemId<guid>, Quantity<int nullable>, Description<string>
+-
+-### Shopping List Templates
+-
+-#### Feature
+-
+-- Name: List Template Manager
+-- Necessary function: Users must be able to create, modify, and delete list templates.
+-
+-#### Minimum User Actions
+-
+-- As a user, I can add a new list template by naming a new list template with no items.
+-- As a user, I can edit an existing list template by editing the template name, adding or removing items, and updating item quantities.
+-- As a user, while adding a template item, I can search and select an existing Item from suggestions or create a new Item.
+-- As a user, I can delete an existing list template.
+-
+-#### Data Model (Confirmed)
+-
+-Option B: Shared item catalog with join table
+-
+-- ListRecord: Id<guid>, Name<string>, Description<string>, Type<enum: List|Template|Recipe>, CreatedDate<dateTime>, UpdatedDate<dateTime>
+-- Item: Id<guid>, Name<string>, Description<string>
+-- ListRecord-Item: ListRecordId<guid>, ItemId<guid>, Quantity<int nullable>, Description<string>
+-
+-#### Data Mapping (Confirmed)
+-
+-- Use one shared entity for both list and template records, distinguished by a type field.
+-- Entity: ListRecord Id<guid>, Name<string>, Description<string>, Type<enum: List|Template|Recipe>, CreatedDate<dateTime>, UpdatedDate<dateTime>
+-- Relationship: ListRecord-Item ListRecordId<guid>, ItemId<guid>, Quantity<int nullable>, Description<string>
+-
+-### Food Recipes
+-
+-#### Feature
+-
+-- Name: Recipe Version Manager
+-- Necessary function: Users must be able to create recipes, update recipes through diff-style versions, and view a selected version state.
+-
+-#### Minimum User Actions
+-
+-- As a user, I can create a recipe record.
+-- As a user, I can add, modify, and remove ingredients through versioned diffs.
+-- As a user, while adding a recipe ingredient, I can search and select an existing Item from suggestions or create a new Item.
+-- As a user, I can add, modify, and remove instruction steps through versioned diffs.
+-- As a user, I can add creator version notes for why a version changed.
+-- As a user, I can add end-user notes and view notes as-of the selected version.
+-- As a user, I can view a selected version with inherited state applied.
+-
+-#### Data Model (Confirmed)
+-
+-- RecipeVersion: Id<guid>, RecipeId<guid>, VersionNumber<int>, ParentVersionId<guid nullable>, CreatedDate<dateTime>
+-- RecipeVersion-ItemDiff: VersionId<guid>, ItemId<guid>, ChangeType<enum: Added|Modified|Removed>, Quantity<string>, Description<string>
+-- Instruction: Id<guid>, RecipeId<guid>, CreatedDate<dateTime>
+-- RecipeVersion-InstructionDiff: VersionId<guid>, InstructionId<guid>, ChangeType<enum: Added|Modified|Removed>, StepNumber<int>, Text<string>
+-- RecipeVersionNote: Id<guid>, VersionId<guid>, Text<string>
+-- RecipeVersionEndUserNoteDiff: VersionId<guid>, ChangeType<enum: Added|Modified|Removed>, Text<string>
+-
+-## Non-Functional Requirements
+-
+-- The deployed application must be compatible with GitHub Pages static hosting.
+-- Persistent application data must rely on browser IndexedDB support.
+-
+-## Constraints
+-
+-- Hosting target: GitHub Pages
+-- Persistence mechanism: IndexedDB in the browser
+-
+-## Assumptions
+-
+-None recorded.
+-
+-## Open Questions
+-
+-None recorded.
+-
+-## Decisions
+-
+-- The application will be hosted on GitHub Pages.
+-- The application will use IndexedDB in the browser for persistence.
+-- The shopping list and template model will use Option B (shared item catalog with join tables).
+-- The Item record set is a shared catalog that supports type-ahead discovery, reuse, and growth over time.
+-- Item definition updates will propagate across lists and templates that reference the same item.
+-- Quantity values are relationship-specific and will be stored on ListRecord-Item records.
+-- Quantity values for list/template items are optional integers on ListRecord-Item records.
+-- UnitOfMeasure is deferred for list/template item management and will be revisited during recipe-phase requirements.
+-- Lists and templates will use one shared entity model with a type discriminator.
+-- Recipe is a supported ListRecord type.
+-- Recipe versioning uses a diff-style inheritance model.
+-- Version 1 is represented using Added change records.
+-- Instruction identity is stable across versions and instruction content is version-diff driven.
+-- End-user notes are version-aware and resolve as-of the selected version.
+-- Creator version notes are stored per version.
+-
+-## Change Log
+-
+-- 2026-03-31: Initial document created with structure only.
+-- 2026-03-31: Added confirmed functional baseline for static GitHub Pages hosting and IndexedDB persistence.
+-- 2026-03-31: Added confirmed purpose details for shopping lists, shopping list templates, and versioned food recipes.
+-- 2026-03-31: Added confirmed primary user definition.
+-- 2026-03-31: Added confirmed Shopping Lists feature definition, actions, and data model.
+-- 2026-03-31: Added confirmed Shopping List Templates feature requirements and unconfirmed data model suggestions.
+-- 2026-03-31: Confirmed Shopping List Templates data model Option B and propagation behavior for shared item definitions.
+-- 2026-03-31: Confirmed quantity-on-relationship behavior and added a pending unified List/Template entity decision.
+-- 2026-04-01: Confirmed unified entity model for lists and templates using a type discriminator.
+-- 2026-04-01: Normalized list/template data model terms to unified ListRecord and ListRecord-Item entities.
+-- 2026-04-01: Added confirmed recipe versioning requirements, shared model description fields, and version-aware instruction and notes behavior.
+-- 2026-04-02: Performed a light deduplication pass on overlapping functional requirement statements.
+-- 2026-04-02: Restructured functional requirements into categories and converted user-facing statements to As a user phrasing.
+-- 2026-04-02: Standardized Feature Definitions minimum user actions to As a user phrasing.
+-- 2026-04-02: Added confirmed Item catalog discovery, select-existing, and create-new item reuse requirements.
+-- 2026-04-08: Confirmed list/template item quantities are optional integers and deferred UnitOfMeasure to recipe-phase requirements.
+\ No newline at end of file
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index b7caabe..bca0fca 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -515,7 +515,7 @@
+       title: 'About Kitchen & Pantry',
+       companyName: 'Ignyos',
+       companyUrl: 'https://ignyos.com',
+-      releaseNotesUrl: './RELEASE_NOTES.md',
++      releaseNotesUrl: 'https://github.com/Ignyos/KAP/releases',
+       releaseVersion: getCurrentReleaseVersion()
+     });
+   }
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index 3d7a197..752ecfa 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -193,6 +193,26 @@
+     }
+   }
+ 
++  async function deleteSelectedVersion(recipeRecord, activeVersion) {
++    var confirmed = await window.KaPUI.ShowConfirm({
++      title: 'Delete Version',
++      message: 'Delete version ' + activeVersion.versionNumber + '? Other version numbers will not change.',
++      confirmLabel: 'Delete',
++      isDanger: true
++    });
++    if (!confirmed) {
++      return false;
++    }
++
++    try {
++      await window.KaPRecipesService.deleteRecipeVersion(recipeRecord.id, activeVersion.id);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to delete version.');
++      return false;
++    }
++  }
++
+   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems) {
+     var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
+       title: 'Add Ingredient',
+@@ -663,7 +683,13 @@
+     function updateVersionNoteSaveState() {
+       var isDirty = noteInput.value !== originalVersionNote;
+       saveNoteButton.disabled = !isDirty;
+-      saveStatus.textContent = isDirty ? 'Unsaved changes' : 'Saved';
++      if (isDirty) {
++        saveStatus.textContent = 'Unsaved changes';
++      } else if (!noteInput.value) {
++        saveStatus.textContent = 'No note yet.';
++      } else {
++        saveStatus.textContent = 'Saved';
++      }
+       saveStatus.classList.toggle('is-dirty', isDirty);
+     }
+ 
+@@ -705,6 +731,22 @@
+     });
+     cloneRow.appendChild(cloneButton);
+ 
++    if (!isViewingLatestVersion) {
++      var deleteVersionButton = document.createElement('button');
++      deleteVersionButton.type = 'button';
++      deleteVersionButton.className = 'recipe-version-secondary-button record-action-button--danger';
++      deleteVersionButton.textContent = 'Delete Version';
++      deleteVersionButton.addEventListener('click', async function () {
++        var deleted = await deleteSelectedVersion(record, activeVersion);
++        if (deleted) {
++          clearRecipeEditMode(record.id);
++          setVersionAccordionExpanded(record.id, true);
++          await renderDetailInto(container, record, hooks, latestVersion ? latestVersion.versionNumber : null);
++        }
++      });
++      cloneRow.appendChild(deleteVersionButton);
++    }
++
+     var cloneInfoWrap = document.createElement('span');
+     cloneInfoWrap.className = 'accordion-info-wrap';
+ 
+@@ -1041,12 +1083,9 @@
+ 
+     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
+     var isInEditMode = !isViewingLatestVersion && isRecipeInEditMode(record.id, activeVersion ? activeVersion.versionNumber : null);
+-    var detailItems = (isViewingLatestVersion || isInEditMode)
+-      ? await window.KaPRecipesService.getRecipeItems(record.id)
+-      : getDetailItemsFromVersionSnapshot(activeVersion);
+-    var instructions = (isViewingLatestVersion || isInEditMode)
+-      ? await window.KaPRecipesService.getRecipeInstructions(record.id)
+-      : getInstructionItemsFromVersionSnapshot(activeVersion);
++    var canEdit = isViewingLatestVersion || isInEditMode;
++    var detailItems = await window.KaPRecipesService.getRecipeItems(record.id);
++    var instructions = await window.KaPRecipesService.getRecipeInstructions(record.id);
+ 
+     var sortedItems = sortByNameAscending(detailItems);
+     var titleText = record.name;
+@@ -1057,7 +1096,7 @@
+       onAddItem: null,
+       detailItems: sortedItems,
+       itemRowBuilder: function (detailItem) {
+-        if (!isViewingLatestVersion && !isInEditMode) {
++        if (!canEdit) {
+           return buildReadOnlyRecipeDetailItemRow(detailItem);
+         }
+ 
+@@ -1067,10 +1106,7 @@
+         {
+           label: 'Add To Grocery List',
+           onClick: async function () {
+-            var ingredients = isViewingLatestVersion
+-              ? await window.KaPRecipesService.getRecipeItems(record.id)
+-              : getDetailItemsFromVersionSnapshot(activeVersion);
+-
++            var ingredients = detailItems;
+             if (!ingredients || ingredients.length === 0) {
+               await showError('This recipe has no ingredients to add.');
+               return;
+@@ -1139,13 +1175,13 @@
+       record,
+       hooks,
+       activeVersion ? activeVersion.versionNumber : null,
+-      isViewingLatestVersion || isInEditMode
++        canEdit
+     );
+     appendIngredientsSection(
+       container,
+       record,
+       detailItems,
+-      isViewingLatestVersion || isInEditMode,
++        canEdit,
+       hooks,
+       activeVersion ? activeVersion.versionNumber : null
+     );
+@@ -1154,7 +1190,7 @@
+       container,
+       record,
+       instructions,
+-      isViewingLatestVersion || isInEditMode,
++        canEdit,
+       hooks,
+       activeVersion ? activeVersion.versionNumber : null
+     );
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index 3b0e480..e616602 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -655,6 +655,27 @@
+     return normalizeVersionRecord(version);
+   }
+ 
++  async function deleteRecipeVersion(recipeId, versionId) {
++    await ensureRecipeHasVersion(recipeId);
++    var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
++    if (!version || version.recipeId !== recipeId) {
++      throw new Error('Recipe version not found.');
++    }
++
++    var versions = await getRecipeVersions(recipeId);
++    if (versions.length <= 1) {
++      throw new Error('At least one version must remain.');
++    }
++
++    var latestVersion = versions[versions.length - 1];
++    if (latestVersion && latestVersion.id === version.id) {
++      throw new Error('Current version cannot be deleted.');
++    }
++
++    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version.id);
++    return true;
++  }
++
+   async function cloneRecipe(recipeId, sourceVersionId, cloneName) {
+     var sourceRecipe = await requireRecipeById(recipeId);
+     var sourceVersion = sourceVersionId
+@@ -703,6 +724,7 @@
+     getRecipeVersionByNumber: getRecipeVersionByNumber,
+     createNewVersion: createNewVersion,
+     updateVersionNote: updateVersionNote,
++    deleteRecipeVersion: deleteRecipeVersion,
+     cloneRecipe: cloneRecipe
+   };
+ })();
+\ No newline at end of file
+diff --git a/src/styles.css b/src/styles.css
+index 4bbe33c..1b58424 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -508,7 +508,7 @@ body {
+   right: 0;
+   top: calc(100% + 6px);
+   display: grid;
+-  min-width: 140px;
++  min-width: 160px;
+   background: var(--color-surface);
+   border: 1px solid var(--color-border);
+   border-radius: 8px;
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index 676982d..ff1d78a 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -548,8 +548,18 @@
+         confirmButton.classList.add('modal-button--primary');
+       }
+ 
+-      if (config.showCancel === false) {
+-        cancelButton.hidden = true;
++      var hidingCancel = config.showCancel === false;
++      var hidingConfirm = config.showConfirm === false;
++
++      if (hidingCancel) {
++        cancelButton.style.display = 'none';
++      }
++      if (hidingConfirm) {
++        confirmButton.style.display = 'none';
++      }
++      if (hidingCancel && hidingConfirm) {
++        titleNode.style.gridColumn = '1 / -1';
++        titleNode.style.textAlign = 'center';
+       }
+ 
+       var getValue = setupBody(bodyNode, confirmButton, cancelButton);
+@@ -2299,7 +2309,7 @@
+     return showModal(function (bodyNode, confirmButton) {
+       var companyName = String(config.companyName || 'Ignyos').trim();
+       var companyUrl = String(config.companyUrl || 'https://ignyos.com').trim();
+-      var releaseNotesUrl = String(config.releaseNotesUrl || './RELEASE_NOTES.md').trim();
++      var releaseNotesUrl = String(config.releaseNotesUrl || 'https://github.com/Ignyos/KAP/releases').trim();
+       var releaseVersion = String(config.releaseVersion || 'Unknown').trim();
+ 
+       var aboutWrap = document.createElement('div');
+@@ -2336,16 +2346,12 @@
+ 
+       bodyNode.appendChild(aboutWrap);
+ 
+-      requestAnimationFrame(function () {
+-        confirmButton.focus();
+-      });
+-
+       return function () { return true; };
+     }, {
+       title: config.title || 'About',
+-      confirmLabel: config.confirmLabel || 'OK',
+       cancelValue: null,
+       showCancel: false,
++      showConfirm: false,
+       isDanger: false,
+       compact: true
+     });

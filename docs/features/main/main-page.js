@@ -515,7 +515,7 @@
       title: 'About Kitchen & Pantry',
       companyName: 'Ignyos',
       companyUrl: 'https://ignyos.com',
-      releaseNotesUrl: './RELEASE_NOTES.md',
+      releaseNotesUrl: 'https://github.com/Ignyos/KAP/releases',
       releaseVersion: getCurrentReleaseVersion()
     });
   }
