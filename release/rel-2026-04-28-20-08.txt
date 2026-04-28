@@ -1,0 +1,2710 @@
+Release timestamp: 2026-04-28-20-08
+Diff source: 2026-04-26-22-04..HEAD
+Generated at: 2026-04-28 16:08:17Z
+diff --git a/QUANTITY_UOM.md b/QUANTITY_UOM.md
+new file mode 100644
+index 0000000..5745357
+--- /dev/null
++++ b/QUANTITY_UOM.md
+@@ -0,0 +1,201 @@
++# Quantity + Unit of Measure (UOM) Plan
++
++## Purpose
++Define a robust and user-friendly quantity system for recipe ingredients that supports measurement units, clearer ingredient display, and future conversion logic when adding recipe ingredients to grocery lists.
++
++## Goals
++1. Support ingredient quantities with units of measure.
++2. Improve quantity entry/edit UX in ingredient add/edit flows.
++3. Improve ingredient quantity visibility in recipe detail without visual noise.
++4. Introduce a maintainable UnitOfMeasure data model with seeded groups.
++5. Allow end users to add and edit units.
++6. Prepare Add To Grocery List for quantity conversion logic.
++
++## In Scope (Initial Slice)
++1. Recipes only for quantity + UOM behavior.
++2. Decimal and fraction quantity entry support.
++3. UnitOfMeasure persistence with seeded grouped units.
++4. Reusable UOM UI component that can be embedded in multiple places.
++5. Recipe ingredient display update with subtle quantity/UOM badge and strict text alignment.
++6. Conversion-prep contract for Add To Grocery List (no full conversion engine yet).
++
++## Out of Scope (Initial Slice)
++1. Full cross-unit conversion engine (e.g. tsp to cups, g to oz across all unit families).
++2. Grocery list persistence model changes for UOM.
++3. Automatic normalization across incompatible units.
++
++---
++
++## UX Requirements
++
++### 1) Entry and Editing (Add/Edit Ingredient Modal)
++1. Quantity field supports decimals (e.g. 0.5, 1.25) and fractions (e.g. 1/2, 3/4).
++2. Unit selection is shown adjacent to the quantity field.
++3. Validation feedback is immediate and clear for invalid quantity text.
++4. Edit Ingredient flow must allow updating quantity and UOM together.
++
++> **Open question**: The current edit ingredient modal hides the quantity field (`showQuantityField: false`). Does the edit flow need to show quantity + UOM too, or add-flow only for the initial slice?
++
++### 2) Ingredient List Display (Recipe Detail)
++1. Show quantity + UOM in a subtle badge.
++2. Ingredient names must remain vertically aligned regardless of quantity/UOM presence.
++3. Rows with missing quantity/UOM must preserve spacing to avoid layout jitter.
++4. Read-only and edit mode keep the same alignment behavior.
++
++### 3) User-Managed UOM
++1. Provide one reusable UOM component embeddable in:
++   - Ingredient add/edit modal
++   - Future settings surface
++2. Users can add new units.
++3. Users can edit user-defined units.
++4. Seeded units remain stable for data integrity (not editable/deletable by user).
++
++---
++
++## Data Model
++
++### New Store: UnitOfMeasure
++Fields:
++| Field | Type | Notes |
++|---|---|---|
++| id | string | UUID |
++| key | string | Stable seed key (e.g. `imperial.tsp`), null for user-created |
++| name | string | Display name (e.g. Teaspoon) |
++| abbreviation | string | Short form (e.g. tsp) |
++| group | string | Imperial, Metric, Unit, Size, Other |
++| isSeeded | boolean | True for system seeds |
++| isActive | boolean | Soft-delete support |
++| sortOrder | number | Within-group display order |
++| createdDate | string | ISO date |
++| updatedDate | string | ISO date |
++
++Indexes:
++- `by_name` on `name`
++- `by_group` on `group`
++- `by_active` on `isActive`
++
++### Recipe Ingredient Record Extensions
++Extend existing ingredient join records with:
++| Field | Type | Notes |
++|---|---|---|
++| quantityValue | number \| null | Canonical numeric value (e.g. 0.5) |
++| quantityDisplay | string \| null | User-facing text, preserves fraction input (e.g. "1/2") |
++| unitOfMeasureId | string \| null | FK to UnitOfMeasure |
++
++### Version Snapshot Extensions
++Recipe version snapshot items should include:
++- `quantityValue`
++- `quantityDisplay`
++- `unitOfMeasureId`
++
++**Backward compatibility**: Existing records without these fields must render safely. Missing values map to empty quantity/UOM state.
++
++---
++
++## Quantity Parsing and Validation
++
++Accept decimal and fraction formats. Reject invalid forms with specific messages.
++
++| User Input | quantityValue | quantityDisplay |
++|---|---|---|
++| `0.5` | 0.5 | "0.5" |
++| `1/2` | 0.5 | "1/2" |
++| `1 1/2` | 1.5 | "1 1/2" |
++| `2` | 2 | "2" |
++| `abc` | error | ΓÇö |
++
++**Canonical strategy**:
++- Store `quantityValue` (numeric) for any future computation.
++- Store `quantityDisplay` (string) for user fidelity, especially fractions.
++- Keep parsing deterministic and side-effect free.
++
++---
++
++## Seeded UOM Groups
++
++| Group | Examples |
++|---|---|
++| Imperial | tsp, tbsp, fl oz, cup, pint, quart, gallon, oz, lb |
++| Metric | ml, l, mg, g, kg |
++| Unit | each, piece, clove, bunch, can, jar |
++| Size | small, medium, large |
++| Other | (user-added customs land here by default) |
++
++---
++
++## Reusable UOM Component Requirements
++1. Grouped browse/search by group name.
++2. Fast selection for common units (e.g. recent or most used).
++3. Add new unit flow (name + abbreviation + group).
++4. Edit user-defined unit flow.
++5. Clear visual distinction between seeded and custom units.
++6. Embeddable API contract ΓÇö the component accepts `onSelect(uom)` and `currentUomId` props.
++
++---
++
++## Add To Grocery List ΓÇö Conversion Prep
++1. Pass `quantityValue`, `quantityDisplay`, and `unitOfMeasureId` in the add-to-list payload.
++2. Design the payload structure to support same-unit aggregation in a future pass.
++3. Define fallback behavior when conversion is unavailable (pass quantity as-is, no conversion attempt).
++4. Defer cross-unit conversion prompts to a follow-up scope.
++
++---
++
++## Migration Plan
++1. Bump IndexedDB schema version (currently 5 ΓåÆ 6).
++2. Create `unitOfMeasures` object store with indexes in `stores.js`.
++3. Seed grouped units idempotently in the `upgrade` handler in `stores.js`.
++4. Preserve existing recipe data ΓÇö no destructive migration of ingredient records.
++5. Ensure old recipes render without runtime errors (missing fields treated as null/empty).
++
++---
++
++## Technical Touchpoints
++
++| File | Change |
++|---|---|
++| `src/data/stores.js` | Add `UNIT_OF_MEASURES` store name + indexes; add seed data; bump upgrade logic |
++| `src/data/db.js` | Bump `DATABASE_VERSION` to 6 |
++| `src/shared/item-entry-rules.js` | Add `parseQuantity(raw)` ΓåÆ `{ quantityValue, quantityDisplay }` and `validateQuantity(raw)` |
++| `src/features/recipes/recipes-service.js` | Persist/read `quantityValue`, `quantityDisplay`, `unitOfMeasureId` on add/edit/snapshot |
++| `src/features/recipes/recipes-page.js` | Wire UOM selector into add/edit modal; pass new fields to service; prep add-to-list payload |
++| `src/ui/ui.js` | Add reusable UOM selector component; extend `ShowDiscoveryItemModal` with UOM field option |
++| `src/styles.css` | Subtle quantity+UOM badge styles; ensure ingredient name alignment is preserved |
++
++---
++
++## Acceptance Checks
++1. User can add a recipe ingredient with a decimal quantity and a selected UOM.
++2. User can add a recipe ingredient with a fraction quantity (e.g. 1/2) and a selected UOM.
++3. User can edit quantity and UOM from the ingredient edit flow.
++4. Ingredient rows show a subtle quantity/UOM badge with consistent name alignment across all rows.
++5. Custom units can be added and are immediately available for selection.
++6. Seeded units are available by group after first DB migration.
++7. Existing recipes without UOM continue to render correctly (no errors, no blank screens).
++8. Version snapshots retain `quantityValue`, `quantityDisplay`, `unitOfMeasureId` for newly created versions.
++9. Add To Grocery List receives quantity/UOM metadata in the payload.
++
++---
++
++## Risks and Mitigations
++
++| Risk | Mitigation |
++|---|---|
++| Inconsistent quantity representation (int vs decimal vs fraction) | Dual-field model: `quantityValue` + `quantityDisplay` |
++| Seed mutability breaking UOM references | Stable seed keys; seeded units not editable/deletable |
++| UI clutter from quantity+UOM badge | Subtle badge (muted color, small font); strict alignment so rows without UOM don't shift |
++| Migration breaking existing data | All new fields optional; backward-compat render path required |
++
++---
++
++## Open Questions
++1. Should the edit ingredient flow expose quantity + UOM, or add-flow only for the initial slice?
++2. Should the UOM selector in the modal be a simple flat dropdown or grouped (with group headers)?
++3. How should "no unit" be represented ΓÇö empty selection, a sentinel "None" option, or omit the field?
++
++---
++
++## Follow-Up Items (Out of Scope Now)
++1. Full conversion rules matrix by unit family (e.g. tsp ΓåÆ tbsp ΓåÆ cup).
++2. Grocery list UOM persistence and display integration.
++3. Advanced conversion conflict UX (e.g. combining oz + grams).
+diff --git a/src/app-init.js b/src/app-init.js
+index 8de9467..e886697 100644
+--- a/src/app-init.js
++++ b/src/app-init.js
+@@ -1,5 +1,7 @@
+ var AppInit = {
+   initialize: async function () {
++    window.KaPSettings.applyTheme(window.KaPSettings.get(window.KaPSettings.KEYS.THEME));
++    window.KaPSettings.applyTextSize(window.KaPSettings.get(window.KaPSettings.KEYS.TEXT_SIZE));
+     await window.KaPDB.open();
+     await window.KaPMainPage.initialize();
+   }
+diff --git a/src/data/db.js b/src/data/db.js
+index 9c84753..e06c190 100644
+--- a/src/data/db.js
++++ b/src/data/db.js
+@@ -1,6 +1,6 @@
+ (function () {
+   var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 5;
++  var DATABASE_VERSION = 6;
+ 
+   var state = {
+     db: null
+diff --git a/src/data/stores.js b/src/data/stores.js
+index 35897b6..61962d0 100644
+--- a/src/data/stores.js
++++ b/src/data/stores.js
+@@ -5,7 +5,9 @@
+     LIST_RECORD_ITEMS: 'listRecordItems',
+     CATEGORIES: 'categories',
+     RECIPE_VERSIONS: 'recipeVersions',
+-    RECIPE_INSTRUCTIONS: 'recipeInstructions'
++    RECIPE_INSTRUCTIONS: 'recipeInstructions',
++    TAGS: 'tags',
++    RECIPE_TAG_MAP: 'recipeTagMap'
+   };
+ 
+   var INDEX_NAMES = {
+@@ -18,7 +20,11 @@
+     RECIPE_VERSIONS_BY_RECIPE_ID: 'by_recipe_id',
+     RECIPE_VERSIONS_BY_RECIPE_AND_VERSION: 'by_recipe_and_version',
+     RECIPE_INSTRUCTIONS_BY_RECIPE_ID: 'by_recipe_id',
+-    RECIPE_INSTRUCTIONS_BY_RECIPE_AND_STEP: 'by_recipe_and_step'
++    RECIPE_INSTRUCTIONS_BY_RECIPE_AND_STEP: 'by_recipe_and_step',
++    TAGS_BY_NAME: 'by_name',
++    RECIPE_TAG_MAP_BY_RECIPE_ID: 'by_recipe_id',
++    RECIPE_TAG_MAP_BY_TAG_ID: 'by_tag_id',
++    RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag'
+   };
+ 
+   function ensureStore(db, transaction, storeName, options) {
+@@ -35,6 +41,10 @@
+     }
+   }
+ 
++  function normalizeTagName(tagName) {
++    return String(tagName || '').trim().toLowerCase();
++  }
++
+   function upgrade(db, oldVersion, transaction) {
+     var listRecordsStore = ensureStore(db, transaction, STORE_NAMES.LIST_RECORDS, { keyPath: 'id' });
+     ensureIndex(listRecordsStore, INDEX_NAMES.LIST_RECORDS_BY_TYPE, 'type', { unique: false });
+@@ -57,6 +67,65 @@
+     var recipeInstructionsStore = ensureStore(db, transaction, STORE_NAMES.RECIPE_INSTRUCTIONS, { keyPath: 'id' });
+     ensureIndex(recipeInstructionsStore, INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_ID, 'recipeId', { unique: false });
+     ensureIndex(recipeInstructionsStore, INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_AND_STEP, ['recipeId', 'stepNumber'], { unique: false });
++
++    var tagsStore = ensureStore(db, transaction, STORE_NAMES.TAGS, { keyPath: 'id' });
++    ensureIndex(tagsStore, INDEX_NAMES.TAGS_BY_NAME, 'name', { unique: true });
++
++    var recipeTagMapStore = ensureStore(db, transaction, STORE_NAMES.RECIPE_TAG_MAP, { keyPath: 'id' });
++    ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_ID, 'recipeId', { unique: false });
++    ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_TAG_ID, 'tagId', { unique: false });
++    ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG, ['recipeId', 'tagId'], { unique: true });
++
++    if (oldVersion < 6) {
++      var existingTagsByName = {};
++
++      tagsStore.getAll().onsuccess = function (event) {
++        var existingTagRecords = event.target.result || [];
++        for (var i = 0; i < existingTagRecords.length; i++) {
++          existingTagsByName[existingTagRecords[i].name] = existingTagRecords[i].id;
++        }
++
++        listRecordsStore.getAll().onsuccess = function (listRecordsEvent) {
++          var listRecords = listRecordsEvent.target.result || [];
++          var seenRecipeTagKeys = {};
++
++          for (var j = 0; j < listRecords.length; j++) {
++            var recipe = listRecords[j];
++            if (!recipe || recipe.type !== 'Recipe' || !Array.isArray(recipe.tags) || recipe.tags.length === 0) {
++              continue;
++            }
++
++            for (var k = 0; k < recipe.tags.length; k++) {
++              var normalizedTag = normalizeTagName(recipe.tags[k]);
++              if (!normalizedTag) {
++                continue;
++              }
++
++              var tagId = existingTagsByName[normalizedTag];
++              if (!tagId) {
++                tagId = window.KaPIds.NewId();
++                existingTagsByName[normalizedTag] = tagId;
++                tagsStore.put({ id: tagId, name: normalizedTag, createdDate: new Date().toISOString() });
++              }
++
++              var recipeTagKey = String(recipe.id) + '::' + String(tagId);
++              if (seenRecipeTagKeys[recipeTagKey]) {
++                continue;
++              }
++
++              seenRecipeTagKeys[recipeTagKey] = true;
++
++              recipeTagMapStore.put({
++                id: window.KaPIds.NewId(),
++                recipeId: recipe.id,
++                tagId: tagId,
++                createdDate: new Date().toISOString()
++              });
++            }
++          }
++        };
++      };
++    }
+   }
+ 
+   window.KaPStores = {
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index bca0fca..97947d5 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -35,6 +35,30 @@
+   var isInstalled = false;
+   var installMenuButtonRef = null;
+ 
++  function normalizeTagList(tags) {
++    return (Array.isArray(tags) ? tags : []).map(function (tag) {
++      return String(tag || '').trim().toLowerCase();
++    }).filter(function (tag) {
++      return !!tag;
++    });
++  }
++
++  function recipeMatchesQuery(record, query) {
++    var normalizedQuery = String(query || '').trim().toLowerCase();
++    if (!normalizedQuery) {
++      return true;
++    }
++
++    var recipeName = String((record && record.name) || '').toLowerCase();
++    if (recipeName.indexOf(normalizedQuery) >= 0) {
++      return true;
++    }
++
++    return normalizeTagList(record && record.tags).some(function (tag) {
++      return tag.indexOf(normalizedQuery) >= 0;
++    });
++  }
++
+   function getSavedExpandedSections() {
+     var saved = window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTIONS);
+     return saved || [];
+@@ -299,6 +323,55 @@
+         });
+       }
+ 
++      contentElement.innerHTML = '';
++
++      if (section.id === 'recipes') {
++        var filterWrap = document.createElement('div');
++        filterWrap.className = 'recipe-filter-wrap';
++
++        var filterInput = document.createElement('input');
++        filterInput.type = 'search';
++        filterInput.className = 'recipe-filter-input';
++        filterInput.placeholder = 'Search recipes by tag or name';
++        filterInput.setAttribute('aria-label', 'Search recipes by tag or name');
++        filterWrap.appendChild(filterInput);
++
++        var filteredCount = document.createElement('span');
++        filteredCount.className = 'recipe-filter-count';
++        filterWrap.appendChild(filteredCount);
++
++        var recordList = document.createElement('div');
++        recordList.className = 'record-list';
++
++        function renderRecipeRows() {
++          var query = String(filterInput.value || '').trim();
++          var filtered = records.filter(function (record) {
++            return recipeMatchesQuery(record, query);
++          });
++
++          recordList.replaceChildren();
++          filtered.forEach(function (record) {
++            recordList.appendChild(createRecordRow(record, section, listItemCountsById[record.id]));
++          });
++
++          filteredCount.textContent = String(filtered.length) + ' / ' + String(records.length);
++
++          if (filtered.length === 0) {
++            var empty = document.createElement('div');
++            empty.className = 'empty-state-message';
++            empty.textContent = 'No recipes match this search.';
++            recordList.appendChild(empty);
++          }
++        }
++
++        filterInput.addEventListener('input', renderRecipeRows);
++        renderRecipeRows();
++
++        contentElement.appendChild(filterWrap);
++        contentElement.appendChild(recordList);
++        return;
++      }
++
+       var recordList = document.createElement('div');
+       recordList.className = 'record-list';
+ 
+@@ -307,7 +380,6 @@
+         recordList.appendChild(row);
+       });
+ 
+-      contentElement.innerHTML = '';
+       contentElement.appendChild(recordList);
+     } catch (error) {
+       console.error('Error rendering section content:', error);
+@@ -325,6 +397,23 @@
+ 
+     row.appendChild(nameSpan);
+ 
++    if (section.id === 'recipes') {
++      var tags = normalizeTagList(record.tags);
++      if (tags.length > 0) {
++        var tagsWrap = document.createElement('div');
++        tagsWrap.className = 'recipe-row-tags';
++
++        tags.forEach(function (tag) {
++          var tagPill = document.createElement('span');
++          tagPill.className = 'recipe-row-tag-pill';
++          tagPill.textContent = tag;
++          tagsWrap.appendChild(tagPill);
++        });
++
++        row.appendChild(tagsWrap);
++      }
++    }
++
+     if (section.id === 'lists') {
+       var countPill = document.createElement('span');
+       countPill.className = 'list-item-count-pill';
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index 752ecfa..501001d 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -61,19 +61,7 @@
+     setAccordionExpanded(DESCRIPTION_ACCORDION_STATE_KEY, recipeId, isExpanded);
+   }
+ 
+-  var recipeEditModeStates = {};
+ 
+-  function isRecipeInEditMode(recipeId, versionNumber) {
+-    return recipeEditModeStates[recipeId] === Number(versionNumber);
+-  }
+-
+-  function setRecipeEditMode(recipeId, versionNumber) {
+-    recipeEditModeStates[recipeId] = Number(versionNumber);
+-  }
+-
+-  function clearRecipeEditMode(recipeId) {
+-    delete recipeEditModeStates[recipeId];
+-  }
+ 
+   function getLastViewedVersionNumber(recipeId) {
+     try {
+@@ -401,6 +389,14 @@
+     });
+   }
+ 
++  function normalizeTags(tags) {
++    return (Array.isArray(tags) ? tags : []).map(function (tag) {
++      return String(tag || '').trim().toLowerCase();
++    }).filter(function (tag) {
++      return !!tag;
++    });
++  }
++
+   function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionNumber) {
+     return window.KaPUI.NewDetailItemRow(detailItem, {
+       onIncrement: async function () {
+@@ -613,6 +609,10 @@
+       setVersionAccordionExpanded(record.id, !isExpanded);
+       renderDetailInto(container, record, hooks, activeVersion.versionNumber);
+     }, function () {
++      if (!isExpanded) {
++        return null;
++      }
++
+       var actions = document.createElement('div');
+ 
+       var newVersionButton = document.createElement('button');
+@@ -739,7 +739,6 @@
+       deleteVersionButton.addEventListener('click', async function () {
+         var deleted = await deleteSelectedVersion(record, activeVersion);
+         if (deleted) {
+-          clearRecipeEditMode(record.id);
+           setVersionAccordionExpanded(record.id, true);
+           await renderDetailInto(container, record, hooks, latestVersion ? latestVersion.versionNumber : null);
+         }
+@@ -864,6 +863,197 @@
+     }
+ 
+     detailShell.insertBefore(section, versionsSection.nextSibling);
++    return section;
++  }
++
++  function appendTagsAccordionSection(container, record, hooks, selectedVersionNumber, canEditTags, descriptionSection, allRecipeTags) {
++    var detailShell = container.querySelector('.detail-shell');
++    var insertAfterSection = descriptionSection || (detailShell ? detailShell.querySelector('.recipe-accordion-card') : null);
++    if (!detailShell || !insertAfterSection) {
++      return;
++    }
++
++    var currentTags = normalizeTags(record.tags);
++    var dropdownOpen = false;
++    var allKnownTags = normalizeTags(allRecipeTags);
++
++    var accordion = buildAccordionSection('', false, function () {
++      var contentNode = section.querySelector('.recipe-accordion-content');
++      var isExpanded = contentNode && contentNode.classList.contains('is-expanded');
++      if (!contentNode) {
++        return;
++      }
++
++      contentNode.classList.toggle('is-expanded', !isExpanded);
++      contentNode.hidden = isExpanded;
++    }, null, function () {
++      var lead = document.createElement('div');
++      lead.className = 'recipe-tags-lead';
++
++      var buttonWrap = document.createElement('div');
++      buttonWrap.className = 'recipe-tags-picker';
++
++      var pickerButton = document.createElement('button');
++      pickerButton.type = 'button';
++      pickerButton.className = 'recipe-tags-button';
++      pickerButton.textContent = '\ud83c\udff7';
++      pickerButton.setAttribute('aria-label', 'Add or select recipe tag');
++      pickerButton.setAttribute('aria-haspopup', 'menu');
++      pickerButton.setAttribute('aria-expanded', 'false');
++      pickerButton.addEventListener('click', function (event) {
++        event.stopPropagation();
++        setDropdownOpen(!dropdownOpen);
++      });
++
++      var dropdown = document.createElement('div');
++      dropdown.className = 'recipe-tags-dropdown';
++      dropdown.hidden = true;
++
++      var tagInput = document.createElement('input');
++      tagInput.type = 'text';
++      tagInput.className = 'recipe-tags-input';
++      tagInput.placeholder = 'Select or add tag';
++      tagInput.setAttribute('aria-label', 'Select or add tag');
++
++      var optionsWrap = document.createElement('div');
++      optionsWrap.className = 'recipe-tags-options';
++
++      function renderOptions() {
++        var query = String(tagInput.value || '').trim().toLowerCase();
++        var available = allKnownTags.filter(function (tag) {
++          if (currentTags.indexOf(tag) >= 0) {
++            return false;
++          }
++
++          if (!query) {
++            return true;
++          }
++
++          return tag.indexOf(query) >= 0;
++        });
++
++        optionsWrap.replaceChildren();
++
++        available.slice(0, 12).forEach(function (tag) {
++          var optionButton = document.createElement('button');
++          optionButton.type = 'button';
++          optionButton.className = 'recipe-tags-option';
++          optionButton.textContent = tag;
++          optionButton.addEventListener('click', async function (event) {
++            event.stopPropagation();
++            await window.KaPRecipesService.addTagToRecipe(record.id, tag);
++            await renderDetailInto(container, record, hooks, selectedVersionNumber);
++          });
++          optionsWrap.appendChild(optionButton);
++        });
++
++        if (available.length === 0) {
++          var empty = document.createElement('span');
++          empty.className = 'recipe-tags-options-empty';
++          empty.textContent = 'No matching tags.';
++          optionsWrap.appendChild(empty);
++        }
++      }
++
++      tagInput.addEventListener('click', function (event) {
++        event.stopPropagation();
++      });
++      tagInput.addEventListener('input', renderOptions);
++      tagInput.addEventListener('keydown', async function (event) {
++        if (event.key !== 'Enter') {
++          return;
++        }
++
++        event.preventDefault();
++        event.stopPropagation();
++
++        var value = String(tagInput.value || '').trim();
++        if (!value) {
++          return;
++        }
++
++        await window.KaPRecipesService.addTagToRecipe(record.id, value);
++        await renderDetailInto(container, record, hooks, selectedVersionNumber);
++      });
++
++      function setDropdownOpen(isOpen) {
++        dropdownOpen = !!isOpen;
++        dropdown.hidden = !dropdownOpen;
++        pickerButton.setAttribute('aria-expanded', dropdownOpen ? 'true' : 'false');
++
++        if (dropdownOpen) {
++          window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, true);
++          renderOptions();
++          requestAnimationFrame(function () {
++            tagInput.focus();
++          });
++        } else {
++          window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, false);
++        }
++      }
++
++      if (!canEditTags) {
++        pickerButton.disabled = true;
++      }
++
++      dropdown.appendChild(tagInput);
++      dropdown.appendChild(optionsWrap);
++      buttonWrap.appendChild(pickerButton);
++      buttonWrap.appendChild(dropdown);
++      lead.appendChild(buttonWrap);
++
++      var tagsWrap = document.createElement('div');
++      tagsWrap.className = 'recipe-tags-list';
++
++      if (currentTags.length === 0) {
++        var emptyTag = document.createElement('span');
++        emptyTag.className = 'recipe-tag-empty';
++        emptyTag.textContent = 'No tags';
++        tagsWrap.appendChild(emptyTag);
++      } else {
++        currentTags.forEach(function (tag) {
++          var tagNode = document.createElement('span');
++          tagNode.className = 'recipe-tag-pill';
++
++          var tagLabel = document.createElement('span');
++          tagLabel.className = 'recipe-tag-label';
++          tagLabel.textContent = tag;
++          tagNode.appendChild(tagLabel);
++
++          if (canEditTags) {
++            var removeButton = document.createElement('button');
++            removeButton.type = 'button';
++            removeButton.className = 'recipe-tag-remove-button';
++            removeButton.setAttribute('aria-label', 'Remove tag ' + tag);
++            removeButton.textContent = 'x';
++            removeButton.addEventListener('click', async function (event) {
++              event.stopPropagation();
++              await window.KaPRecipesService.removeTagFromRecipe(record.id, tag);
++              await renderDetailInto(container, record, hooks, selectedVersionNumber);
++            });
++            tagNode.appendChild(removeButton);
++          }
++
++          tagsWrap.appendChild(tagNode);
++        });
++      }
++
++      lead.appendChild(tagsWrap);
++
++      return lead;
++    });
++
++    var section = accordion.section;
++    var content = accordion.content;
++
++    var hint = document.createElement('p');
++    hint.className = 'recipe-tags-hint';
++    hint.textContent = canEditTags
++      ? 'Use the tag button to add a tag or type one and press Enter.'
++      : 'Tags can be edited on the current version only.';
++
++    content.appendChild(hint);
++    detailShell.insertBefore(section, insertAfterSection.nextSibling);
+   }
+ 
+   function appendIngredientsSection(container, recipeRecord, detailItems, isViewingLatestVersion, hooks, selectedVersionNumber) {
+@@ -1062,10 +1252,6 @@
+   }
+ 
+   async function renderDetailInto(container, record, hooks, selectedVersionNumber) {
+-    if (!selectedVersionNumber) {
+-      clearRecipeEditMode(record.id);
+-    }
+-
+     var availableVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
+     var latestVersion = availableVersions.length > 0 ? availableVersions[availableVersions.length - 1] : null;
+     var resolvedVersionNumber = selectedVersionNumber || getLastViewedVersionNumber(record.id);
+@@ -1082,10 +1268,16 @@
+     }
+ 
+     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
+-    var isInEditMode = !isViewingLatestVersion && isRecipeInEditMode(record.id, activeVersion ? activeVersion.versionNumber : null);
+-    var canEdit = isViewingLatestVersion || isInEditMode;
+-    var detailItems = await window.KaPRecipesService.getRecipeItems(record.id);
+-    var instructions = await window.KaPRecipesService.getRecipeInstructions(record.id);
++    var canEdit = isViewingLatestVersion;
++    var detailItems = isViewingLatestVersion
++      ? await window.KaPRecipesService.getRecipeItems(record.id)
++      : getDetailItemsFromVersionSnapshot(activeVersion);
++    var instructions = isViewingLatestVersion
++      ? await window.KaPRecipesService.getRecipeInstructions(record.id)
++      : getInstructionItemsFromVersionSnapshot(activeVersion);
++    var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
++    var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
++    record.tags = recipeTags;
+ 
+     var sortedItems = sortByNameAscending(detailItems);
+     var titleText = record.name;
+@@ -1145,17 +1337,7 @@
+             }
+           }
+         },
+-        !isViewingLatestVersion ? {
+-          label: isInEditMode ? 'View Only' : 'Edit',
+-          onClick: function () {
+-            if (isInEditMode) {
+-              clearRecipeEditMode(record.id);
+-            } else {
+-              setRecipeEditMode(record.id, activeVersion.versionNumber);
+-            }
+-            renderDetailInto(container, record, hooks, activeVersion.versionNumber);
+-          }
+-        } : null,
++
+         {
+           label: 'Delete',
+           isDanger: true,
+@@ -1170,13 +1352,22 @@
+     });
+ 
+     appendVersionsAccordionSection(container, record, hooks, availableVersions, activeVersion, latestVersion, isViewingLatestVersion);
+-    appendDescriptionAccordionSection(
++    var descriptionSection = appendDescriptionAccordionSection(
+       container,
+       record,
+       hooks,
+       activeVersion ? activeVersion.versionNumber : null,
+         canEdit
+     );
++    appendTagsAccordionSection(
++      container,
++      record,
++      hooks,
++      activeVersion ? activeVersion.versionNumber : null,
++      canEdit,
++      descriptionSection,
++      allRecipeTags
++    );
+     appendIngredientsSection(
+       container,
+       record,
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index e616602..d51fc38 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -27,6 +27,37 @@
+     return window.KaPItemEntryRules.normalizeDescription(description);
+   }
+ 
++  function normalizeTagName(tagName) {
++    return String(tagName || '').trim().toLowerCase();
++  }
++
++  function normalizeRecipeTags(tags) {
++    var seen = {};
++    return (Array.isArray(tags) ? tags : [])
++      .map(normalizeTagName)
++      .filter(function (tag) {
++        if (!tag || seen[tag]) {
++          return false;
++        }
++
++        seen[tag] = true;
++        return true;
++      })
++      .sort(function (a, b) {
++        return a.localeCompare(b, undefined, { sensitivity: 'base' });
++      });
++  }
++
++  function normalizeRecipeRecord(record) {
++    if (!record) {
++      return null;
++    }
++
++    var normalized = Object.assign({}, record);
++    normalized.tags = normalizeRecipeTags(record.tags);
++    return normalized;
++  }
++
+   function sortByNameAscending(records) {
+     return (records || []).slice().sort(function (a, b) {
+       return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), undefined, {
+@@ -129,6 +160,45 @@
+     );
+   }
+ 
++  async function readRecipeTagMapByRecipeId(recipeId) {
++    return window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
++      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_ID,
++      recipeId
++    );
++  }
++
++  async function readTagByName(tagName) {
++    var matches = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.TAGS,
++      window.KaPStores.INDEX_NAMES.TAGS_BY_NAME,
++      normalizeTagName(tagName)
++    );
++
++    return (matches || [])[0] || null;
++  }
++
++  async function ensureTagRecord(tagName) {
++    var normalizedName = normalizeTagName(tagName);
++    if (!normalizedName) {
++      throw new Error('Tag name is required.');
++    }
++
++    var existing = await readTagByName(normalizedName);
++    if (existing) {
++      return existing;
++    }
++
++    var created = {
++      id: window.KaPIds.NewId(),
++      name: normalizedName,
++      createdDate: nowIso()
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.TAGS, created);
++    return created;
++  }
++
+   async function findJoinRecordById(recipeId, recipeItemId) {
+     var joinRecords = await readJoinRecordsByRecipeId(recipeId);
+     return joinRecords.find(function (record) {
+@@ -169,7 +239,96 @@
+       RECIPE_TYPE
+     );
+ 
+-    return sortByNameAscending(records);
++    var normalizedRecipes = sortByNameAscending(records.map(normalizeRecipeRecord));
++    await Promise.all(normalizedRecipes.map(async function (recipe) {
++      recipe.tags = await getRecipeTags(recipe.id);
++    }));
++
++    return normalizedRecipes;
++  }
++
++  async function getRecipeTags(recipeId) {
++    await requireRecipeById(recipeId);
++    var tagMaps = await readRecipeTagMapByRecipeId(recipeId);
++
++    if (!tagMaps || tagMaps.length === 0) {
++      return [];
++    }
++
++    var tags = await Promise.all(tagMaps.map(function (mapRecord) {
++      return window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.TAGS, mapRecord.tagId);
++    }));
++
++    return normalizeRecipeTags(tags.map(function (tag) {
++      return tag && tag.name;
++    }));
++  }
++
++  async function getAllRecipeTags() {
++    var tagRecords = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.TAGS);
++    return normalizeRecipeTags((tagRecords || []).map(function (record) {
++      return record && record.name;
++    })).sort(function (a, b) {
++      return a.localeCompare(b, undefined, { sensitivity: 'base' });
++    });
++  }
++
++  async function addTagToRecipe(recipeId, tagName) {
++    var safeTag = normalizeTagName(tagName);
++    if (!safeTag) {
++      throw new Error('Tag name is required.');
++    }
++
++    await requireRecipeById(recipeId);
++
++    var tag = await ensureTagRecord(safeTag);
++    var existingMaps = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
++      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG,
++      [recipeId, tag.id]
++    );
++
++    if ((existingMaps || []).length === 0) {
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, {
++        id: window.KaPIds.NewId(),
++        recipeId: recipeId,
++        tagId: tag.id,
++        createdDate: nowIso()
++      });
++    }
++
++    var recipe = await requireRecipeById(recipeId);
++    recipe.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipe);
++    return getRecipeTags(recipeId);
++  }
++
++  async function removeTagFromRecipe(recipeId, tagName) {
++    var safeTag = normalizeTagName(tagName);
++    if (!safeTag) {
++      return [];
++    }
++
++    await requireRecipeById(recipeId);
++    var tag = await readTagByName(safeTag);
++    if (!tag) {
++      return getRecipeTags(recipeId);
++    }
++
++    var existingMaps = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
++      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG,
++      [recipeId, tag.id]
++    );
++
++    for (var i = 0; i < existingMaps.length; i++) {
++      await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, existingMaps[i].id);
++    }
++
++    var recipe = await requireRecipeById(recipeId);
++    recipe.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipe);
++    return getRecipeTags(recipeId);
+   }
+ 
+   async function getRecipeItems(recipeId) {
+@@ -322,6 +481,7 @@
+       id: window.KaPIds.NewId(),
+       name: safeName,
+       description: '',
++      tags: [],
+       type: RECIPE_TYPE,
+       createdDate: timestamp,
+       updatedDate: timestamp
+@@ -362,6 +522,7 @@
+     );
+     var joinRecords = await readJoinRecordsByRecipeId(id);
+     var instructionRecords = await readInstructionRecordsByRecipeId(id);
++    var recipeTagMaps = await readRecipeTagMapByRecipeId(id);
+ 
+     await Promise.all(joinRecords.map(function (joinRecord) {
+       return window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord.id);
+@@ -371,6 +532,10 @@
+       return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instruction.id);
+     }));
+ 
++    await Promise.all(recipeTagMaps.map(function (mapRecord) {
++      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, mapRecord.id);
++    }));
++
+     await Promise.all(versions.map(function (version) {
+       return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version.id);
+     }));
+@@ -687,6 +852,11 @@
+     }
+ 
+     var clonedRecipe = await createRecipe(cloneName || (sourceRecipe.name + ' - copy'));
++    var sourceTags = await getRecipeTags(sourceRecipe.id);
++    for (var i = 0; i < sourceTags.length; i++) {
++      await addTagToRecipe(clonedRecipe.id, sourceTags[i]);
++    }
++
+     await replaceRecipeItemsFromSnapshot(clonedRecipe.id, sourceVersion.snapshotItems);
+     await replaceRecipeInstructionsFromSnapshot(clonedRecipe.id, sourceVersion.snapshotInstructions);
+ 
+@@ -702,6 +872,10 @@
+ 
+   window.KaPRecipesService = {
+     getAllRecipes: getAllRecipes,
++    getRecipeTags: getRecipeTags,
++    getAllRecipeTags: getAllRecipeTags,
++    addTagToRecipe: addTagToRecipe,
++    removeTagFromRecipe: removeTagFromRecipe,
+     createRecipe: createRecipe,
+     renameRecipe: renameRecipe,
+     updateRecipeDescription: updateRecipeDescription,
+diff --git a/src/features/settings/settings-page.js b/src/features/settings/settings-page.js
+index d98ef4b..14bc8b2 100644
+--- a/src/features/settings/settings-page.js
++++ b/src/features/settings/settings-page.js
+@@ -1,4 +1,18 @@
+ (function () {
++  var THEME_OPTIONS = [
++    { value: 'dark', label: 'Dark' },
++    { value: 'spring', label: 'Spring' },
++    { value: 'summer', label: 'Summer' },
++    { value: 'autumn', label: 'Autumn' },
++    { value: 'winter', label: 'Winter' }
++  ];
++
++  var TEXT_SIZE_OPTIONS = [
++    { value: 'small', label: 'Small' },
++    { value: 'medium', label: 'Medium' },
++    { value: 'large', label: 'Large' }
++  ];
++
+   async function renderInto(container, hooks) {
+     var section = document.createElement('section');
+     section.className = 'settings-shell';
+@@ -27,10 +41,99 @@
+ 
+     section.appendChild(header);
+ 
++    var body = document.createElement('div');
++    body.className = 'settings-body';
++    body.appendChild(buildThemeRow());
++    body.appendChild(buildTextSizeRow());
++    section.appendChild(body);
++
+     container.replaceChildren(section);
+   }
+ 
++  function buildTextSizeRow() {
++    var row = document.createElement('div');
++    row.className = 'settings-row';
++
++    var label = document.createElement('span');
++    label.className = 'settings-row-label';
++    label.textContent = 'Text Size';
++    row.appendChild(label);
++
++    var control = document.createElement('div');
++    control.className = 'settings-segment-control';
++    control.setAttribute('role', 'group');
++    control.setAttribute('aria-label', 'Text Size');
++
++    var currentSize = window.KaPSettings.get(window.KaPSettings.KEYS.TEXT_SIZE);
++
++    TEXT_SIZE_OPTIONS.forEach(function (option) {
++      var button = document.createElement('button');
++      button.type = 'button';
++      button.className = 'settings-segment-button';
++      if (option.value === currentSize) {
++        button.classList.add('settings-segment-button--active');
++      }
++      button.textContent = option.label;
++      button.dataset.size = option.value;
++
++      button.addEventListener('click', function () {
++        control.querySelectorAll('.settings-segment-button').forEach(function (b) {
++          b.classList.toggle('settings-segment-button--active', b.dataset.size === option.value);
++        });
++        window.KaPSettings.set(window.KaPSettings.KEYS.TEXT_SIZE, option.value);
++        window.KaPSettings.applyTextSize(option.value);
++      });
++
++      control.appendChild(button);
++    });
++
++    row.appendChild(control);
++    return row;
++  }
++
++  function buildThemeRow() {
++    var row = document.createElement('div');
++    row.className = 'settings-row';
++
++    var label = document.createElement('span');
++    label.className = 'settings-row-label';
++    label.textContent = 'Theme';
++    row.appendChild(label);
++
++    var control = document.createElement('div');
++    control.className = 'settings-segment-control';
++    control.setAttribute('role', 'group');
++    control.setAttribute('aria-label', 'Theme');
++
++    var currentTheme = window.KaPSettings.get(window.KaPSettings.KEYS.THEME);
++
++    THEME_OPTIONS.forEach(function (option) {
++      var button = document.createElement('button');
++      button.type = 'button';
++      button.className = 'settings-segment-button';
++      if (option.value === currentTheme) {
++        button.classList.add('settings-segment-button--active');
++      }
++      button.textContent = option.label;
++      button.dataset.theme = option.value;
++
++      button.addEventListener('click', function () {
++        control.querySelectorAll('.settings-segment-button').forEach(function (b) {
++          b.classList.toggle('settings-segment-button--active', b.dataset.theme === option.value);
++        });
++        window.KaPSettings.set(window.KaPSettings.KEYS.THEME, option.value);
++        window.KaPSettings.applyTheme(option.value);
++      });
++
++      control.appendChild(button);
++    });
++
++    row.appendChild(control);
++    return row;
++  }
++
+   window.KaPSettingsPage = {
+     renderInto: renderInto
+   };
+ })();
++
+diff --git a/src/shared/settings.js b/src/shared/settings.js
+index 14d0c87..3b67db1 100644
+--- a/src/shared/settings.js
++++ b/src/shared/settings.js
+@@ -7,7 +7,9 @@
+     EXPANDED_ACCORDION_SECTION: 'expandedAccordionSection',
+     EXPANDED_ACCORDION_SECTIONS: 'expandedAccordionSections',
+     MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
+-    CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord'
++    CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord',
++    TEXT_SIZE: 'textSize',
++    THEME: 'theme'
+   };
+ 
+   var defaults = {
+@@ -23,7 +25,9 @@
+     categoryViewByRecord: {
+       lists: {},
+       templates: {}
+-    }
++    },
++    textSize: 'small',
++    theme: 'dark'
+   };
+ 
+   function getKey(name) {
+@@ -49,9 +53,23 @@
+     localStorage.setItem(key, JSON.stringify(value));
+   }
+ 
++  var TEXT_SIZE_PX = { small: '16px', medium: '18px', large: '20px' };
++  var THEME_NAMES = { dark: true, spring: true, summer: true, autumn: true, winter: true };
++
++  function applyTextSize(size) {
++    document.documentElement.style.fontSize = TEXT_SIZE_PX[size] || TEXT_SIZE_PX.medium;
++  }
++
++  function applyTheme(theme) {
++    var normalizedTheme = THEME_NAMES[theme] ? theme : 'dark';
++    document.documentElement.setAttribute('data-theme', normalizedTheme);
++  }
++
+   window.KaPSettings = {
+     KEYS: KEYS,
+     get: get,
+-    set: set
++    set: set,
++    applyTextSize: applyTextSize,
++    applyTheme: applyTheme
+   };
+ })();
+diff --git a/src/styles.css b/src/styles.css
+index 1b58424..d1d4a4e 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -13,6 +13,62 @@
+   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.35);
+ }
+ 
++:root[data-theme="spring"] {
++  --color-bg: #f1f9ec;
++  --color-surface: #ffffff;
++  --color-surface-hover: #eef7e7;
++  --color-surface-light: #e9f3e1;
++  --color-surface-light-hover: #dceccb;
++  --color-border: #bdd6b0;
++  --color-text: #21301f;
++  --color-muted: #5c7558;
++  --color-disabled: #8aa084;
++  --color-brand: #79be6e;
++  --color-brand-strong: #5ea653;
++}
++
++:root[data-theme="summer"] {
++  --color-bg: #fff6df;
++  --color-surface: #fffdf6;
++  --color-surface-hover: #fff3cf;
++  --color-surface-light: #ffefc3;
++  --color-surface-light-hover: #ffe4a1;
++  --color-border: #e5c993;
++  --color-text: #2f250b;
++  --color-muted: #76633a;
++  --color-disabled: #a19170;
++  --color-brand: #f6bb34;
++  --color-brand-strong: #e49e00;
++}
++
++:root[data-theme="autumn"] {
++  --color-bg: #25180f;
++  --color-surface: #382418;
++  --color-surface-hover: #4a2f20;
++  --color-surface-light: #4f301f;
++  --color-surface-light-hover: #66412a;
++  --color-border: #7e583f;
++  --color-text: #f3e3d1;
++  --color-muted: #c4ab95;
++  --color-disabled: #8f7663;
++  --color-brand: #f28f3d;
++  --color-brand-strong: #e67a20;
++}
++
++:root[data-theme="winter"] {
++  --color-bg: #0f1a26;
++  --color-surface: #162434;
++  --color-surface-hover: #1d2f45;
++  --color-surface-light: #22364d;
++  --color-surface-light-hover: #2e4866;
++  --color-border: #46627f;
++  --color-text: #e7f2ff;
++  --color-muted: #acc3dd;
++  --color-disabled: #6f85a0;
++  --color-brand: #7fc8ff;
++  --color-brand-strong: #58afea;
++}
++
+ * {
+   box-sizing: border-box;
+ }
+@@ -41,7 +97,7 @@ body {
+   display: flex;
+   justify-content: center;
+   background: var(--color-bg);
+-  padding: 14px 20px;
++  padding: 0.875rem 1.25rem;
+ }
+ 
+ .header-container {
+@@ -73,9 +129,9 @@ body {
+   color: var(--color-text);
+   font-size: 1.2rem;
+   line-height: 1;
+-  padding: 4px 8px;
++  padding: 0.25rem 0.5rem;
+   cursor: pointer;
+-  border-radius: 6px;
++  border-radius: 0.375rem;
+ }
+ 
+ .header-menu-button:hover {
+@@ -90,11 +146,11 @@ body {
+ .header-menu-list {
+   position: absolute;
+   right: 0;
+-  top: calc(100% + 8px);
+-  min-width: 160px;
+-  padding: 6px;
++  top: calc(100% + 0.5rem);
++  min-width: 10rem;
++  padding: 0.375rem;
+   border: 1px solid var(--color-border);
+-  border-radius: 8px;
++  border-radius: 0.5rem;
+   background: var(--color-surface-light);
+   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+   z-index: 40;
+@@ -106,8 +162,8 @@ body {
+   background: transparent;
+   border: 1px solid transparent;
+   color: var(--color-text);
+-  padding: 8px 10px;
+-  border-radius: 6px;
++  padding: 0.5rem 0.625rem;
++  border-radius: 0.375rem;
+   font-size: 0.92rem;
+   cursor: pointer;
+ }
+@@ -137,7 +193,7 @@ body {
+ 
+ .tab-nav {
+   position: sticky;
+-  top: 58px;
++  top: 3.625rem;
+   z-index: 20;
+   background: var(--color-bg);
+ }
+@@ -145,8 +201,8 @@ body {
+ .tab-list {
+   display: flex;
+   justify-content: center;
+-  gap: 8px;
+-  padding: 10px 20px 0 20px;
++  gap: 0.5rem;
++  padding: 0.625rem 1.25rem 0 1.25rem;
+   overflow-x: auto;
+ }
+ 
+@@ -156,8 +212,8 @@ body {
+   color: var(--color-muted);
+   display: inline-flex;
+   align-items: baseline;
+-  gap: 10px;
+-  padding: 8px 8px 14px 8px;
++  gap: 0.625rem;
++  padding: 0.5rem 0.5rem 0.875rem 0.5rem;
+   font-size: 0.95rem;
+   cursor: pointer;
+   white-space: nowrap;
+@@ -173,7 +229,7 @@ body {
+   background: var(--color-brand);
+   border: 1px solid var(--color-brand);
+   border-radius: 999px;
+-  padding: 2px 8px;
++  padding: 2px 0.5rem;
+   font-size: 0.88rem;
+   font-weight: 600;
+   line-height: 1.2;
+@@ -190,7 +246,6 @@ body {
+ .tab-button[aria-selected="true"] {
+     border-bottom: solid 2px;
+     border-color: var(--color-muted);
+-    /* background: #333; */
+     border-top-left-radius: .5em;
+     border-top-right-radius: .5rem;
+ }
+@@ -203,7 +258,7 @@ body {
+ .page-main {
+   max-width: 900px;
+   margin: 0 auto;
+-  padding: 20px;
++  padding: 1.25rem;
+ }
+ 
+ .main-content {
+@@ -220,10 +275,10 @@ body {
+ }
+ 
+ .empty-state-card {
+-  margin-top: 8px;
++  margin-top: 0.5rem;
+   border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 18px;
++  border-radius: 0.625rem;
++  padding: 1.125rem;
+ }
+ 
+ .empty-state-text {
+@@ -239,11 +294,11 @@ body {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  gap: 12px;
++  gap: 0.75rem;
+   width: 100%;
+   border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 12px 14px;
++  border-radius: 0.625rem;
++  padding: 0.75rem 0.875rem;
+   background: transparent;
+   color: var(--color-text);
+   font-family: inherit;
+@@ -268,19 +323,19 @@ body {
+ .record-actions {
+   display: flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .record-action-button {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-height: 32px;
++  min-height: 2rem;
+   border: 1px solid transparent;
+   background: transparent;
+   color: var(--color-brand);
+-  border-radius: 8px;
+-  padding: 5px 10px;
++  border-radius: 0.5rem;
++  padding: 0.3125rem 0.625rem;
+   font-size: 0.85rem;
+   cursor: pointer;
+ }
+@@ -314,9 +369,13 @@ body {
+ .detail-item-row {
+   display: flex;
+   align-items: center;
+-  gap: 12px;
++  gap: 0.75rem;
+   border-top: 1px solid var(--color-border);
+-  padding: .15rem 0;
++  padding: 0.625rem 0;
++}
++
++.detail-item-row:first-child {
++  border-top: none;
+ }
+ 
+ .detail-item-row--toggleable {
+@@ -337,7 +396,7 @@ body {
+ }
+ 
+ .detail-item-meta {
+-  margin-top: 4px;
++  margin-top: 0.25rem;
+   color: var(--color-muted);
+   font-size: 0.85rem;
+ }
+@@ -345,14 +404,14 @@ body {
+ .template-item-usage-pills {
+   display: flex;
+   flex-wrap: wrap;
+-  gap: 6px;
+-  margin-top: 8px;
++  gap: 0.375rem;
++  margin-top: 0.5rem;
+ }
+ 
+ .template-item-usage-pill {
+   display: inline-flex;
+   align-items: center;
+-  padding: 2px 8px;
++  padding: 2px 0.5rem;
+   border-radius: 999px;
+   border: 1px solid var(--color-border);
+   background: rgba(77, 159, 255, 0.12);
+@@ -368,7 +427,7 @@ body {
+ .template-detail-item-row {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) auto;
+-  column-gap: 12px;
++  column-gap: 0.75rem;
+   align-items: center;
+ }
+ 
+@@ -407,15 +466,15 @@ body {
+ .detail-item-actions {
+   display: flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .detail-item-qty-pill {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-width: 28px;
+-  padding: 2px 8px;
++  min-width: 1.75rem;
++  padding: 2px 0.5rem;
+   border-radius: 999px;
+   border: 1px solid var(--color-border);
+   background: var(--color-bg);
+@@ -429,10 +488,10 @@ body {
+ .detail-header {
+   display: flex;
+   align-items: center;
+-  gap: 12px;
+-  padding: 4px 0 16px 0;
++  gap: 0.75rem;
++  padding: 0.25rem 0 1rem 0;
+   position: sticky;
+-  top: 58px;
++  top: 3.25rem;
+   background: var(--color-bg);
+   z-index: 10;
+ }
+@@ -444,7 +503,7 @@ body {
+   font-size: 0.95rem;
+   font-family: inherit;
+   cursor: pointer;
+-  padding: 4px 0;
++  padding: 0.25rem 0;
+   flex-shrink: 0;
+ }
+ 
+@@ -468,16 +527,16 @@ body {
+ .detail-actions {
+   display: flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .detail-add-button {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-height: 32px;
++  min-height: 2rem;
+   font-size: 0.9rem;
+-  padding: 6px 12px;
++  padding: 0.375rem 0.75rem;
+ }
+ 
+ .detail-overflow-menu {
+@@ -488,11 +547,11 @@ body {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-height: 32px;
+-  min-width: 42px;
++  min-height: 2rem;
++  min-width: 2.625rem;
+   text-align: center;
+-  padding-left: 10px;
+-  padding-right: 10px;
++  padding-left: 0.625rem;
++  padding-right: 0.625rem;
+ }
+ 
+ .detail-overflow-dots {
+@@ -506,12 +565,12 @@ body {
+ .detail-overflow-list {
+   position: absolute;
+   right: 0;
+-  top: calc(100% + 6px);
++  top: calc(100% + 0.375rem);
+   display: grid;
+-  min-width: 160px;
++  min-width: 10rem;
+   background: var(--color-surface);
+   border: 1px solid var(--color-border);
+-  border-radius: 8px;
++  border-radius: 0.5rem;
+   box-shadow: var(--shadow-soft);
+   overflow: hidden;
+   z-index: 5;
+@@ -519,7 +578,7 @@ body {
+ 
+ .detail-overflow-list.detail-overflow-list--up {
+   top: auto;
+-  bottom: calc(100% + 6px);
++  bottom: calc(100% + 0.375rem);
+ }
+ 
+ .detail-overflow-list[hidden] {
+@@ -531,7 +590,7 @@ body {
+   border-bottom: 1px solid var(--color-border);
+   background: transparent;
+   color: var(--color-text);
+-  padding: 10px 12px;
++  padding: 0.625rem 0.75rem;
+   text-align: left;
+   font-size: 0.9rem;
+   cursor: pointer;
+@@ -553,18 +612,18 @@ body {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  padding: 6px 8px;
++  padding: 0.375rem 0.5rem;
+   border-bottom: 1px solid var(--color-border);
+-  gap: 4px;
++  gap: 0.25rem;
+ }
+ 
+ .detail-overflow-qty-btn {
+   border: 1px solid var(--color-border);
+   background: transparent;
+   color: var(--color-text);
+-  width: 28px;
+-  height: 28px;
+-  border-radius: 6px;
++  width: 1.75rem;
++  height: 1.75rem;
++  border-radius: 0.375rem;
+   font-size: 1.1rem;
+   line-height: 1;
+   cursor: pointer;
+@@ -581,7 +640,7 @@ body {
+ .detail-overflow-qty-display {
+   font-size: 0.9rem;
+   color: var(--color-text);
+-  min-width: 28px;
++  min-width: 1.75rem;
+   text-align: center;
+ }
+ 
+@@ -593,9 +652,9 @@ body {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-height: 32px;
+-  min-width: 36px;
+-  padding: 4px 8px;
++  min-height: 0;
++  min-width: 2.25rem;
++  padding: 0 0.5rem;
+ }
+ 
+ .detail-item-overflow-dots {
+@@ -608,29 +667,29 @@ body {
+ 
+ .detail-item-overflow-menu .detail-overflow-list {
+   right: 0;
+-  top: calc(100% + 6px);
++  top: calc(100% + 0.375rem);
+ }
+ 
+ .detail-item-overflow-menu .detail-overflow-list.detail-overflow-list--up {
+   top: auto;
+-  bottom: calc(100% + 6px);
++  bottom: calc(100% + 0.375rem);
+ }
+ 
+ .crossed-off-section {
+-  margin-top: 18px;
++  margin-top: 1.125rem;
+   border-top: 1px solid var(--color-border);
+-  padding-top: 12px;
++  padding-top: 0.75rem;
+ }
+ 
+ .crossed-off-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  gap: 10px;
+-  margin-bottom: 6px;
++  gap: 0.625rem;
++  margin-bottom: 0.375rem;
+   background: rgba(231, 76, 60, 0.08);
+-  border-radius: 8px;
+-  padding: 6px 10px;
++  border-radius: 0.5rem;
++  padding: 0.375rem 0.625rem;
+ }
+ 
+ .crossed-off-title {
+@@ -642,18 +701,18 @@ body {
+ 
+ .crossed-off-menu .detail-overflow-list {
+   right: 0;
+-  top: calc(100% + 6px);
++  top: calc(100% + 0.375rem);
+ }
+ 
+ .crossed-off-empty {
+   margin: 0;
+-  padding: 8px 0;
++  padding: 0.5rem 0;
+   color: var(--color-muted);
+   font-size: 0.9rem;
+ }
+ 
+ .crossed-off-action-button {
+-  padding: 4px 10px;
++  padding: 0.25rem 0.625rem;
+   margin-left: auto;
+   border: 1px solid var(--color-border);
+   background-color: var(--color-button-bg);
+@@ -661,7 +720,7 @@ body {
+   font-size: 0.85rem;
+   font-weight: 500;
+   cursor: pointer;
+-  border-radius: 4px;
++  border-radius: 0.25rem;
+   transition: background-color 0.2s, color 0.2s;
+   white-space: nowrap;
+ }
+@@ -690,9 +749,8 @@ body {
+ 
+ .recipe-ingredients-section,
+ .recipe-instructions-section {
+-  margin-top: 10px;
+-  border-top: 1px solid var(--color-border);
+-  padding-top: 12px;
++  margin-top: 0.625rem;
++  padding-top: 0.75rem;
+ }
+ 
+ .recipe-ingredients-header,
+@@ -700,8 +758,8 @@ body {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  gap: 10px;
+-  margin-bottom: 8px;
++  gap: 0.625rem;
++  margin-bottom: 0.5rem;
+ }
+ 
+ .recipe-ingredients-title,
+@@ -713,9 +771,9 @@ body {
+ }
+ 
+ .recipe-accordion-card {
+-  margin: 2px 0 16px 0;
++  margin: 2px 0 1rem 0;
+   border: 1px solid var(--color-border);
+-  border-radius: 10px;
++  border-radius: 0.625rem;
+   background: var(--color-surface);
+   overflow: visible;
+ }
+@@ -724,23 +782,23 @@ body {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  gap: 12px;
++  gap: 0.75rem;
+   width: 100%;
+   border: 0;
+   background: var(--color-surface-light);
+   color: var(--color-text);
+-  padding: 14px 16px;
++  padding: 0.875rem 1rem;
+   cursor: pointer;
+   text-align: left;
+   transition: background-color 0.2s ease;
+-  border-radius: 10px 10px 0 0;
++  border-radius: 0.625rem;
+ }
+ 
+ .recipe-accordion-header-actions {
+   margin-left: auto;
+   display: inline-flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .recipe-accordion-header:hover {
+@@ -765,8 +823,8 @@ body {
+ 
+ .recipe-accordion-content {
+   display: none;
+-  gap: 14px;
+-  padding: 14px 16px;
++  gap: 0.875rem;
++  padding: 0.875rem 1rem;
+ }
+ 
+ .recipe-accordion-content.is-expanded {
+@@ -779,21 +837,21 @@ body {
+   border: 1px solid var(--color-border);
+   background: var(--color-bg);
+   color: var(--color-text);
+-  border-radius: 8px;
+-  padding: 6px 10px;
++  border-radius: 0.5rem;
++  padding: 0.375rem 0.625rem;
+   font-size: 0.86rem;
+   cursor: pointer;
+ }
+ 
+ .recipe-version-select {
+-  min-width: 180px;
++  min-width: 11.25rem;
+ }
+ 
+ .recipe-version-save-button,
+ .recipe-version-secondary-button {
+   display: inline-flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .recipe-version-save-button:hover,
+@@ -804,16 +862,16 @@ body {
+ 
+ .recipe-version-note-section {
+   display: grid;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .recipe-version-note-input {
+   width: 100%;
+-  min-height: 104px;
++  min-height: 6.5rem;
+   resize: vertical;
+   border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  padding: 10px 12px;
++  border-radius: 0.625rem;
++  padding: 0.625rem 0.75rem;
+   background: var(--color-bg);
+   color: var(--color-text);
+   font-size: 0.92rem;
+@@ -823,7 +881,7 @@ body {
+ .recipe-version-clone-row {
+   display: flex;
+   align-items: center;
+-  gap: 10px;
++  gap: 0.625rem;
+   flex-wrap: wrap;
+ }
+ 
+@@ -831,7 +889,7 @@ body {
+   margin-left: auto;
+   display: inline-flex;
+   align-items: center;
+-  gap: 10px;
++  gap: 0.625rem;
+ }
+ 
+ .recipe-version-save-status {
+@@ -856,7 +914,7 @@ body {
+ .modal-inline-info {
+   display: flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .modal-inline-info-text {
+@@ -866,16 +924,16 @@ body {
+ .modal-checklist {
+   display: grid;
+   border: 1px solid var(--color-border);
+-  border-radius: 8px;
++  border-radius: 0.5rem;
+   overflow-y: auto;
+-  max-height: 210px;
++  max-height: 13.125rem;
+ }
+ 
+ .modal-checklist-row {
+   display: flex;
+   align-items: center;
+-  gap: 10px;
+-  padding: 9px 12px;
++  gap: 0.625rem;
++  padding: 0.5625rem 0.75rem;
+   cursor: pointer;
+   transition: background-color 0.15s;
+ }
+@@ -890,8 +948,8 @@ body {
+ 
+ .modal-checklist-checkbox {
+   flex-shrink: 0;
+-  width: 16px;
+-  height: 16px;
++  width: 1rem;
++  height: 1rem;
+   cursor: pointer;
+   accent-color: var(--color-brand);
+ }
+@@ -904,13 +962,13 @@ body {
+ .modal-toggle-group {
+   display: flex;
+   border: 1px solid var(--color-border);
+-  border-radius: 8px;
++  border-radius: 0.5rem;
+   overflow: hidden;
+ }
+ 
+ .modal-toggle-button {
+   flex: 1;
+-  padding: 8px 12px;
++  padding: 0.5rem 0.75rem;
+   border: none;
+   background: var(--color-bg);
+   color: var(--color-muted);
+@@ -939,7 +997,7 @@ body {
+ @media (max-width: 640px) {
+   .recipe-accordion-header {
+     flex-wrap: wrap;
+-    gap: 6px;
++    gap: 0.375rem;
+   }
+ }
+ 
+@@ -952,32 +1010,37 @@ body {
+ 
+ .recipe-instruction-list {
+   display: grid;
+-  gap: 8px;
++  gap: 0;
+ }
+ 
+ .recipe-instruction-row {
+   display: grid;
+-  grid-template-columns: auto 1fr auto;
+-  gap: 10px;
+-  align-items: center;
+-  border: 1px solid var(--color-border);
+-  border-radius: 8px;
+-  padding: 10px 12px;
+-  background: var(--color-surface-light);
++  grid-template-columns: auto minmax(0, 1fr) auto;
++  gap: 0.75rem;
++  align-items: start;
++  border-top: 1px solid var(--color-border);
++  padding: 0.625rem 0;
+ }
+ 
+ .recipe-instruction-menu {
+-  align-self: center;
++  align-self: start;
++}
++
++.recipe-instruction-menu .detail-overflow-trigger {
++  min-height: 0;
++  padding-top: 0;
++  padding-bottom: 0;
+ }
+ 
+ .recipe-instruction-number {
+   color: var(--color-muted);
+   font-size: 0.9rem;
+   font-weight: 600;
+-  min-width: 20px;
++  min-width: 1.25rem;
+ }
+ 
+ .recipe-instruction-text {
++  min-width: 0;
+   color: var(--color-text);
+   font-size: 0.94rem;
+   line-height: 1.35;
+@@ -986,7 +1049,7 @@ body {
+ 
+ 
+ .category-group {
+-  margin-bottom: 14px;
++  margin-bottom: 0.875rem;
+ }
+ 
+ .category-group:last-child {
+@@ -995,16 +1058,16 @@ body {
+ 
+ .category-group-header {
+   background: rgba(77, 159, 255, 0.12);
+-  border-radius: 8px;
+-  padding: 6px 10px;
+-  margin: 6px 0;
++  border-radius: 0.5rem;
++  padding: 0.375rem 0.625rem;
++  margin: 0.375rem 0;
+ }
+ 
+ .category-group-title {
+   margin: 0;
+   font-size: 0.95rem;
+   font-weight: 600;
+-  color: #99c4ff;
++  color: var(--color-brand);
+ }
+ 
+ /* Settings */
+@@ -1020,14 +1083,14 @@ body {
+ 
+ .settings-shell {
+   display: grid;
+-  gap: 8px;
++  gap: 0.5rem;
+   width: 100%;
+   max-width: 900px;
+   margin: 0 auto;
+ }
+ 
+ .settings-title {
+-  margin: 0 0 20px 0;
++  margin: 0 0 1.25rem 0;
+   font-size: 1.15rem;
+   font-weight: 600;
+   color: var(--color-text);
+@@ -1044,7 +1107,7 @@ body {
+ }
+ 
+ .settings-header-spacer {
+-  min-width: 56px;
++  min-width: 3.5rem;
+ }
+ 
+ .settings-toggle-row {
+@@ -1053,17 +1116,17 @@ body {
+   justify-content: space-between;
+   width: 100%;
+   box-sizing: border-box;
+-  padding: 12px 14px;
++  padding: 0.75rem 0.875rem;
+   border: 1px solid var(--color-border);
+-  border-radius: 10px;
+-  margin-bottom: 10px;
++  border-radius: 0.625rem;
++  margin-bottom: 0.625rem;
+ }
+ 
+ .settings-toggle-text {
+   flex: 1;
+   display: grid;
+-  gap: 6px;
+-  padding-right: 14px;
++  gap: 0.375rem;
++  padding-right: 0.875rem;
+ }
+ 
+ .settings-toggle-label {
+@@ -1081,10 +1144,10 @@ body {
+ }
+ 
+ .settings-toggle-switch {
+-  width: 48px;
+-  height: 28px;
++  width: 3rem;
++  height: 1.75rem;
+   border: 1px solid var(--color-border);
+-  border-radius: 14px;
++  border-radius: 0.875rem;
+   background: var(--color-surface);
+   cursor: pointer;
+   position: relative;
+@@ -1096,8 +1159,8 @@ body {
+ 
+ .settings-toggle-switch::after {
+   content: '';
+-  width: 20px;
+-  height: 20px;
++  width: 1.25rem;
++  height: 1.25rem;
+   border-radius: 50%;
+   background: var(--color-muted);
+   position: absolute;
+@@ -1111,7 +1174,7 @@ body {
+ }
+ 
+ .settings-toggle-switch--on::after {
+-  left: 26px;
++  left: 1.625rem;
+   background: #000;
+ }
+ 
+@@ -1120,6 +1183,86 @@ body {
+   outline-offset: 2px;
+ }
+ 
++.settings-body {
++  display: grid;
++  gap: 0.625rem;
++  padding: 0.25rem 1.25rem 1.25rem 1.25rem;
++}
++
++.settings-row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  flex-wrap: wrap;
++  gap: 0.625rem;
++  padding: 0.75rem 0.875rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++}
++
++.settings-row-label {
++  color: var(--color-text);
++  font-size: 0.95rem;
++}
++
++.settings-segment-control {
++  display: flex;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  overflow: hidden;
++  max-width: 100%;
++}
++
++.settings-segment-button {
++  background: var(--color-surface);
++  color: var(--color-text);
++  border: none;
++  border-right: 1px solid var(--color-border);
++  padding: 0.375rem 0.875rem;
++  font-size: 0.88rem;
++  cursor: pointer;
++  transition: background 0.15s;
++  white-space: nowrap;
++}
++
++.settings-segment-button:last-child {
++  border-right: none;
++}
++
++.settings-segment-button:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.settings-segment-button--active {
++  background: var(--color-brand);
++  color: #000;
++  font-weight: 600;
++}
++
++.settings-segment-button--active:hover {
++  background: var(--color-brand-strong);
++}
++
++.settings-segment-button:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: -2px;
++}
++
++@media (max-width: 640px) {
++  .settings-row {
++    align-items: stretch;
++  }
++
++  .settings-row-label {
++    width: 100%;
++  }
++
++  .settings-segment-control {
++    width: 100%;
++    overflow-x: auto;
++  }
++}
++
+ /* Modal */
+ 
+ .modal-overlay {
+@@ -1136,14 +1279,14 @@ body {
+   flex-direction: row;
+   align-items: center;
+   justify-content: center;
+-  padding: 20px;
++  padding: 1.25rem;
+ }
+ 
+ .modal-card {
+   background: var(--color-surface);
+   border: none;
+   border-radius: 0;
+-  padding: 24px 20px;
++  padding: 1.5rem 1.25rem;
+   width: 100%;
+   max-width: 100%;
+   height: 100%;
+@@ -1158,11 +1301,11 @@ body {
+   width: 100%;
+   max-width: 460px;
+   height: auto;
+-  max-height: min(90vh, 520px);
++  max-height: min(90vh, 32.5rem);
+   border: 1px solid var(--color-border);
+-  border-radius: 12px;
++  border-radius: 0.75rem;
+   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+-  padding: 20px;
++  padding: 1.25rem;
+ }
+ 
+ @media (min-width: 941px) {
+@@ -1187,13 +1330,13 @@ body {
+ 
+ .modal-body {
+   flex: 1;
+-  margin-top: 12px;
++  margin-top: 0.75rem;
+   overflow-y: auto;
+ }
+ 
+ .modal-item-form {
+   display: grid;
+-  gap: 10px;
++  gap: 0.625rem;
+ }
+ 
+ .modal-field-label {
+@@ -1214,15 +1357,15 @@ body {
+   right: 0;
+   z-index: 10;
+   display: grid;
+-  gap: 6px;
+-  max-height: 400px;
++  gap: 0.375rem;
++  max-height: 25rem;
+   overflow-y: auto;
+   background: var(--color-surface);
+   border: 1px solid var(--color-border);
+   border-top: none;
+-  border-bottom-left-radius: 8px;
+-  border-bottom-right-radius: 8px;
+-  padding: 6px;
++  border-bottom-left-radius: 0.5rem;
++  border-bottom-right-radius: 0.5rem;
++  padding: 0.375rem;
+ }
+ 
+ .modal-suggestions[hidden] {
+@@ -1240,8 +1383,8 @@ body {
+   border: 1px solid var(--color-border);
+   background: transparent;
+   color: var(--color-text);
+-  border-radius: 8px;
+-  padding: 8px 10px;
++  border-radius: 0.5rem;
++  padding: 0.5rem 0.625rem;
+   text-align: left;
+   cursor: pointer;
+ }
+@@ -1257,7 +1400,7 @@ body {
+ 
+ .modal-suggestion-content {
+   display: grid;
+-  gap: 4px;
++  gap: 0.25rem;
+ }
+ 
+ .modal-suggestion-name {
+@@ -1274,9 +1417,9 @@ body {
+   border: transparent;
+   background: transparent;
+   color: #c95454;
+-  width: 36px;
+-  min-width: 36px;
+-  height: 36px;
++  width: 2.25rem;
++  min-width: 2.25rem;
++  height: 2.25rem;
+   cursor: pointer;
+   font-size: 1.75rem;
+ }
+@@ -1296,11 +1439,11 @@ body {
+   width: 100%;
+   background: var(--color-bg);
+   border: 1px solid var(--color-border);
+-  border-radius: 8px;
++  border-radius: 0.5rem;
+   color: var(--color-text);
+   font-size: 0.95rem;
+   font-family: inherit;
+-  padding: 9px 12px;
++  padding: 0.5625rem 0.75rem;
+ }
+ 
+ .modal-input:focus {
+@@ -1325,8 +1468,8 @@ body {
+ 
+ .modal-about-content {
+   display: grid;
+-  gap: 16px;
+-  padding: 10px 0 6px;
++  gap: 1rem;
++  padding: 0.625rem 0 0.375rem;
+   text-align: center;
+ }
+ 
+@@ -1338,12 +1481,12 @@ body {
+   display: grid;
+   grid-template-columns: auto 1fr auto;
+   align-items: center;
+-  gap: 10px;
++  gap: 0.625rem;
+   position: sticky;
+   top: 0;
+   z-index: 2;
+   background: var(--color-surface);
+-  padding-bottom: 12px;
++  padding-bottom: 0.75rem;
+   border-bottom: 1px solid var(--color-border);
+   flex-shrink: 0;
+ }
+@@ -1355,8 +1498,8 @@ body {
+   width: auto;
+   justify-self: start;
+   white-space: nowrap;
+-  border-radius: 8px;
+-  padding: 8px 16px;
++  border-radius: 0.5rem;
++  padding: 0.5rem 1rem;
+   font-size: 0.9rem;
+   font-weight: 500;
+   font-family: inherit;
+@@ -1405,13 +1548,13 @@ body {
+ .accordion-container {
+   display: flex;
+   flex-direction: column;
+-  gap: 12px;
++  gap: 0.75rem;
+ }
+ 
+ .accordion-section {
+   border: 1px solid var(--color-border);
+   background: var(--color-surface);
+-  border-radius: 10px;
++  border-radius: 0.625rem;
+   overflow: visible;
+ }
+ 
+@@ -1419,13 +1562,13 @@ body {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+-  padding: 16px 20px;
++  padding: 1rem 1.25rem;
+   background: var(--color-surface-light);
+   cursor: pointer;
+   -webkit-user-select: none;
+   user-select: none;
+   transition: background-color 0.2s ease;
+-  border-radius: 10px;
++  border-radius: 0.625rem;
+ }
+ 
+ .accordion-header:hover {
+@@ -1440,7 +1583,7 @@ body {
+ .accordion-label {
+   display: inline-flex;
+   align-items: center;
+-  gap: 8px;
++  gap: 0.5rem;
+   font-size: 1.1rem;
+   font-weight: 500;
+   color: var(--color-text);
+@@ -1450,9 +1593,9 @@ body {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-width: 24px;
+-  height: 24px;
+-  padding: 0 8px;
++  min-width: 1.5rem;
++  height: 1.5rem;
++  padding: 0 0.5rem;
+   border: 1px solid var(--color-border);
+   border-radius: 999px;
+   background: var(--color-bg);
+@@ -1472,8 +1615,8 @@ body {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  width: 24px;
+-  height: 24px;
++  width: 1.5rem;
++  height: 1.5rem;
+   border: 1px solid var(--color-brand);
+   border-radius: 999px;
+   background: rgba(77, 159, 255, 0.12);
+@@ -1500,12 +1643,12 @@ body {
+ .accordion-info-tooltip {
+   position: absolute;
+   left: 50%;
+-  top: calc(100% + 10px);
++  top: calc(100% + 0.625rem);
+   transform: translateX(-50%);
+-  width: min(320px, 72vw);
+-  padding: 10px 12px;
++  width: min(20rem, 72vw);
++  padding: 0.625rem 0.75rem;
+   border: 1px solid var(--color-border);
+-  border-radius: 8px;
++  border-radius: 0.5rem;
+   background: var(--color-surface-light);
+   color: var(--color-text);
+   font-size: 0.85rem;
+@@ -1524,9 +1667,9 @@ body {
+   left: 50%;
+   bottom: 100%;
+   transform: translateX(-50%);
+-  border-left: 6px solid transparent;
+-  border-right: 6px solid transparent;
+-  border-bottom: 6px solid var(--color-surface-light);
++  border-left: 0.375rem solid transparent;
++  border-right: 0.375rem solid transparent;
++  border-bottom: 0.375rem solid var(--color-surface-light);
+ }
+ 
+ .accordion-info-wrap:hover .accordion-info-tooltip,
+@@ -1537,7 +1680,7 @@ body {
+ 
+ .accordion-actions {
+   display: flex;
+-  gap: 8px;
++  gap: 0.5rem;
+ }
+ 
+ .accordion-new-button {
+@@ -1545,8 +1688,7 @@ body {
+   border: 1px solid var(--color-brand);
+   color: #000;
+   font-weight: 600;
+-  padding: 6px 12px;
+-  border-radius: 6px;
++  border-radius: 0.375rem;
+   cursor: pointer;
+   font-size: 0.9rem;
+   transition: background-color 0.2s ease;
+@@ -1569,15 +1711,44 @@ body {
+ }
+ 
+ .accordion-content.expanded {
+-  max-height: 2000px;
++  max-height: 125rem;
++}
++
++.recipe-filter-wrap {
++  display: flex;
++  align-items: center;
++  gap: 0.625rem;
++  padding: 0.75rem 1.25rem 0.375rem 1.25rem;
++}
++
++.recipe-filter-input {
++  flex: 1;
++  min-width: 0;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.5rem 0.625rem;
++  background: var(--color-surface);
++  color: var(--color-text);
++  font: inherit;
++}
++
++.recipe-filter-input:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 1px;
++}
++
++.recipe-filter-count {
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  white-space: nowrap;
+ }
+ 
+ .accordion-record-row {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+-  gap: 12px;
+-  padding: 12px 20px;
++  gap: 0.75rem;
++  padding: 0.75rem 1.25rem;
+   border-top: 1px solid var(--color-border);
+   cursor: pointer;
+   transition: background-color 0.15s ease;
+@@ -1591,12 +1762,181 @@ body {
+   background: rgba(77, 159, 255, 0.08);
+ }
+ 
++.recipe-row-tags {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.375rem;
++  flex-wrap: wrap;
++  justify-content: flex-end;
++}
++
++.recipe-row-tag-pill {
++  border: 1px solid var(--color-border);
++  border-radius: 999px;
++  padding: 0.125rem 0.5rem;
++  font-size: 0.76rem;
++  line-height: 1.2;
++  color: var(--color-muted);
++  background: var(--color-surface);
++}
++
++.recipe-tags-lead {
++  width: 100%;
++  display: flex;
++  align-items: center;
++  gap: 0.5rem;
++  min-width: 0;
++}
++
++.recipe-tags-picker {
++  position: relative;
++  flex: 0 0 auto;
++}
++
++.recipe-tags-button {
++    border: none;
++    border-radius: 0.25rem;
++    min-width: 0;
++    min-height: 0;
++    padding: 0;
++    background: transparent;
++    color: var(--color-brand);
++    font-size: 2.35rem;
++    line-height: .5;
++    transform: rotate(90deg);
++    font-weight: bolder;
++    cursor: pointer;
++}
++
++.recipe-tags-button:disabled {
++  cursor: default;
++  opacity: 0.7;
++}
++
++.recipe-tags-button:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 2px;
++}
++
++.recipe-tags-dropdown {
++  position: absolute;
++  top: calc(100% + 0.375rem);
++  left: 0;
++  min-width: 13rem;
++  max-width: min(20rem, 85vw);
++  display: grid;
++  gap: 0.375rem;
++  padding: 0.5rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  background: var(--color-surface-light);
++  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
++  z-index: 70;
++}
++
++.recipe-tags-dropdown[hidden] {
++  display: none;
++}
++
++.recipe-tags-input {
++  width: 100%;
++  border: 1px solid var(--color-border);
++  border-radius: 0.375rem;
++  padding: 0.375rem 0.5rem;
++  background: var(--color-surface);
++  color: var(--color-text);
++  font: inherit;
++}
++
++.recipe-tags-options {
++  display: grid;
++  gap: 0.25rem;
++  max-height: 10rem;
++  overflow-y: auto;
++}
++
++.recipe-tags-option {
++  text-align: left;
++  border: 1px solid var(--color-border);
++  border-radius: 0.375rem;
++  background: var(--color-surface);
++  color: var(--color-text);
++  padding: 0.25rem 0.5rem;
++  cursor: pointer;
++}
++
++.recipe-tags-option:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.recipe-tags-options-empty {
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  padding: 0.125rem 0;
++}
++
++.recipe-tags-list {
++  display: flex;
++  align-items: center;
++  gap: 0.375rem;
++  flex-wrap: wrap;
++  min-width: 0;
++}
++
++.recipe-tag-pill {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.35rem;
++  border: 1px solid var(--color-border);
++  border-radius: 999px;
++  padding: 0.24rem 0.58rem;
++  font-size: 0.8rem;
++  line-height: 1.2;
++  background: var(--color-surface);
++  color: var(--color-text);
++}
++
++.recipe-tag-label {
++  display: inline-block;
++}
++
++.recipe-tag-remove-button {
++  border: none;
++  background: transparent;
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  line-height: 1;
++  padding: 0;
++  cursor: pointer;
++}
++
++.recipe-tag-remove-button:hover {
++  color: var(--color-brand);
++}
++
++.recipe-tag-remove-button:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 2px;
++  border-radius: 0.25rem;
++}
++
++.recipe-tag-empty {
++  color: var(--color-muted);
++  font-size: 0.85rem;
++}
++
++.recipe-tags-hint {
++  margin: 0;
++  color: var(--color-muted);
++  font-size: 0.85rem;
++}
++
+ .list-item-count-pill {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  min-width: 28px;
+-  padding: 2px 8px;
++  min-width: 1.75rem;
++  padding: 2px 0.5rem;
+   border-radius: 999px;
+   border: 1px solid var(--color-border);
+   background: var(--color-bg);
+@@ -1608,7 +1948,7 @@ body {
+ }
+ 
+ .empty-state-message {
+-  padding: 16px 20px;
++  padding: 1rem 1.25rem;
+   color: var(--color-muted);
+   font-size: 0.95rem;
+   text-align: center;
+@@ -1616,26 +1956,36 @@ body {
+ 
+ @media (max-width: 640px) {
+   .app-header {
+-    padding: 12px 14px;
++    padding: 0.75rem 0.875rem;
+   }
+ 
+   .tab-nav {
+-    top: 54px;
++    top: 3.375rem;
+   }
+ 
+   .tab-list {
+-    padding: 8px 14px;
++    padding: 0.5rem 0.875rem;
+   }
+ 
+   .page-main {
+-    padding: 14px;
++    padding: 0.875rem;
+   }
+ 
+   .empty-state-card {
+-    padding: 14px;
++    padding: 0.875rem;
+   }
+ 
+   .tab-inline-action {
+     font-size: 0.82rem;
+   }
++
++  .recipe-filter-wrap {
++    flex-wrap: wrap;
++    padding-top: 0.625rem;
++  }
++
++  .recipe-tags-dropdown {
++    left: auto;
++    right: 0;
++  }
+ }

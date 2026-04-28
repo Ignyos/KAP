@@ -61,19 +61,7 @@
     setAccordionExpanded(DESCRIPTION_ACCORDION_STATE_KEY, recipeId, isExpanded);
   }
 
-  var recipeEditModeStates = {};
 
-  function isRecipeInEditMode(recipeId, versionNumber) {
-    return recipeEditModeStates[recipeId] === Number(versionNumber);
-  }
-
-  function setRecipeEditMode(recipeId, versionNumber) {
-    recipeEditModeStates[recipeId] = Number(versionNumber);
-  }
-
-  function clearRecipeEditMode(recipeId) {
-    delete recipeEditModeStates[recipeId];
-  }
 
   function getLastViewedVersionNumber(recipeId) {
     try {
@@ -401,6 +389,14 @@
     });
   }
 
+  function normalizeTags(tags) {
+    return (Array.isArray(tags) ? tags : []).map(function (tag) {
+      return String(tag || '').trim().toLowerCase();
+    }).filter(function (tag) {
+      return !!tag;
+    });
+  }
+
   function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionNumber) {
     return window.KaPUI.NewDetailItemRow(detailItem, {
       onIncrement: async function () {
@@ -613,6 +609,10 @@
       setVersionAccordionExpanded(record.id, !isExpanded);
       renderDetailInto(container, record, hooks, activeVersion.versionNumber);
     }, function () {
+      if (!isExpanded) {
+        return null;
+      }
+
       var actions = document.createElement('div');
 
       var newVersionButton = document.createElement('button');
@@ -739,7 +739,6 @@
       deleteVersionButton.addEventListener('click', async function () {
         var deleted = await deleteSelectedVersion(record, activeVersion);
         if (deleted) {
-          clearRecipeEditMode(record.id);
           setVersionAccordionExpanded(record.id, true);
           await renderDetailInto(container, record, hooks, latestVersion ? latestVersion.versionNumber : null);
         }
@@ -864,6 +863,197 @@
     }
 
     detailShell.insertBefore(section, versionsSection.nextSibling);
+    return section;
+  }
+
+  function appendTagsAccordionSection(container, record, hooks, selectedVersionNumber, canEditTags, descriptionSection, allRecipeTags) {
+    var detailShell = container.querySelector('.detail-shell');
+    var insertAfterSection = descriptionSection || (detailShell ? detailShell.querySelector('.recipe-accordion-card') : null);
+    if (!detailShell || !insertAfterSection) {
+      return;
+    }
+
+    var currentTags = normalizeTags(record.tags);
+    var dropdownOpen = false;
+    var allKnownTags = normalizeTags(allRecipeTags);
+
+    var accordion = buildAccordionSection('', false, function () {
+      var contentNode = section.querySelector('.recipe-accordion-content');
+      var isExpanded = contentNode && contentNode.classList.contains('is-expanded');
+      if (!contentNode) {
+        return;
+      }
+
+      contentNode.classList.toggle('is-expanded', !isExpanded);
+      contentNode.hidden = isExpanded;
+    }, null, function () {
+      var lead = document.createElement('div');
+      lead.className = 'recipe-tags-lead';
+
+      var buttonWrap = document.createElement('div');
+      buttonWrap.className = 'recipe-tags-picker';
+
+      var pickerButton = document.createElement('button');
+      pickerButton.type = 'button';
+      pickerButton.className = 'recipe-tags-button';
+      pickerButton.textContent = '\ud83c\udff7';
+      pickerButton.setAttribute('aria-label', 'Add or select recipe tag');
+      pickerButton.setAttribute('aria-haspopup', 'menu');
+      pickerButton.setAttribute('aria-expanded', 'false');
+      pickerButton.addEventListener('click', function (event) {
+        event.stopPropagation();
+        setDropdownOpen(!dropdownOpen);
+      });
+
+      var dropdown = document.createElement('div');
+      dropdown.className = 'recipe-tags-dropdown';
+      dropdown.hidden = true;
+
+      var tagInput = document.createElement('input');
+      tagInput.type = 'text';
+      tagInput.className = 'recipe-tags-input';
+      tagInput.placeholder = 'Select or add tag';
+      tagInput.setAttribute('aria-label', 'Select or add tag');
+
+      var optionsWrap = document.createElement('div');
+      optionsWrap.className = 'recipe-tags-options';
+
+      function renderOptions() {
+        var query = String(tagInput.value || '').trim().toLowerCase();
+        var available = allKnownTags.filter(function (tag) {
+          if (currentTags.indexOf(tag) >= 0) {
+            return false;
+          }
+
+          if (!query) {
+            return true;
+          }
+
+          return tag.indexOf(query) >= 0;
+        });
+
+        optionsWrap.replaceChildren();
+
+        available.slice(0, 12).forEach(function (tag) {
+          var optionButton = document.createElement('button');
+          optionButton.type = 'button';
+          optionButton.className = 'recipe-tags-option';
+          optionButton.textContent = tag;
+          optionButton.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            await window.KaPRecipesService.addTagToRecipe(record.id, tag);
+            await renderDetailInto(container, record, hooks, selectedVersionNumber);
+          });
+          optionsWrap.appendChild(optionButton);
+        });
+
+        if (available.length === 0) {
+          var empty = document.createElement('span');
+          empty.className = 'recipe-tags-options-empty';
+          empty.textContent = 'No matching tags.';
+          optionsWrap.appendChild(empty);
+        }
+      }
+
+      tagInput.addEventListener('click', function (event) {
+        event.stopPropagation();
+      });
+      tagInput.addEventListener('input', renderOptions);
+      tagInput.addEventListener('keydown', async function (event) {
+        if (event.key !== 'Enter') {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        var value = String(tagInput.value || '').trim();
+        if (!value) {
+          return;
+        }
+
+        await window.KaPRecipesService.addTagToRecipe(record.id, value);
+        await renderDetailInto(container, record, hooks, selectedVersionNumber);
+      });
+
+      function setDropdownOpen(isOpen) {
+        dropdownOpen = !!isOpen;
+        dropdown.hidden = !dropdownOpen;
+        pickerButton.setAttribute('aria-expanded', dropdownOpen ? 'true' : 'false');
+
+        if (dropdownOpen) {
+          window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, true);
+          renderOptions();
+          requestAnimationFrame(function () {
+            tagInput.focus();
+          });
+        } else {
+          window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, false);
+        }
+      }
+
+      if (!canEditTags) {
+        pickerButton.disabled = true;
+      }
+
+      dropdown.appendChild(tagInput);
+      dropdown.appendChild(optionsWrap);
+      buttonWrap.appendChild(pickerButton);
+      buttonWrap.appendChild(dropdown);
+      lead.appendChild(buttonWrap);
+
+      var tagsWrap = document.createElement('div');
+      tagsWrap.className = 'recipe-tags-list';
+
+      if (currentTags.length === 0) {
+        var emptyTag = document.createElement('span');
+        emptyTag.className = 'recipe-tag-empty';
+        emptyTag.textContent = 'No tags';
+        tagsWrap.appendChild(emptyTag);
+      } else {
+        currentTags.forEach(function (tag) {
+          var tagNode = document.createElement('span');
+          tagNode.className = 'recipe-tag-pill';
+
+          var tagLabel = document.createElement('span');
+          tagLabel.className = 'recipe-tag-label';
+          tagLabel.textContent = tag;
+          tagNode.appendChild(tagLabel);
+
+          if (canEditTags) {
+            var removeButton = document.createElement('button');
+            removeButton.type = 'button';
+            removeButton.className = 'recipe-tag-remove-button';
+            removeButton.setAttribute('aria-label', 'Remove tag ' + tag);
+            removeButton.textContent = 'x';
+            removeButton.addEventListener('click', async function (event) {
+              event.stopPropagation();
+              await window.KaPRecipesService.removeTagFromRecipe(record.id, tag);
+              await renderDetailInto(container, record, hooks, selectedVersionNumber);
+            });
+            tagNode.appendChild(removeButton);
+          }
+
+          tagsWrap.appendChild(tagNode);
+        });
+      }
+
+      lead.appendChild(tagsWrap);
+
+      return lead;
+    });
+
+    var section = accordion.section;
+    var content = accordion.content;
+
+    var hint = document.createElement('p');
+    hint.className = 'recipe-tags-hint';
+    hint.textContent = canEditTags
+      ? 'Use the tag button to add a tag or type one and press Enter.'
+      : 'Tags can be edited on the current version only.';
+
+    content.appendChild(hint);
+    detailShell.insertBefore(section, insertAfterSection.nextSibling);
   }
 
   function appendIngredientsSection(container, recipeRecord, detailItems, isViewingLatestVersion, hooks, selectedVersionNumber) {
@@ -1062,10 +1252,6 @@
   }
 
   async function renderDetailInto(container, record, hooks, selectedVersionNumber) {
-    if (!selectedVersionNumber) {
-      clearRecipeEditMode(record.id);
-    }
-
     var availableVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
     var latestVersion = availableVersions.length > 0 ? availableVersions[availableVersions.length - 1] : null;
     var resolvedVersionNumber = selectedVersionNumber || getLastViewedVersionNumber(record.id);
@@ -1082,10 +1268,16 @@
     }
 
     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
-    var isInEditMode = !isViewingLatestVersion && isRecipeInEditMode(record.id, activeVersion ? activeVersion.versionNumber : null);
-    var canEdit = isViewingLatestVersion || isInEditMode;
-    var detailItems = await window.KaPRecipesService.getRecipeItems(record.id);
-    var instructions = await window.KaPRecipesService.getRecipeInstructions(record.id);
+    var canEdit = isViewingLatestVersion;
+    var detailItems = isViewingLatestVersion
+      ? await window.KaPRecipesService.getRecipeItems(record.id)
+      : getDetailItemsFromVersionSnapshot(activeVersion);
+    var instructions = isViewingLatestVersion
+      ? await window.KaPRecipesService.getRecipeInstructions(record.id)
+      : getInstructionItemsFromVersionSnapshot(activeVersion);
+    var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
+    var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
+    record.tags = recipeTags;
 
     var sortedItems = sortByNameAscending(detailItems);
     var titleText = record.name;
@@ -1145,17 +1337,7 @@
             }
           }
         },
-        !isViewingLatestVersion ? {
-          label: isInEditMode ? 'View Only' : 'Edit',
-          onClick: function () {
-            if (isInEditMode) {
-              clearRecipeEditMode(record.id);
-            } else {
-              setRecipeEditMode(record.id, activeVersion.versionNumber);
-            }
-            renderDetailInto(container, record, hooks, activeVersion.versionNumber);
-          }
-        } : null,
+
         {
           label: 'Delete',
           isDanger: true,
@@ -1170,12 +1352,21 @@
     });
 
     appendVersionsAccordionSection(container, record, hooks, availableVersions, activeVersion, latestVersion, isViewingLatestVersion);
-    appendDescriptionAccordionSection(
+    var descriptionSection = appendDescriptionAccordionSection(
       container,
       record,
       hooks,
       activeVersion ? activeVersion.versionNumber : null,
         canEdit
+    );
+    appendTagsAccordionSection(
+      container,
+      record,
+      hooks,
+      activeVersion ? activeVersion.versionNumber : null,
+      canEdit,
+      descriptionSection,
+      allRecipeTags
     );
     appendIngredientsSection(
       container,
