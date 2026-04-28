@@ -35,6 +35,30 @@
   var isInstalled = false;
   var installMenuButtonRef = null;
 
+  function normalizeTagList(tags) {
+    return (Array.isArray(tags) ? tags : []).map(function (tag) {
+      return String(tag || '').trim().toLowerCase();
+    }).filter(function (tag) {
+      return !!tag;
+    });
+  }
+
+  function recipeMatchesQuery(record, query) {
+    var normalizedQuery = String(query || '').trim().toLowerCase();
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    var recipeName = String((record && record.name) || '').toLowerCase();
+    if (recipeName.indexOf(normalizedQuery) >= 0) {
+      return true;
+    }
+
+    return normalizeTagList(record && record.tags).some(function (tag) {
+      return tag.indexOf(normalizedQuery) >= 0;
+    });
+  }
+
   function getSavedExpandedSections() {
     var saved = window.KaPSettings.get(window.KaPSettings.KEYS.EXPANDED_ACCORDION_SECTIONS);
     return saved || [];
@@ -299,6 +323,55 @@
         });
       }
 
+      contentElement.innerHTML = '';
+
+      if (section.id === 'recipes') {
+        var filterWrap = document.createElement('div');
+        filterWrap.className = 'recipe-filter-wrap';
+
+        var filterInput = document.createElement('input');
+        filterInput.type = 'search';
+        filterInput.className = 'recipe-filter-input';
+        filterInput.placeholder = 'Search recipes by tag or name';
+        filterInput.setAttribute('aria-label', 'Search recipes by tag or name');
+        filterWrap.appendChild(filterInput);
+
+        var filteredCount = document.createElement('span');
+        filteredCount.className = 'recipe-filter-count';
+        filterWrap.appendChild(filteredCount);
+
+        var recordList = document.createElement('div');
+        recordList.className = 'record-list';
+
+        function renderRecipeRows() {
+          var query = String(filterInput.value || '').trim();
+          var filtered = records.filter(function (record) {
+            return recipeMatchesQuery(record, query);
+          });
+
+          recordList.replaceChildren();
+          filtered.forEach(function (record) {
+            recordList.appendChild(createRecordRow(record, section, listItemCountsById[record.id]));
+          });
+
+          filteredCount.textContent = String(filtered.length) + ' / ' + String(records.length);
+
+          if (filtered.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'empty-state-message';
+            empty.textContent = 'No recipes match this search.';
+            recordList.appendChild(empty);
+          }
+        }
+
+        filterInput.addEventListener('input', renderRecipeRows);
+        renderRecipeRows();
+
+        contentElement.appendChild(filterWrap);
+        contentElement.appendChild(recordList);
+        return;
+      }
+
       var recordList = document.createElement('div');
       recordList.className = 'record-list';
 
@@ -307,7 +380,6 @@
         recordList.appendChild(row);
       });
 
-      contentElement.innerHTML = '';
       contentElement.appendChild(recordList);
     } catch (error) {
       console.error('Error rendering section content:', error);
@@ -324,6 +396,23 @@
     nameSpan.textContent = record.name;
 
     row.appendChild(nameSpan);
+
+    if (section.id === 'recipes') {
+      var tags = normalizeTagList(record.tags);
+      if (tags.length > 0) {
+        var tagsWrap = document.createElement('div');
+        tagsWrap.className = 'recipe-row-tags';
+
+        tags.forEach(function (tag) {
+          var tagPill = document.createElement('span');
+          tagPill.className = 'recipe-row-tag-pill';
+          tagPill.textContent = tag;
+          tagsWrap.appendChild(tagPill);
+        });
+
+        row.appendChild(tagsWrap);
+      }
+    }
 
     if (section.id === 'lists') {
       var countPill = document.createElement('span');

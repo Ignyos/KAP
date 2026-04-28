@@ -8,7 +8,8 @@
     EXPANDED_ACCORDION_SECTIONS: 'expandedAccordionSections',
     MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
     CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord',
-    TEXT_SIZE: 'textSize'
+    TEXT_SIZE: 'textSize',
+    THEME: 'theme'
   };
 
   var defaults = {
@@ -25,7 +26,8 @@
       lists: {},
       templates: {}
     },
-    textSize: 'small'
+    textSize: 'small',
+    theme: 'dark'
   };
 
   function getKey(name) {
@@ -52,15 +54,22 @@
   }
 
   var TEXT_SIZE_PX = { small: '16px', medium: '18px', large: '20px' };
+  var THEME_NAMES = { dark: true, spring: true, summer: true, autumn: true, winter: true };
 
   function applyTextSize(size) {
     document.documentElement.style.fontSize = TEXT_SIZE_PX[size] || TEXT_SIZE_PX.medium;
+  }
+
+  function applyTheme(theme) {
+    var normalizedTheme = THEME_NAMES[theme] ? theme : 'dark';
+    document.documentElement.setAttribute('data-theme', normalizedTheme);
   }
 
   window.KaPSettings = {
     KEYS: KEYS,
     get: get,
     set: set,
-    applyTextSize: applyTextSize
+    applyTextSize: applyTextSize,
+    applyTheme: applyTheme
   };
 })();

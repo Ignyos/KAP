@@ -27,6 +27,37 @@
     return window.KaPItemEntryRules.normalizeDescription(description);
   }
 
+  function normalizeTagName(tagName) {
+    return String(tagName || '').trim().toLowerCase();
+  }
+
+  function normalizeRecipeTags(tags) {
+    var seen = {};
+    return (Array.isArray(tags) ? tags : [])
+      .map(normalizeTagName)
+      .filter(function (tag) {
+        if (!tag || seen[tag]) {
+          return false;
+        }
+
+        seen[tag] = true;
+        return true;
+      })
+      .sort(function (a, b) {
+        return a.localeCompare(b, undefined, { sensitivity: 'base' });
+      });
+  }
+
+  function normalizeRecipeRecord(record) {
+    if (!record) {
+      return null;
+    }
+
+    var normalized = Object.assign({}, record);
+    normalized.tags = normalizeRecipeTags(record.tags);
+    return normalized;
+  }
+
   function sortByNameAscending(records) {
     return (records || []).slice().sort(function (a, b) {
       return String((a && a.name) || '').localeCompare(String((b && b.name) || ''), undefined, {
@@ -129,6 +160,45 @@
     );
   }
 
+  async function readRecipeTagMapByRecipeId(recipeId) {
+    return window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
+      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_ID,
+      recipeId
+    );
+  }
+
+  async function readTagByName(tagName) {
+    var matches = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.TAGS,
+      window.KaPStores.INDEX_NAMES.TAGS_BY_NAME,
+      normalizeTagName(tagName)
+    );
+
+    return (matches || [])[0] || null;
+  }
+
+  async function ensureTagRecord(tagName) {
+    var normalizedName = normalizeTagName(tagName);
+    if (!normalizedName) {
+      throw new Error('Tag name is required.');
+    }
+
+    var existing = await readTagByName(normalizedName);
+    if (existing) {
+      return existing;
+    }
+
+    var created = {
+      id: window.KaPIds.NewId(),
+      name: normalizedName,
+      createdDate: nowIso()
+    };
+
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.TAGS, created);
+    return created;
+  }
+
   async function findJoinRecordById(recipeId, recipeItemId) {
     var joinRecords = await readJoinRecordsByRecipeId(recipeId);
     return joinRecords.find(function (record) {
@@ -169,7 +239,96 @@
       RECIPE_TYPE
     );
 
-    return sortByNameAscending(records);
+    var normalizedRecipes = sortByNameAscending(records.map(normalizeRecipeRecord));
+    await Promise.all(normalizedRecipes.map(async function (recipe) {
+      recipe.tags = await getRecipeTags(recipe.id);
+    }));
+
+    return normalizedRecipes;
+  }
+
+  async function getRecipeTags(recipeId) {
+    await requireRecipeById(recipeId);
+    var tagMaps = await readRecipeTagMapByRecipeId(recipeId);
+
+    if (!tagMaps || tagMaps.length === 0) {
+      return [];
+    }
+
+    var tags = await Promise.all(tagMaps.map(function (mapRecord) {
+      return window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.TAGS, mapRecord.tagId);
+    }));
+
+    return normalizeRecipeTags(tags.map(function (tag) {
+      return tag && tag.name;
+    }));
+  }
+
+  async function getAllRecipeTags() {
+    var tagRecords = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.TAGS);
+    return normalizeRecipeTags((tagRecords || []).map(function (record) {
+      return record && record.name;
+    })).sort(function (a, b) {
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+  }
+
+  async function addTagToRecipe(recipeId, tagName) {
+    var safeTag = normalizeTagName(tagName);
+    if (!safeTag) {
+      throw new Error('Tag name is required.');
+    }
+
+    await requireRecipeById(recipeId);
+
+    var tag = await ensureTagRecord(safeTag);
+    var existingMaps = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
+      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG,
+      [recipeId, tag.id]
+    );
+
+    if ((existingMaps || []).length === 0) {
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, {
+        id: window.KaPIds.NewId(),
+        recipeId: recipeId,
+        tagId: tag.id,
+        createdDate: nowIso()
+      });
+    }
+
+    var recipe = await requireRecipeById(recipeId);
+    recipe.updatedDate = nowIso();
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipe);
+    return getRecipeTags(recipeId);
+  }
+
+  async function removeTagFromRecipe(recipeId, tagName) {
+    var safeTag = normalizeTagName(tagName);
+    if (!safeTag) {
+      return [];
+    }
+
+    await requireRecipeById(recipeId);
+    var tag = await readTagByName(safeTag);
+    if (!tag) {
+      return getRecipeTags(recipeId);
+    }
+
+    var existingMaps = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
+      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG,
+      [recipeId, tag.id]
+    );
+
+    for (var i = 0; i < existingMaps.length; i++) {
+      await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, existingMaps[i].id);
+    }
+
+    var recipe = await requireRecipeById(recipeId);
+    recipe.updatedDate = nowIso();
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipe);
+    return getRecipeTags(recipeId);
   }
 
   async function getRecipeItems(recipeId) {
@@ -322,6 +481,7 @@
       id: window.KaPIds.NewId(),
       name: safeName,
       description: '',
+      tags: [],
       type: RECIPE_TYPE,
       createdDate: timestamp,
       updatedDate: timestamp
@@ -362,6 +522,7 @@
     );
     var joinRecords = await readJoinRecordsByRecipeId(id);
     var instructionRecords = await readInstructionRecordsByRecipeId(id);
+    var recipeTagMaps = await readRecipeTagMapByRecipeId(id);
 
     await Promise.all(joinRecords.map(function (joinRecord) {
       return window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord.id);
@@ -369,6 +530,10 @@
 
     await Promise.all(instructionRecords.map(function (instruction) {
       return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, instruction.id);
+    }));
+
+    await Promise.all(recipeTagMaps.map(function (mapRecord) {
+      return window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, mapRecord.id);
     }));
 
     await Promise.all(versions.map(function (version) {
@@ -687,6 +852,11 @@
     }
 
     var clonedRecipe = await createRecipe(cloneName || (sourceRecipe.name + ' - copy'));
+    var sourceTags = await getRecipeTags(sourceRecipe.id);
+    for (var i = 0; i < sourceTags.length; i++) {
+      await addTagToRecipe(clonedRecipe.id, sourceTags[i]);
+    }
+
     await replaceRecipeItemsFromSnapshot(clonedRecipe.id, sourceVersion.snapshotItems);
     await replaceRecipeInstructionsFromSnapshot(clonedRecipe.id, sourceVersion.snapshotInstructions);
 
@@ -702,6 +872,10 @@
 
   window.KaPRecipesService = {
     getAllRecipes: getAllRecipes,
+    getRecipeTags: getRecipeTags,
+    getAllRecipeTags: getAllRecipeTags,
+    addTagToRecipe: addTagToRecipe,
+    removeTagFromRecipe: removeTagFromRecipe,
     createRecipe: createRecipe,
     renameRecipe: renameRecipe,
     updateRecipeDescription: updateRecipeDescription,
