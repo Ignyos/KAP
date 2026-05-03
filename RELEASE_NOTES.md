@@ -1,32 +1,31 @@
-# Release v2026-05-03-18-05
+# Release v2026-05-03-20-40
 
 ## Overview
-This release overhauls recipe version management to use user-named, independent versions and adds stronger controls for editing, visibility, and deletion behavior in the recipe detail experience.
+This release adds complete quantity and unit-of-measure support to recipe ingredients, including seeded units, add/edit flows, and ingredient display updates.
 
 ## New Features
-- **User-Named Versions**: New and existing recipe versions use editable version names instead of numeric version labels.
-- **New Version Modal Inputs**: Creating a version now includes a base-version selector and a required version name field prefilled with the current date/time.
-- **Always-Visible Version Actions**: The Versions section now includes persistent `Clone Version` and `Delete` actions.
-- **Section Visibility Controls**: Recipe action menu adds `Hide/Show Versions`, `Hide/Show Description`, and `Hide/Show Tags` controls.
-- **Per-Version Editing APIs**: Non-current versions now support their own item and instruction edits through version-specific data paths.
+- **Ingredient Unit Selection**: Add and edit ingredient flows now include a Unit selector next to Quantity.
+- **Custom Units in Ingredient Modal**: Unit selection now supports inline `+ Add Unit...` creation without leaving the ingredient modal.
+- **Units Management in Settings**: Settings now includes a Units of Measure section to view grouped units, add custom units, and edit non-seeded units.
+- **Seeded Unit Catalog**: Recipes now include seeded Imperial, Metric, Unit, and Size units with behavior metadata.
 
 ## Improvements
-- **Version Selector Clarity**: Version dropdown entries now show version names, and selected labels update immediately after renaming.
-- **Version Naming Defaults**: New versions default to `YYYY-MM-DD HH:MM` naming for consistent timestamp-based names.
-- **Version UI Language**: Version-related labels and helper copy now consistently reference versions (for example, `Clone Version`).
-- **Tags UX Polish**: Tag empty-state cue is more visible, and tags header/pointer behavior is refined for actionable elements.
-- **Delete Recipe Confirmation**: Recipe delete confirmation now warns when multiple versions will be removed.
+- **Decimal Quantity Support**: Ingredient quantities now store decimal values for recipe and version items.
+- **Ingredient Row Quantity Badge**: Recipe ingredient rows now display quantity with unit abbreviation in a compact badge.
+- **Add to Grocery List Context**: Ingredient selection in Add to Grocery List now shows quantity and unit badges for clearer review before adding.
+- **Quantity Input Layout**: Quantity and Unit controls now share a single row for faster entry and editing.
 
 ## Bug Fixes
-- **Version Data Separation**: Editing one version no longer leaks item or instruction changes into other versions.
-- **Version Identity Tracking**: Last-viewed version and version navigation now use stable version IDs, preventing mismatches from number-based lookups.
-- **New Version Base List Labels**: Base-version options no longer show undefined values.
-- **Version Delete Targeting**: Deleting a version now removes only that version and then correctly reloads the remaining version state.
+- **Unit Dropdown Loading**: Unit lists now load reliably by reading all units and filtering active records in code.
+- **Version Ingredient Editing**: Non-latest version ingredient edits now correctly save updated quantity and unit values.
 
 ## Technical Changes
-- Replaced version-number access paths with version-ID and version-name models.
-- Added version-specific service methods for item and instruction CRUD, movement, and quantity updates.
-- Added section visibility state keys for Versions, Description, and Tags in recipe detail view.
+- Bumped IndexedDB schema version to 7.
+- Added `unitOfMeasures` store, indexes, and idempotent seed migration.
+- Added recipe service APIs for unit retrieval, creation, and updates.
+- Extended recipe/version item snapshots and detail records with `quantityValue` and `unitOfMeasureId`.
+- Removed recipe ingredient `More/Less` quantity actions from the row action menu.
+- Removed the completed quantity/UOM planning doc (`QUANTITY_UOM.md`).
 
 ## Installation
 1. Clone or pull the latest code from the repository.
@@ -40,4 +39,3 @@ This release overhauls recipe version management to use user-named, independent 
 - Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
 - For feature documentation and usage guides, see `application-structure.md`.
 - For recipe feature planning notes, see `recipe-feature-definition.md`.
-- For quantity and unit-of-measure planning, see `QUANTITY_UOM.md`.

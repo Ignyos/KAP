@@ -1,0 +1,3667 @@
+Release timestamp: 2026-05-03-20-40
+Diff source: 2026-05-03-18-05..HEAD
+Generated at: 2026-05-03 16:40:52Z
+diff --git a/QUANTITY_UOM.md b/QUANTITY_UOM.md
+deleted file mode 100644
+index 5745357..0000000
+--- a/QUANTITY_UOM.md
++++ /dev/null
+@@ -1,201 +0,0 @@
+-# Quantity + Unit of Measure (UOM) Plan
+-
+-## Purpose
+-Define a robust and user-friendly quantity system for recipe ingredients that supports measurement units, clearer ingredient display, and future conversion logic when adding recipe ingredients to grocery lists.
+-
+-## Goals
+-1. Support ingredient quantities with units of measure.
+-2. Improve quantity entry/edit UX in ingredient add/edit flows.
+-3. Improve ingredient quantity visibility in recipe detail without visual noise.
+-4. Introduce a maintainable UnitOfMeasure data model with seeded groups.
+-5. Allow end users to add and edit units.
+-6. Prepare Add To Grocery List for quantity conversion logic.
+-
+-## In Scope (Initial Slice)
+-1. Recipes only for quantity + UOM behavior.
+-2. Decimal and fraction quantity entry support.
+-3. UnitOfMeasure persistence with seeded grouped units.
+-4. Reusable UOM UI component that can be embedded in multiple places.
+-5. Recipe ingredient display update with subtle quantity/UOM badge and strict text alignment.
+-6. Conversion-prep contract for Add To Grocery List (no full conversion engine yet).
+-
+-## Out of Scope (Initial Slice)
+-1. Full cross-unit conversion engine (e.g. tsp to cups, g to oz across all unit families).
+-2. Grocery list persistence model changes for UOM.
+-3. Automatic normalization across incompatible units.
+-
+----
+-
+-## UX Requirements
+-
+-### 1) Entry and Editing (Add/Edit Ingredient Modal)
+-1. Quantity field supports decimals (e.g. 0.5, 1.25) and fractions (e.g. 1/2, 3/4).
+-2. Unit selection is shown adjacent to the quantity field.
+-3. Validation feedback is immediate and clear for invalid quantity text.
+-4. Edit Ingredient flow must allow updating quantity and UOM together.
+-
+-> **Open question**: The current edit ingredient modal hides the quantity field (`showQuantityField: false`). Does the edit flow need to show quantity + UOM too, or add-flow only for the initial slice?
+-
+-### 2) Ingredient List Display (Recipe Detail)
+-1. Show quantity + UOM in a subtle badge.
+-2. Ingredient names must remain vertically aligned regardless of quantity/UOM presence.
+-3. Rows with missing quantity/UOM must preserve spacing to avoid layout jitter.
+-4. Read-only and edit mode keep the same alignment behavior.
+-
+-### 3) User-Managed UOM
+-1. Provide one reusable UOM component embeddable in:
+-   - Ingredient add/edit modal
+-   - Future settings surface
+-2. Users can add new units.
+-3. Users can edit user-defined units.
+-4. Seeded units remain stable for data integrity (not editable/deletable by user).
+-
+----
+-
+-## Data Model
+-
+-### New Store: UnitOfMeasure
+-Fields:
+-| Field | Type | Notes |
+-|---|---|---|
+-| id | string | UUID |
+-| key | string | Stable seed key (e.g. `imperial.tsp`), null for user-created |
+-| name | string | Display name (e.g. Teaspoon) |
+-| abbreviation | string | Short form (e.g. tsp) |
+-| group | string | Imperial, Metric, Unit, Size, Other |
+-| isSeeded | boolean | True for system seeds |
+-| isActive | boolean | Soft-delete support |
+-| sortOrder | number | Within-group display order |
+-| createdDate | string | ISO date |
+-| updatedDate | string | ISO date |
+-
+-Indexes:
+-- `by_name` on `name`
+-- `by_group` on `group`
+-- `by_active` on `isActive`
+-
+-### Recipe Ingredient Record Extensions
+-Extend existing ingredient join records with:
+-| Field | Type | Notes |
+-|---|---|---|
+-| quantityValue | number \| null | Canonical numeric value (e.g. 0.5) |
+-| quantityDisplay | string \| null | User-facing text, preserves fraction input (e.g. "1/2") |
+-| unitOfMeasureId | string \| null | FK to UnitOfMeasure |
+-
+-### Version Snapshot Extensions
+-Recipe version snapshot items should include:
+-- `quantityValue`
+-- `quantityDisplay`
+-- `unitOfMeasureId`
+-
+-**Backward compatibility**: Existing records without these fields must render safely. Missing values map to empty quantity/UOM state.
+-
+----
+-
+-## Quantity Parsing and Validation
+-
+-Accept decimal and fraction formats. Reject invalid forms with specific messages.
+-
+-| User Input | quantityValue | quantityDisplay |
+-|---|---|---|
+-| `0.5` | 0.5 | "0.5" |
+-| `1/2` | 0.5 | "1/2" |
+-| `1 1/2` | 1.5 | "1 1/2" |
+-| `2` | 2 | "2" |
+-| `abc` | error | ΓÇö |
+-
+-**Canonical strategy**:
+-- Store `quantityValue` (numeric) for any future computation.
+-- Store `quantityDisplay` (string) for user fidelity, especially fractions.
+-- Keep parsing deterministic and side-effect free.
+-
+----
+-
+-## Seeded UOM Groups
+-
+-| Group | Examples |
+-|---|---|
+-| Imperial | tsp, tbsp, fl oz, cup, pint, quart, gallon, oz, lb |
+-| Metric | ml, l, mg, g, kg |
+-| Unit | each, piece, clove, bunch, can, jar |
+-| Size | small, medium, large |
+-| Other | (user-added customs land here by default) |
+-
+----
+-
+-## Reusable UOM Component Requirements
+-1. Grouped browse/search by group name.
+-2. Fast selection for common units (e.g. recent or most used).
+-3. Add new unit flow (name + abbreviation + group).
+-4. Edit user-defined unit flow.
+-5. Clear visual distinction between seeded and custom units.
+-6. Embeddable API contract ΓÇö the component accepts `onSelect(uom)` and `currentUomId` props.
+-
+----
+-
+-## Add To Grocery List ΓÇö Conversion Prep
+-1. Pass `quantityValue`, `quantityDisplay`, and `unitOfMeasureId` in the add-to-list payload.
+-2. Design the payload structure to support same-unit aggregation in a future pass.
+-3. Define fallback behavior when conversion is unavailable (pass quantity as-is, no conversion attempt).
+-4. Defer cross-unit conversion prompts to a follow-up scope.
+-
+----
+-
+-## Migration Plan
+-1. Bump IndexedDB schema version (currently 5 ΓåÆ 6).
+-2. Create `unitOfMeasures` object store with indexes in `stores.js`.
+-3. Seed grouped units idempotently in the `upgrade` handler in `stores.js`.
+-4. Preserve existing recipe data ΓÇö no destructive migration of ingredient records.
+-5. Ensure old recipes render without runtime errors (missing fields treated as null/empty).
+-
+----
+-
+-## Technical Touchpoints
+-
+-| File | Change |
+-|---|---|
+-| `src/data/stores.js` | Add `UNIT_OF_MEASURES` store name + indexes; add seed data; bump upgrade logic |
+-| `src/data/db.js` | Bump `DATABASE_VERSION` to 6 |
+-| `src/shared/item-entry-rules.js` | Add `parseQuantity(raw)` ΓåÆ `{ quantityValue, quantityDisplay }` and `validateQuantity(raw)` |
+-| `src/features/recipes/recipes-service.js` | Persist/read `quantityValue`, `quantityDisplay`, `unitOfMeasureId` on add/edit/snapshot |
+-| `src/features/recipes/recipes-page.js` | Wire UOM selector into add/edit modal; pass new fields to service; prep add-to-list payload |
+-| `src/ui/ui.js` | Add reusable UOM selector component; extend `ShowDiscoveryItemModal` with UOM field option |
+-| `src/styles.css` | Subtle quantity+UOM badge styles; ensure ingredient name alignment is preserved |
+-
+----
+-
+-## Acceptance Checks
+-1. User can add a recipe ingredient with a decimal quantity and a selected UOM.
+-2. User can add a recipe ingredient with a fraction quantity (e.g. 1/2) and a selected UOM.
+-3. User can edit quantity and UOM from the ingredient edit flow.
+-4. Ingredient rows show a subtle quantity/UOM badge with consistent name alignment across all rows.
+-5. Custom units can be added and are immediately available for selection.
+-6. Seeded units are available by group after first DB migration.
+-7. Existing recipes without UOM continue to render correctly (no errors, no blank screens).
+-8. Version snapshots retain `quantityValue`, `quantityDisplay`, `unitOfMeasureId` for newly created versions.
+-9. Add To Grocery List receives quantity/UOM metadata in the payload.
+-
+----
+-
+-## Risks and Mitigations
+-
+-| Risk | Mitigation |
+-|---|---|
+-| Inconsistent quantity representation (int vs decimal vs fraction) | Dual-field model: `quantityValue` + `quantityDisplay` |
+-| Seed mutability breaking UOM references | Stable seed keys; seeded units not editable/deletable |
+-| UI clutter from quantity+UOM badge | Subtle badge (muted color, small font); strict alignment so rows without UOM don't shift |
+-| Migration breaking existing data | All new fields optional; backward-compat render path required |
+-
+----
+-
+-## Open Questions
+-1. Should the edit ingredient flow expose quantity + UOM, or add-flow only for the initial slice?
+-2. Should the UOM selector in the modal be a simple flat dropdown or grouped (with group headers)?
+-3. How should "no unit" be represented ΓÇö empty selection, a sentinel "None" option, or omit the field?
+-
+----
+-
+-## Follow-Up Items (Out of Scope Now)
+-1. Full conversion rules matrix by unit family (e.g. tsp ΓåÆ tbsp ΓåÆ cup).
+-2. Grocery list UOM persistence and display integration.
+-3. Advanced conversion conflict UX (e.g. combining oz + grams).
+diff --git a/RELEASE_NOTES.md.new b/RELEASE_NOTES.md.new
+deleted file mode 100644
+index b118a01..0000000
+--- a/RELEASE_NOTES.md.new
++++ /dev/null
+@@ -1,43 +0,0 @@
+-# Release v2026-05-03-18-05
+-
+-## Overview
+-This release overhauls recipe version management to use user-named, independent versions and adds stronger controls for editing, visibility, and deletion behavior in the recipe detail experience.
+-
+-## New Features
+-- **User-Named Versions**: New and existing recipe versions use editable version names instead of numeric version labels.
+-- **New Version Modal Inputs**: Creating a version now includes a base-version selector and a required version name field prefilled with the current date/time.
+-- **Always-Visible Version Actions**: The Versions section now includes persistent `Clone Version` and `Delete` actions.
+-- **Section Visibility Controls**: Recipe action menu adds `Hide/Show Versions`, `Hide/Show Description`, and `Hide/Show Tags` controls.
+-- **Per-Version Editing APIs**: Non-current versions now support their own item and instruction edits through version-specific data paths.
+-
+-## Improvements
+-- **Version Selector Clarity**: Version dropdown entries now show version names, and selected labels update immediately after renaming.
+-- **Version Naming Defaults**: New versions default to `YYYY-MM-DD HH:MM` naming for consistent timestamp-based names.
+-- **Version UI Language**: Version-related labels and helper copy now consistently reference versions (for example, `Clone Version`).
+-- **Tags UX Polish**: Tag empty-state cue is more visible, and tags header/pointer behavior is refined for actionable elements.
+-- **Delete Recipe Confirmation**: Recipe delete confirmation now warns when multiple versions will be removed.
+-
+-## Bug Fixes
+-- **Version Data Separation**: Editing one version no longer leaks item or instruction changes into other versions.
+-- **Version Identity Tracking**: Last-viewed version and version navigation now use stable version IDs, preventing mismatches from number-based lookups.
+-- **New Version Base List Labels**: Base-version options no longer show undefined values.
+-- **Version Delete Targeting**: Deleting a version now removes only that version and then correctly reloads the remaining version state.
+-
+-## Technical Changes
+-- Replaced version-number access paths with version-ID and version-name models.
+-- Added version-specific service methods for item and instruction CRUD, movement, and quantity updates.
+-- Added section visibility state keys for Versions, Description, and Tags in recipe detail view.
+-
+-## Installation
+-1. Clone or pull the latest code from the repository.
+-2. Open `src/index.html` or `docs/index.html` in a web browser.
+-
+-## Requirements
+-- Modern web browser with ES5 JavaScript support.
+-- LocalStorage and IndexedDB support for data persistence.
+-
+-## Documentation
+-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+-- For feature documentation and usage guides, see `application-structure.md`.
+-- For recipe feature planning notes, see `recipe-feature-definition.md`.
+-- For quantity and unit-of-measure planning, see `QUANTITY_UOM.md`.
+diff --git a/docs/data/db.js b/docs/data/db.js
+index e06c190..03572c8 100644
+--- a/docs/data/db.js
++++ b/docs/data/db.js
+@@ -1,6 +1,6 @@
+ (function () {
+   var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 6;
++  var DATABASE_VERSION = 7;
+ 
+   var state = {
+     db: null
+diff --git a/docs/data/stores.js b/docs/data/stores.js
+index 61962d0..a3d5540 100644
+--- a/docs/data/stores.js
++++ b/docs/data/stores.js
+@@ -7,7 +7,8 @@
+     RECIPE_VERSIONS: 'recipeVersions',
+     RECIPE_INSTRUCTIONS: 'recipeInstructions',
+     TAGS: 'tags',
+-    RECIPE_TAG_MAP: 'recipeTagMap'
++    RECIPE_TAG_MAP: 'recipeTagMap',
++    UNIT_OF_MEASURES: 'unitOfMeasures'
+   };
+ 
+   var INDEX_NAMES = {
+@@ -24,7 +25,10 @@
+     TAGS_BY_NAME: 'by_name',
+     RECIPE_TAG_MAP_BY_RECIPE_ID: 'by_recipe_id',
+     RECIPE_TAG_MAP_BY_TAG_ID: 'by_tag_id',
+-    RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag'
++    RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag',
++    UNIT_OF_MEASURES_BY_NAME: 'by_name',
++    UNIT_OF_MEASURES_BY_GROUP: 'by_group',
++    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active'
+   };
+ 
+   function ensureStore(db, transaction, storeName, options) {
+@@ -45,6 +49,37 @@
+     return String(tagName || '').trim().toLowerCase();
+   }
+ 
++  function getUnitOfMeasureSeedData() {
++    return [
++      { key: 'imperial.tsp', name: 'Teaspoon', abbreviation: 'tsp', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 10 },
++      { key: 'imperial.tbsp', name: 'Tablespoon', abbreviation: 'tbsp', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 20 },
++      { key: 'imperial.floz', name: 'Fluid Ounce', abbreviation: 'fl oz', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 30 },
++      { key: 'imperial.cup', name: 'Cup', abbreviation: 'cup', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 40 },
++      { key: 'imperial.pint', name: 'Pint', abbreviation: 'pt', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 50 },
++      { key: 'imperial.quart', name: 'Quart', abbreviation: 'qt', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 60 },
++      { key: 'imperial.gallon', name: 'Gallon', abbreviation: 'gal', group: 'Imperial', quantityBehavior: 'whole_or_half', quantityStep: 0.5, sortOrder: 70 },
++      { key: 'imperial.oz', name: 'Ounce', abbreviation: 'oz', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 80 },
++      { key: 'imperial.lb', name: 'Pound', abbreviation: 'lb', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 90 },
++      { key: 'metric.ml', name: 'Milliliter', abbreviation: 'ml', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 100 },
++      { key: 'metric.l', name: 'Liter', abbreviation: 'l', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 110 },
++      { key: 'metric.mg', name: 'Milligram', abbreviation: 'mg', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 120 },
++      { key: 'metric.g', name: 'Gram', abbreviation: 'g', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 130 },
++      { key: 'metric.kg', name: 'Kilogram', abbreviation: 'kg', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 140 },
++      { key: 'unit.each', name: 'Each', abbreviation: 'each', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 150 },
++      { key: 'unit.piece', name: 'Piece', abbreviation: 'piece', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 160 },
++      { key: 'unit.clove', name: 'Clove', abbreviation: 'clove', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 170 },
++      { key: 'unit.bunch', name: 'Bunch', abbreviation: 'bunch', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 180 },
++      { key: 'unit.can', name: 'Can', abbreviation: 'can', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 190 },
++      { key: 'unit.jar', name: 'Jar', abbreviation: 'jar', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 200 },
++      { key: 'unit.packet', name: 'Packet', abbreviation: 'packet', group: 'Unit', quantityBehavior: 'user_defined', quantityStep: null, sortOrder: 210 },
++      { key: 'unit.bag', name: 'Bag', abbreviation: 'bag', group: 'Unit', quantityBehavior: 'user_defined', quantityStep: null, sortOrder: 220 },
++      { key: 'unit.box', name: 'Box', abbreviation: 'box', group: 'Unit', quantityBehavior: 'user_defined', quantityStep: null, sortOrder: 230 },
++      { key: 'size.small', name: 'Small', abbreviation: 'sm', group: 'Size', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 240 },
++      { key: 'size.medium', name: 'Medium', abbreviation: 'med', group: 'Size', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 250 },
++      { key: 'size.large', name: 'Large', abbreviation: 'lg', group: 'Size', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 260 }
++    ];
++  }
++
+   function upgrade(db, oldVersion, transaction) {
+     var listRecordsStore = ensureStore(db, transaction, STORE_NAMES.LIST_RECORDS, { keyPath: 'id' });
+     ensureIndex(listRecordsStore, INDEX_NAMES.LIST_RECORDS_BY_TYPE, 'type', { unique: false });
+@@ -76,6 +111,11 @@
+     ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_TAG_ID, 'tagId', { unique: false });
+     ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG, ['recipeId', 'tagId'], { unique: true });
+ 
++    var unitOfMeasuresStore = ensureStore(db, transaction, STORE_NAMES.UNIT_OF_MEASURES, { keyPath: 'id' });
++    ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_NAME, 'name', { unique: false });
++    ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_GROUP, 'group', { unique: false });
++    ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_ACTIVE, 'isActive', { unique: false });
++
+     if (oldVersion < 6) {
+       var existingTagsByName = {};
+ 
+@@ -126,6 +166,44 @@
+         };
+       };
+     }
++
++    if (oldVersion < 7) {
++      unitOfMeasuresStore.getAll().onsuccess = function (event) {
++        var existing = event.target.result || [];
++        var existingByKey = {};
++        var seedUnits = getUnitOfMeasureSeedData();
++        var timestamp = new Date().toISOString();
++
++        for (var i = 0; i < existing.length; i++) {
++          var existingKey = String(existing[i] && existing[i].key || '');
++          if (existingKey) {
++            existingByKey[existingKey] = true;
++          }
++        }
++
++        for (var j = 0; j < seedUnits.length; j++) {
++          var seed = seedUnits[j];
++          if (existingByKey[seed.key]) {
++            continue;
++          }
++
++          unitOfMeasuresStore.put({
++            id: window.KaPIds.NewId(),
++            key: seed.key,
++            name: seed.name,
++            abbreviation: seed.abbreviation,
++            group: seed.group,
++            quantityBehavior: seed.quantityBehavior,
++            quantityStep: seed.quantityStep,
++            isSeeded: true,
++            isActive: true,
++            sortOrder: seed.sortOrder,
++            createdDate: timestamp,
++            updatedDate: timestamp
++          });
++        }
++      };
++    }
+   }
+ 
+   window.KaPStores = {
+diff --git a/docs/features/recipes/recipes-page.js b/docs/features/recipes/recipes-page.js
+index a229c66..b86df5e 100644
+--- a/docs/features/recipes/recipes-page.js
++++ b/docs/features/recipes/recipes-page.js
+@@ -257,11 +257,18 @@
+   }
+ 
+   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems, activeVersionId, isViewingLatestVersion) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
++    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
+       title: 'Add Ingredient',
+       currentContextLabel: 'recipe',
+       detailItems: detailItems
+-    }));
++    });
++    baseOptions.getUnitOfMeasures = function () {
++      return window.KaPRecipesService.getAllUnitOfMeasures();
++    };
++    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
++      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++    };
++    var result = await window.KaPUI.ShowDiscoveryItemModal(baseOptions);
+ 
+     if (result === null) {
+       return;
+@@ -274,7 +281,8 @@
+           result.item.id,
+           result.name,
+           result.quantity,
+-          result.description
++          result.description,
++          result.unitOfMeasureId || null
+         );
+       } else {
+         await window.KaPRecipesService.addItemToVersion(
+@@ -283,7 +291,8 @@
+           result.item.id,
+           result.name,
+           result.quantity,
+-          result.description
++          result.description,
++          result.unitOfMeasureId || null
+         );
+       }
+ 
+@@ -309,8 +318,16 @@
+       initialCategoryId: detailItem.categoryId,
+       initialCategoryName: detailItem.categoryName,
+       initialDescription: detailItem.description,
+-      showQuantityField: false,
++      initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++      initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
++      showQuantityField: true,
+       showCategoryField: true,
++      getUnitOfMeasures: function () {
++        return window.KaPRecipesService.getAllUnitOfMeasures();
++      },
++      createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++        return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++      },
+       getAllCategories: function () {
+         return window.KaPCategoriesService.getAllCategories();
+       },
+@@ -338,8 +355,9 @@
+         recipeRecord.id,
+         detailItem.id,
+         result.name,
+-        detailItem.quantity,
+-        result.description
++        result.quantity,
++        result.description,
++        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
+       );
+ 
+       if (detailItem.itemId) {
+@@ -477,24 +495,6 @@
+ 
+   function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion) {
+     return window.KaPUI.NewDetailItemRow(detailItem, {
+-      onIncrement: async function () {
+-        var updated = isViewingLatestVersion
+-          ? await window.KaPRecipesService.incrementRecipeItemQuantity(recipeRecord.id, detailItem.id)
+-          : (await window.KaPRecipesService.incrementVersionItemQuantity(recipeRecord.id, selectedVersionId, detailItem.id)).find(function (item) {
+-            return item.id === detailItem.id;
+-          });
+-        detailItem.quantity = updated.quantity;
+-        return updated.quantity;
+-      },
+-      onDecrement: async function () {
+-        var updated = isViewingLatestVersion
+-          ? await window.KaPRecipesService.decrementRecipeItemQuantity(recipeRecord.id, detailItem.id)
+-          : (await window.KaPRecipesService.decrementVersionItemQuantity(recipeRecord.id, selectedVersionId, detailItem.id)).find(function (item) {
+-            return item.id === detailItem.id;
+-          });
+-        detailItem.quantity = updated.quantity;
+-        return updated.quantity;
+-      },
+       onEdit: async function () {
+         if (isViewingLatestVersion) {
+           await editRecipeItemWithPrompt(recipeRecord, detailItem);
+@@ -509,8 +509,16 @@
+             initialCategoryId: detailItem.categoryId,
+             initialCategoryName: detailItem.categoryName,
+             initialDescription: detailItem.description,
+-            showQuantityField: false,
++            initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++            initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
++            showQuantityField: true,
+             showCategoryField: true,
++            getUnitOfMeasures: function () {
++              return window.KaPRecipesService.getAllUnitOfMeasures();
++            },
++            createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++              return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++            },
+             getAllCategories: function () {
+               return window.KaPCategoriesService.getAllCategories();
+             },
+@@ -535,8 +543,9 @@
+               selectedVersionId,
+               detailItem.id,
+               result.name,
+-              detailItem.quantity,
+-              result.description
++              result.quantity,
++              result.description,
++              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
+             );
+           }
+         }
+@@ -1561,6 +1570,20 @@
+     var detailItems = isViewingLatestVersion
+       ? await window.KaPRecipesService.getRecipeItems(record.id)
+       : await window.KaPRecipesService.getVersionItems(record.id, activeVersion.id);
++
++    // Pre-resolve UOM abbreviations so rows can render without async per-row lookups
++    var allUomUnits = [];
++    try {
++      allUomUnits = await window.KaPRecipesService.getAllUnitOfMeasures();
++    } catch (_e) {}
++    var uomById = {};
++    for (var u = 0; u < allUomUnits.length; u++) {
++      uomById[allUomUnits[u].id] = allUomUnits[u];
++    }
++    detailItems.forEach(function (item) {
++      var uom = item.unitOfMeasureId ? uomById[item.unitOfMeasureId] : null;
++      item.uomAbbreviation = uom ? (uom.abbreviation || uom.name || null) : null;
++    });
+     var instructions = isViewingLatestVersion
+       ? await window.KaPRecipesService.getRecipeInstructions(record.id)
+       : await window.KaPRecipesService.getVersionInstructions(record.id, activeVersion.id);
+@@ -1616,7 +1639,7 @@
+                   targetListId,
+                   ingredient.itemId,
+                   ingredient.name,
+-                  ingredient.quantity,
++                  ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity,
+                   ingredient.description
+                 );
+               }));
+diff --git a/docs/features/recipes/recipes-service.js b/docs/features/recipes/recipes-service.js
+index 660f82d..c96fd87 100644
+--- a/docs/features/recipes/recipes-service.js
++++ b/docs/features/recipes/recipes-service.js
+@@ -37,6 +37,15 @@
+     return window.KaPItemEntryRules.normalizeDescription(description);
+   }
+ 
++  function normalizeOptionalUnitOfMeasureId(unitOfMeasureId) {
++    var raw = String(unitOfMeasureId == null ? '' : unitOfMeasureId).trim();
++    return raw || null;
++  }
++
++  function normalizeOptionalRecipeQuantity(quantity) {
++    return window.KaPItemEntryRules.normalizeOptionalDecimalQuantity(quantity);
++  }
++
+   function normalizeTagName(tagName) {
+     return String(tagName || '').trim().toLowerCase();
+   }
+@@ -92,10 +101,16 @@
+ 
+   function cloneSnapshotItems(snapshotItems) {
+     return (snapshotItems || []).map(function (entry) {
++      var quantityValue = entry && entry.quantityValue == null
++        ? (entry && entry.quantity == null ? null : Number(entry.quantity))
++        : Number(entry.quantityValue);
++
+       return {
+         itemId: String((entry && entry.itemId) || ''),
+         name: String((entry && entry.name) || ''),
+-        quantity: entry && entry.quantity == null ? null : Number(entry.quantity),
++        quantity: quantityValue,
++        quantityValue: quantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(entry && entry.unitOfMeasureId),
+         description: String((entry && entry.description) || ''),
+         categoryId: String((entry && entry.categoryId) || ''),
+         categoryName: String((entry && entry.categoryName) || '')
+@@ -149,6 +164,29 @@
+     return item;
+   }
+ 
++  async function getUnitOfMeasureById(unitOfMeasureId) {
++    var normalizedId = normalizeOptionalUnitOfMeasureId(unitOfMeasureId);
++    if (!normalizedId) {
++      return null;
++    }
++
++    return window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, normalizedId);
++  }
++
++  async function ensureValidQuantityForUnit(quantityValue, unitOfMeasureId) {
++    var normalizedId = normalizeOptionalUnitOfMeasureId(unitOfMeasureId);
++    if (!normalizedId) {
++      return null;
++    }
++
++    var uom = await getUnitOfMeasureById(normalizedId);
++    if (!uom || uom.isActive === false) {
++      throw new Error('Unit of measure not found.');
++    }
++
++    return normalizedId;
++  }
++
+   async function touchRecipe(recipeId) {
+     var recipe = await requireRecipeById(recipeId);
+     recipe.updatedDate = nowIso();
+@@ -357,12 +395,18 @@
+           await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+         }
+ 
++        var quantityValue = joinRecord.quantityValue == null
++          ? (joinRecord.quantity == null ? null : Number(joinRecord.quantity))
++          : Number(joinRecord.quantityValue);
++
+         return {
+           id: joinRecord.id,
+           listRecordId: joinRecord.listRecordId,
+           itemId: joinRecord.itemId,
+           name: joinRecord.name || (item && item.name) || 'Unknown Item',
+-          quantity: joinRecord.quantity,
++          quantity: quantityValue,
++          quantityValue: quantityValue,
++          unitOfMeasureId: normalizeOptionalUnitOfMeasureId(joinRecord.unitOfMeasureId),
+           description: joinRecord.description,
+           categoryId: (item && item.categoryId) || '',
+           categoryName: (item && item.categoryName) || '',
+@@ -426,10 +470,16 @@
+     var instructionRecords = await getRecipeInstructions(recipeId);
+ 
+     latestVersion.snapshotItems = detailItems.map(function (detailItem) {
++      var quantityValue = detailItem.quantityValue == null
++        ? (detailItem.quantity == null ? null : Number(detailItem.quantity))
++        : Number(detailItem.quantityValue);
++
+       return {
+         itemId: detailItem.itemId || '',
+         name: detailItem.name || '',
+-        quantity: detailItem.quantity,
++        quantity: quantityValue,
++        quantityValue: quantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(detailItem.unitOfMeasureId),
+         description: detailItem.description || '',
+         categoryId: detailItem.categoryId || '',
+         categoryName: detailItem.categoryName || ''
+@@ -565,26 +615,39 @@
+     return instructionRecords.length;
+   }
+ 
+-  async function addItemToRecipe(recipeId, itemId, name, quantity, description) {
++  async function addItemToRecipe(recipeId, itemId, name, quantity, description, unitOfMeasureId) {
+     await requireRecipeById(recipeId);
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var joinRecords = await readJoinRecordsByRecipeId(recipeId);
+     var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
+ 
+     if (existingByName) {
+-      existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
++      var currentQuantity = existingByName.quantityValue == null ? existingByName.quantity : existingByName.quantityValue;
++      var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
++      existingByName.quantity = incremented;
++      existingByName.quantityValue = incremented;
++      if (unitOfMeasureId !== undefined) {
++        existingByName.unitOfMeasureId = await ensureValidQuantityForUnit(
++          existingByName.quantityValue,
++          unitOfMeasureId
++        );
++      }
+       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+       await syncLatestVersionSnapshot(recipeId);
+       return existingByName;
+     }
+ 
+     await requireItemById(itemId);
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedUnitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     var joinRecord = {
+       id: window.KaPIds.NewId(),
+       listRecordId: recipeId,
+       itemId: itemId,
+       name: safeName,
+-      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
++      quantity: normalizedQuantity,
++      quantityValue: normalizedQuantity,
++      unitOfMeasureId: normalizedUnitOfMeasureId,
+       description: window.KaPItemEntryRules.normalizeDescription(description)
+     };
+ 
+@@ -593,7 +656,7 @@
+     return joinRecord;
+   }
+ 
+-  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description) {
++  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description, unitOfMeasureId) {
+     await requireRecipeById(recipeId);
+     var existing = await findJoinRecordById(recipeId, recipeItemId);
+     if (!existing) {
+@@ -601,7 +664,14 @@
+     }
+ 
+     existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    existing.quantity = normalizedQuantity;
++    existing.quantityValue = normalizedQuantity;
++    if (unitOfMeasureId !== undefined) {
++      existing.unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
++    } else {
++      await ensureValidQuantityForUnit(normalizedQuantity, existing.unitOfMeasureId);
++    }
+     existing.description = window.KaPItemEntryRules.normalizeDescription(description);
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+@@ -627,8 +697,10 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = existing.quantity == null ? 1 : existing.quantity;
+-    existing.quantity = current + 1;
++    var current = existing.quantityValue == null ? (existing.quantity == null ? 1 : existing.quantity) : existing.quantityValue;
++    var updatedQuantity = current + 1;
++    existing.quantity = updatedQuantity;
++    existing.quantityValue = updatedQuantity;
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+     return existing;
+@@ -641,8 +713,10 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = existing.quantity == null ? 1 : existing.quantity;
+-    existing.quantity = Math.max(1, current - 1);
++    var current = existing.quantityValue == null ? (existing.quantity == null ? 1 : existing.quantity) : existing.quantityValue;
++    var updatedQuantity = Math.max(1, current - 1);
++    existing.quantity = updatedQuantity;
++    existing.quantityValue = updatedQuantity;
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+     return existing;
+@@ -747,12 +821,17 @@
+         itemId = createdItem.id;
+       }
+ 
++      var quantityValue = snapshotItem.quantityValue == null ? snapshotItem.quantity : snapshotItem.quantityValue;
++      var normalizedQuantityValue = quantityValue == null ? null : Number(quantityValue);
++
+       var joinRecord = {
+         id: window.KaPIds.NewId(),
+         listRecordId: recipeId,
+         itemId: itemId,
+         name: snapshotItem.name,
+-        quantity: snapshotItem.quantity,
++        quantity: normalizedQuantityValue,
++        quantityValue: normalizedQuantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description
+       };
+ 
+@@ -817,12 +896,18 @@
+ 
+   function buildDetailItemsFromSnapshot(recipeId, snapshotItems) {
+     return sortByNameAscending(cloneSnapshotItems(snapshotItems).map(function (snapshotItem, index) {
++      var quantityValue = snapshotItem.quantityValue == null
++        ? (snapshotItem.quantity == null ? null : Number(snapshotItem.quantity))
++        : Number(snapshotItem.quantityValue);
++
+       return {
+         id: String(snapshotItem.itemId || '') + '::' + String(index),
+         listRecordId: recipeId,
+         itemId: snapshotItem.itemId || '',
+         name: snapshotItem.name || 'Unknown Item',
+-        quantity: snapshotItem.quantity,
++        quantity: quantityValue,
++        quantityValue: quantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description || '',
+         categoryId: snapshotItem.categoryId || '',
+         categoryName: snapshotItem.categoryName || '',
+@@ -876,14 +961,14 @@
+     return buildInstructionItemsFromSnapshot(version.snapshotInstructions);
+   }
+ 
+-  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description) {
++  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description, unitOfMeasureId) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+     }
+ 
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    var normalizedQuantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
+     var normalizedDescription = window.KaPItemEntryRules.normalizeDescription(description);
+     var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+     var existing = snapshotItems.find(function (entry) {
+@@ -891,14 +976,23 @@
+     });
+ 
+     if (existing) {
+-      existing.quantity = window.KaPItemEntryRules.incrementQuantity(existing.quantity);
++      var currentQuantity = existing.quantityValue == null ? existing.quantity : existing.quantityValue;
++      var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
++      existing.quantity = incremented;
++      existing.quantityValue = incremented;
++      if (unitOfMeasureId !== undefined) {
++        existing.unitOfMeasureId = await ensureValidQuantityForUnit(existing.quantityValue, unitOfMeasureId);
++      }
+     } else {
+       await requireItemById(itemId);
+       var sourceItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
++      var normalizedUnitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+       snapshotItems.push({
+         itemId: itemId,
+         name: safeName,
+         quantity: normalizedQuantity,
++        quantityValue: normalizedQuantity,
++        unitOfMeasureId: normalizedUnitOfMeasureId,
+         description: normalizedDescription,
+         categoryId: (sourceItem && sourceItem.categoryId) || '',
+         categoryName: (sourceItem && sourceItem.categoryName) || ''
+@@ -909,7 +1003,7 @@
+     return getVersionItems(recipeId, versionId);
+   }
+ 
+-  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description) {
++  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description, unitOfMeasureId) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+@@ -923,8 +1017,15 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
+     snapshotItems[itemIndex].name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    snapshotItems[itemIndex].quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    snapshotItems[itemIndex].quantity = normalizedQuantity;
++    snapshotItems[itemIndex].quantityValue = normalizedQuantity;
++    if (unitOfMeasureId !== undefined) {
++      snapshotItems[itemIndex].unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
++    } else {
++      await ensureValidQuantityForUnit(normalizedQuantity, snapshotItems[itemIndex].unitOfMeasureId);
++    }
+     snapshotItems[itemIndex].description = window.KaPItemEntryRules.normalizeDescription(description);
+ 
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+@@ -958,8 +1059,12 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity;
+-    snapshotItems[itemIndex].quantity = current + 1;
++    var current = snapshotItems[itemIndex].quantityValue == null
++      ? (snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity)
++      : snapshotItems[itemIndex].quantityValue;
++    var updatedQuantity = current + 1;
++    snapshotItems[itemIndex].quantity = updatedQuantity;
++    snapshotItems[itemIndex].quantityValue = updatedQuantity;
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+     return getVersionItems(recipeId, versionId);
+   }
+@@ -978,8 +1083,12 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity;
+-    snapshotItems[itemIndex].quantity = Math.max(1, current - 1);
++    var current = snapshotItems[itemIndex].quantityValue == null
++      ? (snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity)
++      : snapshotItems[itemIndex].quantityValue;
++    var updatedQuantity = Math.max(1, current - 1);
++    snapshotItems[itemIndex].quantity = updatedQuantity;
++    snapshotItems[itemIndex].quantityValue = updatedQuantity;
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+     return getVersionItems(recipeId, versionId);
+   }
+@@ -1151,10 +1260,142 @@
+     return clonedRecipe;
+   }
+ 
++  function sortUnitOfMeasures(records) {
++    return (records || []).slice().sort(function (a, b) {
++      var groupCompare = String(a && a.group || '').localeCompare(String(b && b.group || ''), undefined, { sensitivity: 'base' });
++      if (groupCompare !== 0) {
++        return groupCompare;
++      }
++
++      var sortA = Number(a && a.sortOrder || 0);
++      var sortB = Number(b && b.sortOrder || 0);
++      if (sortA !== sortB) {
++        return sortA - sortB;
++      }
++
++      return String(a && a.name || '').localeCompare(String(b && b.name || ''), undefined, { sensitivity: 'base' });
++    });
++  }
++
++  async function getAllUnitOfMeasures(options) {
++    var includeInactive = !!(options && options.includeInactive);
++    var records = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES);
++    var filtered = includeInactive
++      ? (records || [])
++      : (records || []).filter(function (r) { return r && r.isActive !== false; });
++
++    return sortUnitOfMeasures(filtered);
++  }
++
++  async function createUnitOfMeasure(name, abbreviation, group, quantityBehavior, quantityStep) {
++    var safeName = String(name || '').trim();
++    if (!safeName) {
++      throw new Error('Unit name is required.');
++    }
++
++    var existing = await getAllUnitOfMeasures({ includeInactive: true });
++    var duplicate = existing.find(function (record) {
++      return String(record && record.name || '').toLowerCase() === safeName.toLowerCase();
++    });
++
++    if (duplicate) {
++      throw new Error('A unit with that name already exists.');
++    }
++
++    var safeAbbreviation = String(abbreviation || '').trim();
++    var safeGroup = String(group || 'Other').trim() || 'Other';
++    var safeBehavior = String(quantityBehavior || 'decimal').trim().toLowerCase();
++    if (safeBehavior !== 'whole_or_half' && safeBehavior !== 'decimal' && safeBehavior !== 'user_defined') {
++      safeBehavior = 'decimal';
++    }
++
++    var safeStep = quantityStep == null || String(quantityStep).trim() === ''
++      ? null
++      : Number(quantityStep);
++
++    if (safeStep != null && (Number.isNaN(safeStep) || !Number.isFinite(safeStep) || safeStep <= 0)) {
++      throw new Error('Quantity step must be a positive number.');
++    }
++
++    var timestamp = nowIso();
++    var unit = {
++      id: window.KaPIds.NewId(),
++      key: null,
++      name: safeName,
++      abbreviation: safeAbbreviation,
++      group: safeGroup,
++      quantityBehavior: safeBehavior,
++      quantityStep: safeStep,
++      isSeeded: false,
++      isActive: true,
++      sortOrder: 1000,
++      createdDate: timestamp,
++      updatedDate: timestamp
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
++    return unit;
++  }
++
++  async function updateUnitOfMeasure(unitId, updates) {
++    var unit = await getUnitOfMeasureById(unitId);
++    if (!unit) {
++      throw new Error('Unit of measure not found.');
++    }
++
++    if (unit.isSeeded) {
++      throw new Error('Seeded units cannot be edited.');
++    }
++
++    var nextName = updates && updates.name !== undefined ? String(updates.name || '').trim() : String(unit.name || '').trim();
++    if (!nextName) {
++      throw new Error('Unit name is required.');
++    }
++
++    if (nextName.toLowerCase() !== String(unit.name || '').toLowerCase()) {
++      var existing = await getAllUnitOfMeasures({ includeInactive: true });
++      var duplicate = existing.find(function (record) {
++        return record && record.id !== unit.id && String(record.name || '').toLowerCase() === nextName.toLowerCase();
++      });
++      if (duplicate) {
++        throw new Error('A unit with that name already exists.');
++      }
++    }
++
++    var nextBehavior = updates && updates.quantityBehavior !== undefined
++      ? String(updates.quantityBehavior || '').trim().toLowerCase()
++      : String(unit.quantityBehavior || 'decimal').trim().toLowerCase();
++    if (nextBehavior !== 'whole_or_half' && nextBehavior !== 'decimal' && nextBehavior !== 'user_defined') {
++      throw new Error('Invalid quantity behavior.');
++    }
++
++    var nextStep = updates && updates.quantityStep !== undefined
++      ? (updates.quantityStep == null || String(updates.quantityStep).trim() === '' ? null : Number(updates.quantityStep))
++      : unit.quantityStep;
++
++    if (nextStep != null && (Number.isNaN(nextStep) || !Number.isFinite(nextStep) || nextStep <= 0)) {
++      throw new Error('Quantity step must be a positive number.');
++    }
++
++    unit.name = nextName;
++    unit.abbreviation = updates && updates.abbreviation !== undefined ? String(updates.abbreviation || '').trim() : String(unit.abbreviation || '');
++    unit.group = updates && updates.group !== undefined ? (String(updates.group || '').trim() || 'Other') : String(unit.group || 'Other');
++    unit.quantityBehavior = nextBehavior;
++    unit.quantityStep = nextStep;
++    unit.isActive = updates && updates.isActive !== undefined ? !!updates.isActive : unit.isActive !== false;
++    unit.updatedDate = nowIso();
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
++    return unit;
++  }
++
+   window.KaPRecipesService = {
+     getAllRecipes: getAllRecipes,
+     getRecipeTags: getRecipeTags,
+     getAllRecipeTags: getAllRecipeTags,
++    getAllUnitOfMeasures: getAllUnitOfMeasures,
++    createUnitOfMeasure: createUnitOfMeasure,
++    updateUnitOfMeasure: updateUnitOfMeasure,
+     addTagToRecipe: addTagToRecipe,
+     removeTagFromRecipe: removeTagFromRecipe,
+     createRecipe: createRecipe,
+diff --git a/docs/features/settings/settings-page.js b/docs/features/settings/settings-page.js
+index 14bc8b2..ccdd2fc 100644
+--- a/docs/features/settings/settings-page.js
++++ b/docs/features/settings/settings-page.js
+@@ -45,11 +45,133 @@
+     body.className = 'settings-body';
+     body.appendChild(buildThemeRow());
+     body.appendChild(buildTextSizeRow());
++
++    var uomSection = document.createElement('div');
++    uomSection.className = 'settings-uom-section';
++    await renderUomSectionInto(uomSection);
++    body.appendChild(uomSection);
++
+     section.appendChild(body);
+ 
+     container.replaceChildren(section);
+   }
+ 
++  async function renderUomSectionInto(container) {
++    container.replaceChildren();
++
++    var heading = document.createElement('div');
++    heading.className = 'settings-section-heading';
++
++    var headingText = document.createElement('span');
++    headingText.textContent = 'Units of Measure';
++    heading.appendChild(headingText);
++
++    var addButton = document.createElement('button');
++    addButton.type = 'button';
++    addButton.className = 'record-action-button settings-uom-add-button';
++    addButton.textContent = '+ Add Unit';
++    addButton.addEventListener('click', async function () {
++      var created = await window.KaPUI.ShowCreateUnitModal({
++        createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++          return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++        }
++      });
++      if (created) {
++        await renderUomSectionInto(container);
++      }
++    });
++    heading.appendChild(addButton);
++    container.appendChild(heading);
++
++    var units = [];
++    try {
++      units = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++    } catch (_e) {}
++
++    if (units.length === 0) {
++      var empty = document.createElement('p');
++      empty.className = 'settings-uom-empty';
++      empty.textContent = 'No units found.';
++      container.appendChild(empty);
++      return;
++    }
++
++    var currentGroup = null;
++    units.forEach(function (unit) {
++      if (unit.group !== currentGroup) {
++        currentGroup = unit.group;
++        var groupHeader = document.createElement('div');
++        groupHeader.className = 'settings-uom-group-header';
++        groupHeader.textContent = unit.group;
++        container.appendChild(groupHeader);
++      }
++
++      var row = document.createElement('div');
++      row.className = 'settings-uom-row';
++
++      var nameBlock = document.createElement('div');
++      nameBlock.className = 'settings-uom-name-block';
++
++      var nameSpan = document.createElement('span');
++      nameSpan.className = 'settings-uom-name';
++      nameSpan.textContent = unit.name;
++      nameBlock.appendChild(nameSpan);
++
++      if (unit.abbreviation) {
++        var abbrSpan = document.createElement('span');
++        abbrSpan.className = 'settings-uom-abbr';
++        abbrSpan.textContent = unit.abbreviation;
++        nameBlock.appendChild(abbrSpan);
++      }
++
++      row.appendChild(nameBlock);
++
++      var metaBlock = document.createElement('div');
++      metaBlock.className = 'settings-uom-meta';
++
++      var behaviorLabel = { decimal: 'Decimal', whole_or_half: 'Whole / half', user_defined: 'Custom step' };
++      var behaviorSpan = document.createElement('span');
++      behaviorSpan.className = 'settings-uom-behavior';
++      behaviorSpan.textContent = behaviorLabel[unit.quantityBehavior] || unit.quantityBehavior || '';
++      metaBlock.appendChild(behaviorSpan);
++
++      if (!unit.isActive) {
++        var inactiveTag = document.createElement('span');
++        inactiveTag.className = 'settings-uom-inactive-tag';
++        inactiveTag.textContent = 'Inactive';
++        metaBlock.appendChild(inactiveTag);
++      }
++
++      row.appendChild(metaBlock);
++
++      if (!unit.isSeeded) {
++        var editButton = document.createElement('button');
++        editButton.type = 'button';
++        editButton.className = 'record-action-button settings-uom-edit-button';
++        editButton.textContent = 'Edit';
++        editButton.addEventListener('click', async function () {
++          await showEditUnitModal(unit, container);
++        });
++        row.appendChild(editButton);
++      }
++
++      container.appendChild(row);
++    });
++  }
++
++  async function showEditUnitModal(unit, sectionContainer) {
++    var result = await window.KaPUI.ShowEditUnitModal({
++      unit: unit,
++      updateUnitOfMeasure: function (id, updates) {
++        return window.KaPRecipesService.updateUnitOfMeasure(id, updates);
++      }
++    });
++
++    if (result) {
++      await renderUomSectionInto(sectionContainer);
++    }
++  }
++
+   function buildTextSizeRow() {
+     var row = document.createElement('div');
+     row.className = 'settings-row';
+diff --git a/docs/shared/item-entry-rules.js b/docs/shared/item-entry-rules.js
+index 85f2ba7..a6b62d9 100644
+--- a/docs/shared/item-entry-rules.js
++++ b/docs/shared/item-entry-rules.js
+@@ -25,6 +25,37 @@
+     return Number(raw);
+   }
+ 
++  function normalizeOptionalDecimalQuantity(quantity) {
++    var raw = String(quantity == null ? '' : quantity).trim();
++    if (!raw) {
++      return null;
++    }
++
++    if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) {
++      throw new Error('Quantity must be a decimal number.');
++    }
++
++    var parsed = Number(raw);
++    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
++      throw new Error('Quantity must be a decimal number.');
++    }
++
++    return parsed;
++  }
++
++  function validateQuantityForBehavior(quantityValue, quantityBehavior, quantityStep) {
++    if (quantityValue == null) {
++      return true;
++    }
++
++    var numeric = Number(quantityValue);
++    if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
++      throw new Error('Quantity must be a decimal number.');
++    }
++
++    return true;
++  }
++
+   function normalizeNameKey(name) {
+     return String(name || '').trim().toLowerCase();
+   }
+@@ -44,6 +75,8 @@
+     ensureValidItemEntryName: ensureValidItemEntryName,
+     normalizeDescription: normalizeDescription,
+     normalizeOptionalIntegerQuantity: normalizeOptionalIntegerQuantity,
++    normalizeOptionalDecimalQuantity: normalizeOptionalDecimalQuantity,
++    validateQuantityForBehavior: validateQuantityForBehavior,
+     findJoinRecordByName: findJoinRecordByName,
+     incrementQuantity: incrementQuantity
+   };
+diff --git a/docs/styles.css b/docs/styles.css
+index b7871a1..c483415 100644
+--- a/docs/styles.css
++++ b/docs/styles.css
+@@ -474,6 +474,7 @@ body {
+   align-items: center;
+   justify-content: center;
+   min-width: 1.75rem;
++  max-width: 6rem;
+   padding: 2px 0.5rem;
+   border-radius: 999px;
+   border: 1px solid var(--color-border);
+@@ -483,6 +484,9 @@ body {
+   font-weight: 600;
+   line-height: 1.2;
+   flex-shrink: 0;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
+ }
+ 
+ .detail-header {
+@@ -994,6 +998,15 @@ body {
+ .modal-checklist-name {
+   font-size: 0.95rem;
+   color: var(--color-text);
++  flex: 1;
++}
++
++.modal-checklist-qty {
++  flex-shrink: 0;
++  font-size: 0.8rem;
++  color: var(--color-muted);
++  font-weight: 600;
++  white-space: nowrap;
+ }
+ 
+ .modal-toggle-group {
+@@ -1226,6 +1239,124 @@ body {
+   padding: 0.25rem 1.25rem 1.25rem 1.25rem;
+ }
+ 
++.settings-uom-section {
++  display: grid;
++  gap: 0;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  overflow: hidden;
++  margin-top: 0.375rem;
++}
++
++.settings-section-heading {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  padding: 0.625rem 0.875rem;
++  background: var(--color-surface);
++  font-size: 0.88rem;
++  font-weight: 600;
++  color: var(--color-muted);
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++  border-bottom: 1px solid var(--color-border);
++}
++
++.settings-uom-add-button {
++  font-size: 0.85rem;
++  color: var(--color-brand);
++  background: transparent;
++  border: none;
++  padding: 0.125rem 0.25rem;
++  cursor: pointer;
++}
++
++.settings-uom-add-button:hover {
++  color: var(--color-brand-strong);
++}
++
++.settings-uom-group-header {
++  padding: 0.375rem 0.875rem 0.25rem;
++  font-size: 0.78rem;
++  font-weight: 600;
++  color: var(--color-muted);
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++  background: var(--color-bg);
++  border-top: 1px solid var(--color-border);
++}
++
++.settings-uom-group-header:first-of-type {
++  border-top: none;
++}
++
++.settings-uom-row {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  padding: 0.5rem 0.875rem;
++  border-top: 1px solid var(--color-border);
++}
++
++.settings-uom-name-block {
++  flex: 1;
++  display: flex;
++  align-items: baseline;
++  gap: 0.375rem;
++  min-width: 0;
++}
++
++.settings-uom-name {
++  font-size: 0.93rem;
++  color: var(--color-text);
++}
++
++.settings-uom-abbr {
++  font-size: 0.8rem;
++  color: var(--color-muted);
++}
++
++.settings-uom-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.375rem;
++  flex-shrink: 0;
++}
++
++.settings-uom-behavior {
++  font-size: 0.78rem;
++  color: var(--color-muted);
++}
++
++.settings-uom-inactive-tag {
++  font-size: 0.72rem;
++  padding: 1px 0.4rem;
++  border-radius: 999px;
++  border: 1px solid var(--color-border);
++  color: var(--color-muted);
++}
++
++.settings-uom-edit-button {
++  font-size: 0.82rem;
++  color: var(--color-brand);
++  background: transparent;
++  border: none;
++  padding: 0.125rem 0.25rem;
++  cursor: pointer;
++  flex-shrink: 0;
++}
++
++.settings-uom-edit-button:hover {
++  color: var(--color-brand-strong);
++}
++
++.settings-uom-empty {
++  padding: 0.75rem 0.875rem;
++  color: var(--color-muted);
++  font-size: 0.88rem;
++  margin: 0;
++}
++
+ .settings-row {
+   display: flex;
+   align-items: center;
+@@ -1483,6 +1614,53 @@ body {
+   padding: 0.5625rem 0.75rem;
+ }
+ 
++.modal-quantity-row {
++  display: flex;
++  gap: 0.5rem;
++  align-items: stretch;
++}
++
++.modal-quantity-input {
++  flex: 1;
++  min-width: 0;
++}
++
++.modal-uom-select {
++  flex: 1;
++  min-width: 0;
++  background: var(--color-bg);
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  color: var(--color-text);
++  font-size: 0.9rem;
++  font-family: inherit;
++  padding: 0.5rem 0.5rem;
++  cursor: pointer;
++}
++
++.modal-uom-select:focus {
++  outline: none;
++  border-color: var(--color-brand);
++}
++
++.modal-uom-select::-webkit-scrollbar {
++  width: 6px;
++}
++
++.modal-uom-select::-webkit-scrollbar-track {
++  background: var(--color-surface);
++  border-radius: 0 0.5rem 0.5rem 0;
++}
++
++.modal-uom-select::-webkit-scrollbar-thumb {
++  background: var(--color-border);
++  border-radius: 999px;
++}
++
++.modal-uom-select::-webkit-scrollbar-thumb:hover {
++  background: var(--color-muted);
++}
++
+ .modal-input:focus {
+   outline: none;
+   border-color: var(--color-brand);
+diff --git a/docs/ui/ui.js b/docs/ui/ui.js
+index 04d792d..09e767a 100644
+--- a/docs/ui/ui.js
++++ b/docs/ui/ui.js
+@@ -286,7 +286,8 @@
+     var qtyPillNode = node.querySelector('.detail-item-qty-pill');
+     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+     var descriptionText = detailItem.description || '';
+-    var currentQuantity = detailItem.quantity;
++    var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
++    var uomAbbreviation = detailItem.uomAbbreviation || null;
+     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
+ 
+@@ -303,16 +304,21 @@
+       });
+     }
+ 
+-    function updateQtyPill(qty) {
++    function updateQtyPill(qty, abbr) {
+       if (!qtyPillNode) {
+         return;
+       }
+ 
+       var numericQty = Number(qty);
+-      var showPill = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && numericQty !== 1;
++      var hasUom = !!(abbr);
++      var showPill = (qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && (numericQty !== 1 || hasUom)) || hasUom;
+ 
+       if (showPill) {
+-        qtyPillNode.textContent = String(qty);
++        var pillText = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 ? String(qty) : '';
++        if (abbr) {
++          pillText = pillText ? pillText + '\u00a0' + abbr : abbr;
++        }
++        qtyPillNode.textContent = pillText;
+         qtyPillNode.style.display = '';
+         qtyPillNode.style.visibility = 'visible';
+         qtyPillNode.setAttribute('aria-hidden', 'false');
+@@ -324,7 +330,7 @@
+       }
+     }
+ 
+-    updateQtyPill(currentQuantity);
++    updateQtyPill(currentQuantity, uomAbbreviation);
+ 
+     if (descriptionText) {
+       metaNode.textContent = descriptionText;
+@@ -595,6 +601,166 @@
+     });
+   }
+ 
++  // Modal for creating a custom unit of measure.
++  // Returns a Promise that resolves with the created unit object, or null if cancelled.
++  function ShowCreateUnitModal(options) {
++    // options: { createUnitOfMeasure: async fn(name, abbr, group, behavior, step) }
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'Add Unit';
++      confirmButton.textContent = 'Add';
++      card.setAttribute('aria-label', 'Add Unit');
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      // Name
++      var nameLabel = document.createElement('label');
++      nameLabel.className = 'modal-field-label';
++      nameLabel.textContent = 'Unit name';
++      form.appendChild(nameLabel);
++      var nameInput = document.createElement('input');
++      nameInput.type = 'text';
++      nameInput.className = 'modal-input';
++      nameInput.placeholder = 'e.g. Handful';
++      form.appendChild(nameInput);
++
++      // Abbreviation
++      var abbrLabel = document.createElement('label');
++      abbrLabel.className = 'modal-field-label';
++      abbrLabel.textContent = 'Abbreviation (optional)';
++      form.appendChild(abbrLabel);
++      var abbrInput = document.createElement('input');
++      abbrInput.type = 'text';
++      abbrInput.className = 'modal-input';
++      abbrInput.placeholder = 'e.g. hdfl';
++      form.appendChild(abbrInput);
++
++      // Group
++      var groupLabel = document.createElement('label');
++      groupLabel.className = 'modal-field-label';
++      groupLabel.textContent = 'Group';
++      form.appendChild(groupLabel);
++      var groupSelect = document.createElement('select');
++      groupSelect.className = 'modal-input';
++      ['Imperial', 'Metric', 'Unit', 'Size', 'Other'].forEach(function (g) {
++        var opt = document.createElement('option');
++        opt.value = g;
++        opt.textContent = g;
++        groupSelect.appendChild(opt);
++      });
++      groupSelect.value = 'Other';
++      form.appendChild(groupSelect);
++
++      // Quantity behavior
++      var behaviorLabel = document.createElement('label');
++      behaviorLabel.className = 'modal-field-label';
++      behaviorLabel.textContent = 'Quantity behavior';
++      form.appendChild(behaviorLabel);
++      var behaviorSelect = document.createElement('select');
++      behaviorSelect.className = 'modal-input';
++      [
++        { value: 'decimal', label: 'Decimal (free entry)' },
++        { value: 'whole_or_half', label: 'Whole or half (0.5 step)' },
++        { value: 'user_defined', label: 'Custom step' }
++      ].forEach(function (item) {
++        var opt = document.createElement('option');
++        opt.value = item.value;
++        opt.textContent = item.label;
++        behaviorSelect.appendChild(opt);
++      });
++      behaviorSelect.value = 'decimal';
++      form.appendChild(behaviorSelect);
++
++      // Step (shown only for user_defined)
++      var stepLabel = document.createElement('label');
++      stepLabel.className = 'modal-field-label';
++      stepLabel.textContent = 'Step size (optional)';
++      stepLabel.hidden = true;
++      form.appendChild(stepLabel);
++      var stepInput = document.createElement('input');
++      stepInput.type = 'text';
++      stepInput.className = 'modal-input';
++      stepInput.placeholder = 'e.g. 0.25';
++      stepInput.hidden = true;
++      form.appendChild(stepInput);
++
++      behaviorSelect.addEventListener('change', function () {
++        var isCustom = behaviorSelect.value === 'user_defined';
++        stepLabel.hidden = !isCustom;
++        stepInput.hidden = !isCustom;
++      });
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++
++      bodyNode.appendChild(form);
++
++      function closeModal(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      async function handleSubmit() {
++        errorNode.textContent = '';
++        var name = String(nameInput.value || '').trim();
++        if (!name) {
++          errorNode.textContent = 'Unit name is required.';
++          nameInput.focus();
++          return;
++        }
++        var abbr = String(abbrInput.value || '').trim() || null;
++        var group = groupSelect.value;
++        var behavior = behaviorSelect.value;
++        var stepRaw = String(stepInput.value || '').trim();
++        var step = null;
++        if (behavior === 'user_defined' && stepRaw) {
++          step = parseFloat(stepRaw);
++          if (Number.isNaN(step) || step <= 0) {
++            errorNode.textContent = 'Step size must be a positive number.';
++            stepInput.focus();
++            return;
++          }
++        }
++
++        try {
++          var created = await options.createUnitOfMeasure(name, abbr, group, behavior, step);
++          closeModal(created);
++        } catch (err) {
++          errorNode.textContent = err.message || 'Unable to create unit.';
++        }
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') { closeModal(null); }
++        if (event.key === 'Enter' && event.target !== behaviorSelect && event.target !== groupSelect) {
++          event.preventDefault();
++          handleSubmit();
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) { closeModal(null); }
++      });
++      cancelButton.addEventListener('click', function () { closeModal(null); });
++      confirmButton.addEventListener('click', function () { handleSubmit(); });
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++      nameInput.focus();
++    });
++  }
++
+   function ShowDiscoveryItemModal(options) {
+     return new Promise(function (resolve) {
+       var suggestionsEnabled = options.enableSuggestions !== false;
+@@ -650,18 +816,105 @@
+       form.appendChild(nameInputWrapper);
+ 
+       var quantityInput = null;
++      var uomSelect = null;
++      var uomUnits = [];
++      var selectedUomId = options.initialUnitOfMeasureId || null;
++
+       if (showQuantityField) {
+         var quantityLabel = document.createElement('label');
+         quantityLabel.className = 'modal-field-label';
+         quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
+         form.appendChild(quantityLabel);
+ 
++        var quantityRow = document.createElement('div');
++        quantityRow.className = 'modal-quantity-row';
++
+         quantityInput = document.createElement('input');
+         quantityInput.type = 'text';
+-        quantityInput.className = 'modal-input';
++        quantityInput.className = 'modal-input modal-quantity-input';
+         quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
+         quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
+-        form.appendChild(quantityInput);
++        quantityRow.appendChild(quantityInput);
++
++        uomSelect = document.createElement('select');
++        uomSelect.className = 'modal-uom-select';
++        uomSelect.setAttribute('aria-label', 'Unit of measure');
++
++        var noneOption = document.createElement('option');
++        noneOption.value = '';
++        noneOption.textContent = 'Unit';
++        uomSelect.appendChild(noneOption);
++
++        if (options.getUnitOfMeasures) {
++          options.getUnitOfMeasures().then(function (units) {
++            uomUnits = units || [];
++            populateUomSelect();
++          }).catch(function () {});
++        }
++
++        function populateUomSelect() {
++          // Remove everything except the blank first option
++          while (uomSelect.options.length > 1) {
++            uomSelect.remove(1);
++          }
++
++          var currentGroup = null;
++          var optgroup = null;
++
++          uomUnits.forEach(function (unit) {
++            if (unit.group !== currentGroup) {
++              currentGroup = unit.group;
++              optgroup = document.createElement('optgroup');
++              optgroup.label = currentGroup;
++              uomSelect.appendChild(optgroup);
++            }
++
++            var opt = document.createElement('option');
++            opt.value = unit.id;
++            opt.textContent = unit.name + (unit.abbreviation ? ' (' + unit.abbreviation + ')' : '');
++            if (unit.id === selectedUomId) {
++              opt.selected = true;
++            }
++
++            (optgroup || uomSelect).appendChild(opt);
++          });
++
++          // Separator + add unit option
++          if (options.createUnitOfMeasure) {
++            var separator = document.createElement('option');
++            separator.disabled = true;
++            separator.textContent = '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
++            uomSelect.appendChild(separator);
++
++            var addOpt = document.createElement('option');
++            addOpt.value = '__add_unit__';
++            addOpt.textContent = '+ Add UnitΓÇª';
++            uomSelect.appendChild(addOpt);
++          }
++        }
++
++        uomSelect.addEventListener('change', function () {
++          if (uomSelect.value === '__add_unit__') {
++            // Restore previous selection while modal is open
++            uomSelect.value = selectedUomId || '';
++            ShowCreateUnitModal({
++              createUnitOfMeasure: options.createUnitOfMeasure
++            }).then(function (created) {
++              if (!created) { return; }
++              return options.getUnitOfMeasures().then(function (units) {
++                uomUnits = units || [];
++                selectedUomId = created.id;
++                populateUomSelect();
++                uomSelect.value = created.id;
++              });
++            }).catch(function () {});
++            return;
++          }
++          selectedUomId = uomSelect.value || null;
++        });
++
++        quantityRow.appendChild(uomSelect);
++        form.appendChild(quantityRow);
+       }
+ 
+       var categoryInput = null;
+@@ -1086,6 +1339,7 @@
+             close({
+               name: rawName,
+               quantity: quantityResult.value,
++              unitOfMeasureId: selectedUomId || null,
+               description: String(descriptionInput.value || '').trim(),
+               categoryId: category ? category.id || '' : '',
+               categoryName: category ? category.name || '' : ''
+@@ -1107,6 +1361,7 @@
+             item: item,
+             name: rawName,
+             quantity: quantityResult.value,
++            unitOfMeasureId: selectedUomId || null,
+             description: String(descriptionInput.value || '').trim(),
+             categoryId: category ? category.id || '' : '',
+             categoryName: category ? category.name || '' : ''
+@@ -1754,6 +2009,155 @@
+     });
+   }
+ 
++  // Modal for editing a user-defined (non-seeded) unit of measure.
++  // Returns a Promise that resolves with the updated unit object, or null if cancelled.
++  function ShowEditUnitModal(options) {
++    // options: { unit, updateUnitOfMeasure: async fn(id, updates) }
++    var unit = options.unit || {};
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'Edit Unit';
++      confirmButton.textContent = 'Save';
++      card.setAttribute('aria-label', 'Edit Unit');
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      // Name
++      var nameLabel = document.createElement('label');
++      nameLabel.className = 'modal-field-label';
++      nameLabel.textContent = 'Unit name';
++      form.appendChild(nameLabel);
++      var nameInput = document.createElement('input');
++      nameInput.type = 'text';
++      nameInput.className = 'modal-input';
++      nameInput.value = unit.name || '';
++      form.appendChild(nameInput);
++
++      // Abbreviation
++      var abbrLabel = document.createElement('label');
++      abbrLabel.className = 'modal-field-label';
++      abbrLabel.textContent = 'Abbreviation (optional)';
++      form.appendChild(abbrLabel);
++      var abbrInput = document.createElement('input');
++      abbrInput.type = 'text';
++      abbrInput.className = 'modal-input';
++      abbrInput.value = unit.abbreviation || '';
++      form.appendChild(abbrInput);
++
++      // Quantity behavior
++      var behaviorLabel = document.createElement('label');
++      behaviorLabel.className = 'modal-field-label';
++      behaviorLabel.textContent = 'Quantity behavior';
++      form.appendChild(behaviorLabel);
++      var behaviorSelect = document.createElement('select');
++      behaviorSelect.className = 'modal-input';
++      [
++        { value: 'decimal', label: 'Decimal (free entry)' },
++        { value: 'whole_or_half', label: 'Whole or half (0.5 step)' },
++        { value: 'user_defined', label: 'Custom step' }
++      ].forEach(function (item) {
++        var opt = document.createElement('option');
++        opt.value = item.value;
++        opt.textContent = item.label;
++        behaviorSelect.appendChild(opt);
++      });
++      behaviorSelect.value = unit.quantityBehavior || 'decimal';
++      form.appendChild(behaviorSelect);
++
++      // Step
++      var stepLabel = document.createElement('label');
++      stepLabel.className = 'modal-field-label';
++      stepLabel.textContent = 'Step size (optional)';
++      stepLabel.hidden = behaviorSelect.value !== 'user_defined';
++      form.appendChild(stepLabel);
++      var stepInput = document.createElement('input');
++      stepInput.type = 'text';
++      stepInput.className = 'modal-input';
++      stepInput.value = unit.quantityStep != null ? String(unit.quantityStep) : '';
++      stepInput.hidden = behaviorSelect.value !== 'user_defined';
++      form.appendChild(stepInput);
++
++      behaviorSelect.addEventListener('change', function () {
++        var isCustom = behaviorSelect.value === 'user_defined';
++        stepLabel.hidden = !isCustom;
++        stepInput.hidden = !isCustom;
++      });
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++
++      bodyNode.appendChild(form);
++
++      function closeModal(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      async function handleSubmit() {
++        errorNode.textContent = '';
++        var name = String(nameInput.value || '').trim();
++        if (!name) {
++          errorNode.textContent = 'Unit name is required.';
++          nameInput.focus();
++          return;
++        }
++        var abbr = String(abbrInput.value || '').trim() || null;
++        var behavior = behaviorSelect.value;
++        var stepRaw = String(stepInput.value || '').trim();
++        var step = null;
++        if (behavior === 'user_defined' && stepRaw) {
++          step = parseFloat(stepRaw);
++          if (Number.isNaN(step) || step <= 0) {
++            errorNode.textContent = 'Step size must be a positive number.';
++            stepInput.focus();
++            return;
++          }
++        }
++
++        try {
++          var updated = await options.updateUnitOfMeasure(unit.id, {
++            name: name,
++            abbreviation: abbr,
++            quantityBehavior: behavior,
++            quantityStep: step
++          });
++          closeModal(updated || { id: unit.id });
++        } catch (err) {
++          errorNode.textContent = err.message || 'Unable to update unit.';
++        }
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') { closeModal(null); }
++        if (event.key === 'Enter' && event.target !== behaviorSelect) {
++          event.preventDefault();
++          handleSubmit();
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) { closeModal(null); }
++      });
++      cancelButton.addEventListener('click', function () { closeModal(null); });
++      confirmButton.addEventListener('click', function () { handleSubmit(); });
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++      nameInput.focus();
++    });
++  }
++
+   function ShowPrompt(config) {
+     return showModal(function (bodyNode, confirmButton) {
+       var input = document.createElement('input');
+@@ -1829,6 +2233,20 @@
+ 
+         row.appendChild(checkbox);
+         row.appendChild(nameNode);
++
++        var qty = ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity;
++        var abbr = ingredient.uomAbbreviation || null;
++        var numericQty = Number(qty);
++        var hasQty = qty != null && !Number.isNaN(numericQty) && numericQty !== 0;
++        if (hasQty || abbr) {
++          var qtyBadge = document.createElement('span');
++          qtyBadge.className = 'modal-checklist-qty';
++          var badgeText = hasQty ? String(qty) : '';
++          if (abbr) { badgeText = badgeText ? badgeText + '\u00a0' + abbr : abbr; }
++          qtyBadge.textContent = badgeText;
++          row.appendChild(qtyBadge);
++        }
++
+         ingredientList.appendChild(row);
+         checkboxes.push({ checkbox: checkbox, ingredient: ingredient });
+       });
+@@ -2407,6 +2825,8 @@
+     ReplaceDetailItemRows: ReplaceDetailItemRows,
+     NewSettingsToggle: NewSettingsToggle,
+     ShowDiscoveryItemModal: ShowDiscoveryItemModal,
++    ShowCreateUnitModal: ShowCreateUnitModal,
++    ShowEditUnitModal: ShowEditUnitModal,
+     ShowTemplateConfigModal: ShowTemplateConfigModal,
+     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
+     ShowPrompt: ShowPrompt,
+diff --git a/src/data/db.js b/src/data/db.js
+index e06c190..03572c8 100644
+--- a/src/data/db.js
++++ b/src/data/db.js
+@@ -1,6 +1,6 @@
+ (function () {
+   var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 6;
++  var DATABASE_VERSION = 7;
+ 
+   var state = {
+     db: null
+diff --git a/src/data/stores.js b/src/data/stores.js
+index 61962d0..a3d5540 100644
+--- a/src/data/stores.js
++++ b/src/data/stores.js
+@@ -7,7 +7,8 @@
+     RECIPE_VERSIONS: 'recipeVersions',
+     RECIPE_INSTRUCTIONS: 'recipeInstructions',
+     TAGS: 'tags',
+-    RECIPE_TAG_MAP: 'recipeTagMap'
++    RECIPE_TAG_MAP: 'recipeTagMap',
++    UNIT_OF_MEASURES: 'unitOfMeasures'
+   };
+ 
+   var INDEX_NAMES = {
+@@ -24,7 +25,10 @@
+     TAGS_BY_NAME: 'by_name',
+     RECIPE_TAG_MAP_BY_RECIPE_ID: 'by_recipe_id',
+     RECIPE_TAG_MAP_BY_TAG_ID: 'by_tag_id',
+-    RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag'
++    RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag',
++    UNIT_OF_MEASURES_BY_NAME: 'by_name',
++    UNIT_OF_MEASURES_BY_GROUP: 'by_group',
++    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active'
+   };
+ 
+   function ensureStore(db, transaction, storeName, options) {
+@@ -45,6 +49,37 @@
+     return String(tagName || '').trim().toLowerCase();
+   }
+ 
++  function getUnitOfMeasureSeedData() {
++    return [
++      { key: 'imperial.tsp', name: 'Teaspoon', abbreviation: 'tsp', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 10 },
++      { key: 'imperial.tbsp', name: 'Tablespoon', abbreviation: 'tbsp', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 20 },
++      { key: 'imperial.floz', name: 'Fluid Ounce', abbreviation: 'fl oz', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 30 },
++      { key: 'imperial.cup', name: 'Cup', abbreviation: 'cup', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 40 },
++      { key: 'imperial.pint', name: 'Pint', abbreviation: 'pt', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 50 },
++      { key: 'imperial.quart', name: 'Quart', abbreviation: 'qt', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 60 },
++      { key: 'imperial.gallon', name: 'Gallon', abbreviation: 'gal', group: 'Imperial', quantityBehavior: 'whole_or_half', quantityStep: 0.5, sortOrder: 70 },
++      { key: 'imperial.oz', name: 'Ounce', abbreviation: 'oz', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 80 },
++      { key: 'imperial.lb', name: 'Pound', abbreviation: 'lb', group: 'Imperial', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 90 },
++      { key: 'metric.ml', name: 'Milliliter', abbreviation: 'ml', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 100 },
++      { key: 'metric.l', name: 'Liter', abbreviation: 'l', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 110 },
++      { key: 'metric.mg', name: 'Milligram', abbreviation: 'mg', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 120 },
++      { key: 'metric.g', name: 'Gram', abbreviation: 'g', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 130 },
++      { key: 'metric.kg', name: 'Kilogram', abbreviation: 'kg', group: 'Metric', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 140 },
++      { key: 'unit.each', name: 'Each', abbreviation: 'each', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 150 },
++      { key: 'unit.piece', name: 'Piece', abbreviation: 'piece', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 160 },
++      { key: 'unit.clove', name: 'Clove', abbreviation: 'clove', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 170 },
++      { key: 'unit.bunch', name: 'Bunch', abbreviation: 'bunch', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 180 },
++      { key: 'unit.can', name: 'Can', abbreviation: 'can', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 190 },
++      { key: 'unit.jar', name: 'Jar', abbreviation: 'jar', group: 'Unit', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 200 },
++      { key: 'unit.packet', name: 'Packet', abbreviation: 'packet', group: 'Unit', quantityBehavior: 'user_defined', quantityStep: null, sortOrder: 210 },
++      { key: 'unit.bag', name: 'Bag', abbreviation: 'bag', group: 'Unit', quantityBehavior: 'user_defined', quantityStep: null, sortOrder: 220 },
++      { key: 'unit.box', name: 'Box', abbreviation: 'box', group: 'Unit', quantityBehavior: 'user_defined', quantityStep: null, sortOrder: 230 },
++      { key: 'size.small', name: 'Small', abbreviation: 'sm', group: 'Size', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 240 },
++      { key: 'size.medium', name: 'Medium', abbreviation: 'med', group: 'Size', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 250 },
++      { key: 'size.large', name: 'Large', abbreviation: 'lg', group: 'Size', quantityBehavior: 'decimal', quantityStep: null, sortOrder: 260 }
++    ];
++  }
++
+   function upgrade(db, oldVersion, transaction) {
+     var listRecordsStore = ensureStore(db, transaction, STORE_NAMES.LIST_RECORDS, { keyPath: 'id' });
+     ensureIndex(listRecordsStore, INDEX_NAMES.LIST_RECORDS_BY_TYPE, 'type', { unique: false });
+@@ -76,6 +111,11 @@
+     ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_TAG_ID, 'tagId', { unique: false });
+     ensureIndex(recipeTagMapStore, INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_AND_TAG, ['recipeId', 'tagId'], { unique: true });
+ 
++    var unitOfMeasuresStore = ensureStore(db, transaction, STORE_NAMES.UNIT_OF_MEASURES, { keyPath: 'id' });
++    ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_NAME, 'name', { unique: false });
++    ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_GROUP, 'group', { unique: false });
++    ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_ACTIVE, 'isActive', { unique: false });
++
+     if (oldVersion < 6) {
+       var existingTagsByName = {};
+ 
+@@ -126,6 +166,44 @@
+         };
+       };
+     }
++
++    if (oldVersion < 7) {
++      unitOfMeasuresStore.getAll().onsuccess = function (event) {
++        var existing = event.target.result || [];
++        var existingByKey = {};
++        var seedUnits = getUnitOfMeasureSeedData();
++        var timestamp = new Date().toISOString();
++
++        for (var i = 0; i < existing.length; i++) {
++          var existingKey = String(existing[i] && existing[i].key || '');
++          if (existingKey) {
++            existingByKey[existingKey] = true;
++          }
++        }
++
++        for (var j = 0; j < seedUnits.length; j++) {
++          var seed = seedUnits[j];
++          if (existingByKey[seed.key]) {
++            continue;
++          }
++
++          unitOfMeasuresStore.put({
++            id: window.KaPIds.NewId(),
++            key: seed.key,
++            name: seed.name,
++            abbreviation: seed.abbreviation,
++            group: seed.group,
++            quantityBehavior: seed.quantityBehavior,
++            quantityStep: seed.quantityStep,
++            isSeeded: true,
++            isActive: true,
++            sortOrder: seed.sortOrder,
++            createdDate: timestamp,
++            updatedDate: timestamp
++          });
++        }
++      };
++    }
+   }
+ 
+   window.KaPStores = {
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index a229c66..b86df5e 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -257,11 +257,18 @@
+   }
+ 
+   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems, activeVersionId, isViewingLatestVersion) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
++    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
+       title: 'Add Ingredient',
+       currentContextLabel: 'recipe',
+       detailItems: detailItems
+-    }));
++    });
++    baseOptions.getUnitOfMeasures = function () {
++      return window.KaPRecipesService.getAllUnitOfMeasures();
++    };
++    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
++      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++    };
++    var result = await window.KaPUI.ShowDiscoveryItemModal(baseOptions);
+ 
+     if (result === null) {
+       return;
+@@ -274,7 +281,8 @@
+           result.item.id,
+           result.name,
+           result.quantity,
+-          result.description
++          result.description,
++          result.unitOfMeasureId || null
+         );
+       } else {
+         await window.KaPRecipesService.addItemToVersion(
+@@ -283,7 +291,8 @@
+           result.item.id,
+           result.name,
+           result.quantity,
+-          result.description
++          result.description,
++          result.unitOfMeasureId || null
+         );
+       }
+ 
+@@ -309,8 +318,16 @@
+       initialCategoryId: detailItem.categoryId,
+       initialCategoryName: detailItem.categoryName,
+       initialDescription: detailItem.description,
+-      showQuantityField: false,
++      initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++      initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
++      showQuantityField: true,
+       showCategoryField: true,
++      getUnitOfMeasures: function () {
++        return window.KaPRecipesService.getAllUnitOfMeasures();
++      },
++      createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++        return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++      },
+       getAllCategories: function () {
+         return window.KaPCategoriesService.getAllCategories();
+       },
+@@ -338,8 +355,9 @@
+         recipeRecord.id,
+         detailItem.id,
+         result.name,
+-        detailItem.quantity,
+-        result.description
++        result.quantity,
++        result.description,
++        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
+       );
+ 
+       if (detailItem.itemId) {
+@@ -477,24 +495,6 @@
+ 
+   function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion) {
+     return window.KaPUI.NewDetailItemRow(detailItem, {
+-      onIncrement: async function () {
+-        var updated = isViewingLatestVersion
+-          ? await window.KaPRecipesService.incrementRecipeItemQuantity(recipeRecord.id, detailItem.id)
+-          : (await window.KaPRecipesService.incrementVersionItemQuantity(recipeRecord.id, selectedVersionId, detailItem.id)).find(function (item) {
+-            return item.id === detailItem.id;
+-          });
+-        detailItem.quantity = updated.quantity;
+-        return updated.quantity;
+-      },
+-      onDecrement: async function () {
+-        var updated = isViewingLatestVersion
+-          ? await window.KaPRecipesService.decrementRecipeItemQuantity(recipeRecord.id, detailItem.id)
+-          : (await window.KaPRecipesService.decrementVersionItemQuantity(recipeRecord.id, selectedVersionId, detailItem.id)).find(function (item) {
+-            return item.id === detailItem.id;
+-          });
+-        detailItem.quantity = updated.quantity;
+-        return updated.quantity;
+-      },
+       onEdit: async function () {
+         if (isViewingLatestVersion) {
+           await editRecipeItemWithPrompt(recipeRecord, detailItem);
+@@ -509,8 +509,16 @@
+             initialCategoryId: detailItem.categoryId,
+             initialCategoryName: detailItem.categoryName,
+             initialDescription: detailItem.description,
+-            showQuantityField: false,
++            initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++            initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
++            showQuantityField: true,
+             showCategoryField: true,
++            getUnitOfMeasures: function () {
++              return window.KaPRecipesService.getAllUnitOfMeasures();
++            },
++            createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++              return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++            },
+             getAllCategories: function () {
+               return window.KaPCategoriesService.getAllCategories();
+             },
+@@ -535,8 +543,9 @@
+               selectedVersionId,
+               detailItem.id,
+               result.name,
+-              detailItem.quantity,
+-              result.description
++              result.quantity,
++              result.description,
++              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
+             );
+           }
+         }
+@@ -1561,6 +1570,20 @@
+     var detailItems = isViewingLatestVersion
+       ? await window.KaPRecipesService.getRecipeItems(record.id)
+       : await window.KaPRecipesService.getVersionItems(record.id, activeVersion.id);
++
++    // Pre-resolve UOM abbreviations so rows can render without async per-row lookups
++    var allUomUnits = [];
++    try {
++      allUomUnits = await window.KaPRecipesService.getAllUnitOfMeasures();
++    } catch (_e) {}
++    var uomById = {};
++    for (var u = 0; u < allUomUnits.length; u++) {
++      uomById[allUomUnits[u].id] = allUomUnits[u];
++    }
++    detailItems.forEach(function (item) {
++      var uom = item.unitOfMeasureId ? uomById[item.unitOfMeasureId] : null;
++      item.uomAbbreviation = uom ? (uom.abbreviation || uom.name || null) : null;
++    });
+     var instructions = isViewingLatestVersion
+       ? await window.KaPRecipesService.getRecipeInstructions(record.id)
+       : await window.KaPRecipesService.getVersionInstructions(record.id, activeVersion.id);
+@@ -1616,7 +1639,7 @@
+                   targetListId,
+                   ingredient.itemId,
+                   ingredient.name,
+-                  ingredient.quantity,
++                  ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity,
+                   ingredient.description
+                 );
+               }));
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index 660f82d..c96fd87 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -37,6 +37,15 @@
+     return window.KaPItemEntryRules.normalizeDescription(description);
+   }
+ 
++  function normalizeOptionalUnitOfMeasureId(unitOfMeasureId) {
++    var raw = String(unitOfMeasureId == null ? '' : unitOfMeasureId).trim();
++    return raw || null;
++  }
++
++  function normalizeOptionalRecipeQuantity(quantity) {
++    return window.KaPItemEntryRules.normalizeOptionalDecimalQuantity(quantity);
++  }
++
+   function normalizeTagName(tagName) {
+     return String(tagName || '').trim().toLowerCase();
+   }
+@@ -92,10 +101,16 @@
+ 
+   function cloneSnapshotItems(snapshotItems) {
+     return (snapshotItems || []).map(function (entry) {
++      var quantityValue = entry && entry.quantityValue == null
++        ? (entry && entry.quantity == null ? null : Number(entry.quantity))
++        : Number(entry.quantityValue);
++
+       return {
+         itemId: String((entry && entry.itemId) || ''),
+         name: String((entry && entry.name) || ''),
+-        quantity: entry && entry.quantity == null ? null : Number(entry.quantity),
++        quantity: quantityValue,
++        quantityValue: quantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(entry && entry.unitOfMeasureId),
+         description: String((entry && entry.description) || ''),
+         categoryId: String((entry && entry.categoryId) || ''),
+         categoryName: String((entry && entry.categoryName) || '')
+@@ -149,6 +164,29 @@
+     return item;
+   }
+ 
++  async function getUnitOfMeasureById(unitOfMeasureId) {
++    var normalizedId = normalizeOptionalUnitOfMeasureId(unitOfMeasureId);
++    if (!normalizedId) {
++      return null;
++    }
++
++    return window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, normalizedId);
++  }
++
++  async function ensureValidQuantityForUnit(quantityValue, unitOfMeasureId) {
++    var normalizedId = normalizeOptionalUnitOfMeasureId(unitOfMeasureId);
++    if (!normalizedId) {
++      return null;
++    }
++
++    var uom = await getUnitOfMeasureById(normalizedId);
++    if (!uom || uom.isActive === false) {
++      throw new Error('Unit of measure not found.');
++    }
++
++    return normalizedId;
++  }
++
+   async function touchRecipe(recipeId) {
+     var recipe = await requireRecipeById(recipeId);
+     recipe.updatedDate = nowIso();
+@@ -357,12 +395,18 @@
+           await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+         }
+ 
++        var quantityValue = joinRecord.quantityValue == null
++          ? (joinRecord.quantity == null ? null : Number(joinRecord.quantity))
++          : Number(joinRecord.quantityValue);
++
+         return {
+           id: joinRecord.id,
+           listRecordId: joinRecord.listRecordId,
+           itemId: joinRecord.itemId,
+           name: joinRecord.name || (item && item.name) || 'Unknown Item',
+-          quantity: joinRecord.quantity,
++          quantity: quantityValue,
++          quantityValue: quantityValue,
++          unitOfMeasureId: normalizeOptionalUnitOfMeasureId(joinRecord.unitOfMeasureId),
+           description: joinRecord.description,
+           categoryId: (item && item.categoryId) || '',
+           categoryName: (item && item.categoryName) || '',
+@@ -426,10 +470,16 @@
+     var instructionRecords = await getRecipeInstructions(recipeId);
+ 
+     latestVersion.snapshotItems = detailItems.map(function (detailItem) {
++      var quantityValue = detailItem.quantityValue == null
++        ? (detailItem.quantity == null ? null : Number(detailItem.quantity))
++        : Number(detailItem.quantityValue);
++
+       return {
+         itemId: detailItem.itemId || '',
+         name: detailItem.name || '',
+-        quantity: detailItem.quantity,
++        quantity: quantityValue,
++        quantityValue: quantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(detailItem.unitOfMeasureId),
+         description: detailItem.description || '',
+         categoryId: detailItem.categoryId || '',
+         categoryName: detailItem.categoryName || ''
+@@ -565,26 +615,39 @@
+     return instructionRecords.length;
+   }
+ 
+-  async function addItemToRecipe(recipeId, itemId, name, quantity, description) {
++  async function addItemToRecipe(recipeId, itemId, name, quantity, description, unitOfMeasureId) {
+     await requireRecipeById(recipeId);
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var joinRecords = await readJoinRecordsByRecipeId(recipeId);
+     var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
+ 
+     if (existingByName) {
+-      existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
++      var currentQuantity = existingByName.quantityValue == null ? existingByName.quantity : existingByName.quantityValue;
++      var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
++      existingByName.quantity = incremented;
++      existingByName.quantityValue = incremented;
++      if (unitOfMeasureId !== undefined) {
++        existingByName.unitOfMeasureId = await ensureValidQuantityForUnit(
++          existingByName.quantityValue,
++          unitOfMeasureId
++        );
++      }
+       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+       await syncLatestVersionSnapshot(recipeId);
+       return existingByName;
+     }
+ 
+     await requireItemById(itemId);
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedUnitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     var joinRecord = {
+       id: window.KaPIds.NewId(),
+       listRecordId: recipeId,
+       itemId: itemId,
+       name: safeName,
+-      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
++      quantity: normalizedQuantity,
++      quantityValue: normalizedQuantity,
++      unitOfMeasureId: normalizedUnitOfMeasureId,
+       description: window.KaPItemEntryRules.normalizeDescription(description)
+     };
+ 
+@@ -593,7 +656,7 @@
+     return joinRecord;
+   }
+ 
+-  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description) {
++  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description, unitOfMeasureId) {
+     await requireRecipeById(recipeId);
+     var existing = await findJoinRecordById(recipeId, recipeItemId);
+     if (!existing) {
+@@ -601,7 +664,14 @@
+     }
+ 
+     existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    existing.quantity = normalizedQuantity;
++    existing.quantityValue = normalizedQuantity;
++    if (unitOfMeasureId !== undefined) {
++      existing.unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
++    } else {
++      await ensureValidQuantityForUnit(normalizedQuantity, existing.unitOfMeasureId);
++    }
+     existing.description = window.KaPItemEntryRules.normalizeDescription(description);
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+@@ -627,8 +697,10 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = existing.quantity == null ? 1 : existing.quantity;
+-    existing.quantity = current + 1;
++    var current = existing.quantityValue == null ? (existing.quantity == null ? 1 : existing.quantity) : existing.quantityValue;
++    var updatedQuantity = current + 1;
++    existing.quantity = updatedQuantity;
++    existing.quantityValue = updatedQuantity;
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+     return existing;
+@@ -641,8 +713,10 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = existing.quantity == null ? 1 : existing.quantity;
+-    existing.quantity = Math.max(1, current - 1);
++    var current = existing.quantityValue == null ? (existing.quantity == null ? 1 : existing.quantity) : existing.quantityValue;
++    var updatedQuantity = Math.max(1, current - 1);
++    existing.quantity = updatedQuantity;
++    existing.quantityValue = updatedQuantity;
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+     return existing;
+@@ -747,12 +821,17 @@
+         itemId = createdItem.id;
+       }
+ 
++      var quantityValue = snapshotItem.quantityValue == null ? snapshotItem.quantity : snapshotItem.quantityValue;
++      var normalizedQuantityValue = quantityValue == null ? null : Number(quantityValue);
++
+       var joinRecord = {
+         id: window.KaPIds.NewId(),
+         listRecordId: recipeId,
+         itemId: itemId,
+         name: snapshotItem.name,
+-        quantity: snapshotItem.quantity,
++        quantity: normalizedQuantityValue,
++        quantityValue: normalizedQuantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description
+       };
+ 
+@@ -817,12 +896,18 @@
+ 
+   function buildDetailItemsFromSnapshot(recipeId, snapshotItems) {
+     return sortByNameAscending(cloneSnapshotItems(snapshotItems).map(function (snapshotItem, index) {
++      var quantityValue = snapshotItem.quantityValue == null
++        ? (snapshotItem.quantity == null ? null : Number(snapshotItem.quantity))
++        : Number(snapshotItem.quantityValue);
++
+       return {
+         id: String(snapshotItem.itemId || '') + '::' + String(index),
+         listRecordId: recipeId,
+         itemId: snapshotItem.itemId || '',
+         name: snapshotItem.name || 'Unknown Item',
+-        quantity: snapshotItem.quantity,
++        quantity: quantityValue,
++        quantityValue: quantityValue,
++        unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description || '',
+         categoryId: snapshotItem.categoryId || '',
+         categoryName: snapshotItem.categoryName || '',
+@@ -876,14 +961,14 @@
+     return buildInstructionItemsFromSnapshot(version.snapshotInstructions);
+   }
+ 
+-  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description) {
++  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description, unitOfMeasureId) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+     }
+ 
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    var normalizedQuantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
+     var normalizedDescription = window.KaPItemEntryRules.normalizeDescription(description);
+     var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+     var existing = snapshotItems.find(function (entry) {
+@@ -891,14 +976,23 @@
+     });
+ 
+     if (existing) {
+-      existing.quantity = window.KaPItemEntryRules.incrementQuantity(existing.quantity);
++      var currentQuantity = existing.quantityValue == null ? existing.quantity : existing.quantityValue;
++      var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
++      existing.quantity = incremented;
++      existing.quantityValue = incremented;
++      if (unitOfMeasureId !== undefined) {
++        existing.unitOfMeasureId = await ensureValidQuantityForUnit(existing.quantityValue, unitOfMeasureId);
++      }
+     } else {
+       await requireItemById(itemId);
+       var sourceItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
++      var normalizedUnitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+       snapshotItems.push({
+         itemId: itemId,
+         name: safeName,
+         quantity: normalizedQuantity,
++        quantityValue: normalizedQuantity,
++        unitOfMeasureId: normalizedUnitOfMeasureId,
+         description: normalizedDescription,
+         categoryId: (sourceItem && sourceItem.categoryId) || '',
+         categoryName: (sourceItem && sourceItem.categoryName) || ''
+@@ -909,7 +1003,7 @@
+     return getVersionItems(recipeId, versionId);
+   }
+ 
+-  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description) {
++  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description, unitOfMeasureId) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+@@ -923,8 +1017,15 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
++    var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
+     snapshotItems[itemIndex].name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+-    snapshotItems[itemIndex].quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    snapshotItems[itemIndex].quantity = normalizedQuantity;
++    snapshotItems[itemIndex].quantityValue = normalizedQuantity;
++    if (unitOfMeasureId !== undefined) {
++      snapshotItems[itemIndex].unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
++    } else {
++      await ensureValidQuantityForUnit(normalizedQuantity, snapshotItems[itemIndex].unitOfMeasureId);
++    }
+     snapshotItems[itemIndex].description = window.KaPItemEntryRules.normalizeDescription(description);
+ 
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+@@ -958,8 +1059,12 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity;
+-    snapshotItems[itemIndex].quantity = current + 1;
++    var current = snapshotItems[itemIndex].quantityValue == null
++      ? (snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity)
++      : snapshotItems[itemIndex].quantityValue;
++    var updatedQuantity = current + 1;
++    snapshotItems[itemIndex].quantity = updatedQuantity;
++    snapshotItems[itemIndex].quantityValue = updatedQuantity;
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+     return getVersionItems(recipeId, versionId);
+   }
+@@ -978,8 +1083,12 @@
+       throw new Error('Recipe item not found.');
+     }
+ 
+-    var current = snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity;
+-    snapshotItems[itemIndex].quantity = Math.max(1, current - 1);
++    var current = snapshotItems[itemIndex].quantityValue == null
++      ? (snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity)
++      : snapshotItems[itemIndex].quantityValue;
++    var updatedQuantity = Math.max(1, current - 1);
++    snapshotItems[itemIndex].quantity = updatedQuantity;
++    snapshotItems[itemIndex].quantityValue = updatedQuantity;
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+     return getVersionItems(recipeId, versionId);
+   }
+@@ -1151,10 +1260,142 @@
+     return clonedRecipe;
+   }
+ 
++  function sortUnitOfMeasures(records) {
++    return (records || []).slice().sort(function (a, b) {
++      var groupCompare = String(a && a.group || '').localeCompare(String(b && b.group || ''), undefined, { sensitivity: 'base' });
++      if (groupCompare !== 0) {
++        return groupCompare;
++      }
++
++      var sortA = Number(a && a.sortOrder || 0);
++      var sortB = Number(b && b.sortOrder || 0);
++      if (sortA !== sortB) {
++        return sortA - sortB;
++      }
++
++      return String(a && a.name || '').localeCompare(String(b && b.name || ''), undefined, { sensitivity: 'base' });
++    });
++  }
++
++  async function getAllUnitOfMeasures(options) {
++    var includeInactive = !!(options && options.includeInactive);
++    var records = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES);
++    var filtered = includeInactive
++      ? (records || [])
++      : (records || []).filter(function (r) { return r && r.isActive !== false; });
++
++    return sortUnitOfMeasures(filtered);
++  }
++
++  async function createUnitOfMeasure(name, abbreviation, group, quantityBehavior, quantityStep) {
++    var safeName = String(name || '').trim();
++    if (!safeName) {
++      throw new Error('Unit name is required.');
++    }
++
++    var existing = await getAllUnitOfMeasures({ includeInactive: true });
++    var duplicate = existing.find(function (record) {
++      return String(record && record.name || '').toLowerCase() === safeName.toLowerCase();
++    });
++
++    if (duplicate) {
++      throw new Error('A unit with that name already exists.');
++    }
++
++    var safeAbbreviation = String(abbreviation || '').trim();
++    var safeGroup = String(group || 'Other').trim() || 'Other';
++    var safeBehavior = String(quantityBehavior || 'decimal').trim().toLowerCase();
++    if (safeBehavior !== 'whole_or_half' && safeBehavior !== 'decimal' && safeBehavior !== 'user_defined') {
++      safeBehavior = 'decimal';
++    }
++
++    var safeStep = quantityStep == null || String(quantityStep).trim() === ''
++      ? null
++      : Number(quantityStep);
++
++    if (safeStep != null && (Number.isNaN(safeStep) || !Number.isFinite(safeStep) || safeStep <= 0)) {
++      throw new Error('Quantity step must be a positive number.');
++    }
++
++    var timestamp = nowIso();
++    var unit = {
++      id: window.KaPIds.NewId(),
++      key: null,
++      name: safeName,
++      abbreviation: safeAbbreviation,
++      group: safeGroup,
++      quantityBehavior: safeBehavior,
++      quantityStep: safeStep,
++      isSeeded: false,
++      isActive: true,
++      sortOrder: 1000,
++      createdDate: timestamp,
++      updatedDate: timestamp
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
++    return unit;
++  }
++
++  async function updateUnitOfMeasure(unitId, updates) {
++    var unit = await getUnitOfMeasureById(unitId);
++    if (!unit) {
++      throw new Error('Unit of measure not found.');
++    }
++
++    if (unit.isSeeded) {
++      throw new Error('Seeded units cannot be edited.');
++    }
++
++    var nextName = updates && updates.name !== undefined ? String(updates.name || '').trim() : String(unit.name || '').trim();
++    if (!nextName) {
++      throw new Error('Unit name is required.');
++    }
++
++    if (nextName.toLowerCase() !== String(unit.name || '').toLowerCase()) {
++      var existing = await getAllUnitOfMeasures({ includeInactive: true });
++      var duplicate = existing.find(function (record) {
++        return record && record.id !== unit.id && String(record.name || '').toLowerCase() === nextName.toLowerCase();
++      });
++      if (duplicate) {
++        throw new Error('A unit with that name already exists.');
++      }
++    }
++
++    var nextBehavior = updates && updates.quantityBehavior !== undefined
++      ? String(updates.quantityBehavior || '').trim().toLowerCase()
++      : String(unit.quantityBehavior || 'decimal').trim().toLowerCase();
++    if (nextBehavior !== 'whole_or_half' && nextBehavior !== 'decimal' && nextBehavior !== 'user_defined') {
++      throw new Error('Invalid quantity behavior.');
++    }
++
++    var nextStep = updates && updates.quantityStep !== undefined
++      ? (updates.quantityStep == null || String(updates.quantityStep).trim() === '' ? null : Number(updates.quantityStep))
++      : unit.quantityStep;
++
++    if (nextStep != null && (Number.isNaN(nextStep) || !Number.isFinite(nextStep) || nextStep <= 0)) {
++      throw new Error('Quantity step must be a positive number.');
++    }
++
++    unit.name = nextName;
++    unit.abbreviation = updates && updates.abbreviation !== undefined ? String(updates.abbreviation || '').trim() : String(unit.abbreviation || '');
++    unit.group = updates && updates.group !== undefined ? (String(updates.group || '').trim() || 'Other') : String(unit.group || 'Other');
++    unit.quantityBehavior = nextBehavior;
++    unit.quantityStep = nextStep;
++    unit.isActive = updates && updates.isActive !== undefined ? !!updates.isActive : unit.isActive !== false;
++    unit.updatedDate = nowIso();
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
++    return unit;
++  }
++
+   window.KaPRecipesService = {
+     getAllRecipes: getAllRecipes,
+     getRecipeTags: getRecipeTags,
+     getAllRecipeTags: getAllRecipeTags,
++    getAllUnitOfMeasures: getAllUnitOfMeasures,
++    createUnitOfMeasure: createUnitOfMeasure,
++    updateUnitOfMeasure: updateUnitOfMeasure,
+     addTagToRecipe: addTagToRecipe,
+     removeTagFromRecipe: removeTagFromRecipe,
+     createRecipe: createRecipe,
+diff --git a/src/features/settings/settings-page.js b/src/features/settings/settings-page.js
+index 14bc8b2..ccdd2fc 100644
+--- a/src/features/settings/settings-page.js
++++ b/src/features/settings/settings-page.js
+@@ -45,11 +45,133 @@
+     body.className = 'settings-body';
+     body.appendChild(buildThemeRow());
+     body.appendChild(buildTextSizeRow());
++
++    var uomSection = document.createElement('div');
++    uomSection.className = 'settings-uom-section';
++    await renderUomSectionInto(uomSection);
++    body.appendChild(uomSection);
++
+     section.appendChild(body);
+ 
+     container.replaceChildren(section);
+   }
+ 
++  async function renderUomSectionInto(container) {
++    container.replaceChildren();
++
++    var heading = document.createElement('div');
++    heading.className = 'settings-section-heading';
++
++    var headingText = document.createElement('span');
++    headingText.textContent = 'Units of Measure';
++    heading.appendChild(headingText);
++
++    var addButton = document.createElement('button');
++    addButton.type = 'button';
++    addButton.className = 'record-action-button settings-uom-add-button';
++    addButton.textContent = '+ Add Unit';
++    addButton.addEventListener('click', async function () {
++      var created = await window.KaPUI.ShowCreateUnitModal({
++        createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++          return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++        }
++      });
++      if (created) {
++        await renderUomSectionInto(container);
++      }
++    });
++    heading.appendChild(addButton);
++    container.appendChild(heading);
++
++    var units = [];
++    try {
++      units = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++    } catch (_e) {}
++
++    if (units.length === 0) {
++      var empty = document.createElement('p');
++      empty.className = 'settings-uom-empty';
++      empty.textContent = 'No units found.';
++      container.appendChild(empty);
++      return;
++    }
++
++    var currentGroup = null;
++    units.forEach(function (unit) {
++      if (unit.group !== currentGroup) {
++        currentGroup = unit.group;
++        var groupHeader = document.createElement('div');
++        groupHeader.className = 'settings-uom-group-header';
++        groupHeader.textContent = unit.group;
++        container.appendChild(groupHeader);
++      }
++
++      var row = document.createElement('div');
++      row.className = 'settings-uom-row';
++
++      var nameBlock = document.createElement('div');
++      nameBlock.className = 'settings-uom-name-block';
++
++      var nameSpan = document.createElement('span');
++      nameSpan.className = 'settings-uom-name';
++      nameSpan.textContent = unit.name;
++      nameBlock.appendChild(nameSpan);
++
++      if (unit.abbreviation) {
++        var abbrSpan = document.createElement('span');
++        abbrSpan.className = 'settings-uom-abbr';
++        abbrSpan.textContent = unit.abbreviation;
++        nameBlock.appendChild(abbrSpan);
++      }
++
++      row.appendChild(nameBlock);
++
++      var metaBlock = document.createElement('div');
++      metaBlock.className = 'settings-uom-meta';
++
++      var behaviorLabel = { decimal: 'Decimal', whole_or_half: 'Whole / half', user_defined: 'Custom step' };
++      var behaviorSpan = document.createElement('span');
++      behaviorSpan.className = 'settings-uom-behavior';
++      behaviorSpan.textContent = behaviorLabel[unit.quantityBehavior] || unit.quantityBehavior || '';
++      metaBlock.appendChild(behaviorSpan);
++
++      if (!unit.isActive) {
++        var inactiveTag = document.createElement('span');
++        inactiveTag.className = 'settings-uom-inactive-tag';
++        inactiveTag.textContent = 'Inactive';
++        metaBlock.appendChild(inactiveTag);
++      }
++
++      row.appendChild(metaBlock);
++
++      if (!unit.isSeeded) {
++        var editButton = document.createElement('button');
++        editButton.type = 'button';
++        editButton.className = 'record-action-button settings-uom-edit-button';
++        editButton.textContent = 'Edit';
++        editButton.addEventListener('click', async function () {
++          await showEditUnitModal(unit, container);
++        });
++        row.appendChild(editButton);
++      }
++
++      container.appendChild(row);
++    });
++  }
++
++  async function showEditUnitModal(unit, sectionContainer) {
++    var result = await window.KaPUI.ShowEditUnitModal({
++      unit: unit,
++      updateUnitOfMeasure: function (id, updates) {
++        return window.KaPRecipesService.updateUnitOfMeasure(id, updates);
++      }
++    });
++
++    if (result) {
++      await renderUomSectionInto(sectionContainer);
++    }
++  }
++
+   function buildTextSizeRow() {
+     var row = document.createElement('div');
+     row.className = 'settings-row';
+diff --git a/src/shared/item-entry-rules.js b/src/shared/item-entry-rules.js
+index 85f2ba7..a6b62d9 100644
+--- a/src/shared/item-entry-rules.js
++++ b/src/shared/item-entry-rules.js
+@@ -25,6 +25,37 @@
+     return Number(raw);
+   }
+ 
++  function normalizeOptionalDecimalQuantity(quantity) {
++    var raw = String(quantity == null ? '' : quantity).trim();
++    if (!raw) {
++      return null;
++    }
++
++    if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) {
++      throw new Error('Quantity must be a decimal number.');
++    }
++
++    var parsed = Number(raw);
++    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
++      throw new Error('Quantity must be a decimal number.');
++    }
++
++    return parsed;
++  }
++
++  function validateQuantityForBehavior(quantityValue, quantityBehavior, quantityStep) {
++    if (quantityValue == null) {
++      return true;
++    }
++
++    var numeric = Number(quantityValue);
++    if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
++      throw new Error('Quantity must be a decimal number.');
++    }
++
++    return true;
++  }
++
+   function normalizeNameKey(name) {
+     return String(name || '').trim().toLowerCase();
+   }
+@@ -44,6 +75,8 @@
+     ensureValidItemEntryName: ensureValidItemEntryName,
+     normalizeDescription: normalizeDescription,
+     normalizeOptionalIntegerQuantity: normalizeOptionalIntegerQuantity,
++    normalizeOptionalDecimalQuantity: normalizeOptionalDecimalQuantity,
++    validateQuantityForBehavior: validateQuantityForBehavior,
+     findJoinRecordByName: findJoinRecordByName,
+     incrementQuantity: incrementQuantity
+   };
+diff --git a/src/styles.css b/src/styles.css
+index b7871a1..c483415 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -474,6 +474,7 @@ body {
+   align-items: center;
+   justify-content: center;
+   min-width: 1.75rem;
++  max-width: 6rem;
+   padding: 2px 0.5rem;
+   border-radius: 999px;
+   border: 1px solid var(--color-border);
+@@ -483,6 +484,9 @@ body {
+   font-weight: 600;
+   line-height: 1.2;
+   flex-shrink: 0;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
+ }
+ 
+ .detail-header {
+@@ -994,6 +998,15 @@ body {
+ .modal-checklist-name {
+   font-size: 0.95rem;
+   color: var(--color-text);
++  flex: 1;
++}
++
++.modal-checklist-qty {
++  flex-shrink: 0;
++  font-size: 0.8rem;
++  color: var(--color-muted);
++  font-weight: 600;
++  white-space: nowrap;
+ }
+ 
+ .modal-toggle-group {
+@@ -1226,6 +1239,124 @@ body {
+   padding: 0.25rem 1.25rem 1.25rem 1.25rem;
+ }
+ 
++.settings-uom-section {
++  display: grid;
++  gap: 0;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  overflow: hidden;
++  margin-top: 0.375rem;
++}
++
++.settings-section-heading {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  padding: 0.625rem 0.875rem;
++  background: var(--color-surface);
++  font-size: 0.88rem;
++  font-weight: 600;
++  color: var(--color-muted);
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++  border-bottom: 1px solid var(--color-border);
++}
++
++.settings-uom-add-button {
++  font-size: 0.85rem;
++  color: var(--color-brand);
++  background: transparent;
++  border: none;
++  padding: 0.125rem 0.25rem;
++  cursor: pointer;
++}
++
++.settings-uom-add-button:hover {
++  color: var(--color-brand-strong);
++}
++
++.settings-uom-group-header {
++  padding: 0.375rem 0.875rem 0.25rem;
++  font-size: 0.78rem;
++  font-weight: 600;
++  color: var(--color-muted);
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++  background: var(--color-bg);
++  border-top: 1px solid var(--color-border);
++}
++
++.settings-uom-group-header:first-of-type {
++  border-top: none;
++}
++
++.settings-uom-row {
++  display: flex;
++  align-items: center;
++  gap: 0.75rem;
++  padding: 0.5rem 0.875rem;
++  border-top: 1px solid var(--color-border);
++}
++
++.settings-uom-name-block {
++  flex: 1;
++  display: flex;
++  align-items: baseline;
++  gap: 0.375rem;
++  min-width: 0;
++}
++
++.settings-uom-name {
++  font-size: 0.93rem;
++  color: var(--color-text);
++}
++
++.settings-uom-abbr {
++  font-size: 0.8rem;
++  color: var(--color-muted);
++}
++
++.settings-uom-meta {
++  display: flex;
++  align-items: center;
++  gap: 0.375rem;
++  flex-shrink: 0;
++}
++
++.settings-uom-behavior {
++  font-size: 0.78rem;
++  color: var(--color-muted);
++}
++
++.settings-uom-inactive-tag {
++  font-size: 0.72rem;
++  padding: 1px 0.4rem;
++  border-radius: 999px;
++  border: 1px solid var(--color-border);
++  color: var(--color-muted);
++}
++
++.settings-uom-edit-button {
++  font-size: 0.82rem;
++  color: var(--color-brand);
++  background: transparent;
++  border: none;
++  padding: 0.125rem 0.25rem;
++  cursor: pointer;
++  flex-shrink: 0;
++}
++
++.settings-uom-edit-button:hover {
++  color: var(--color-brand-strong);
++}
++
++.settings-uom-empty {
++  padding: 0.75rem 0.875rem;
++  color: var(--color-muted);
++  font-size: 0.88rem;
++  margin: 0;
++}
++
+ .settings-row {
+   display: flex;
+   align-items: center;
+@@ -1483,6 +1614,53 @@ body {
+   padding: 0.5625rem 0.75rem;
+ }
+ 
++.modal-quantity-row {
++  display: flex;
++  gap: 0.5rem;
++  align-items: stretch;
++}
++
++.modal-quantity-input {
++  flex: 1;
++  min-width: 0;
++}
++
++.modal-uom-select {
++  flex: 1;
++  min-width: 0;
++  background: var(--color-bg);
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  color: var(--color-text);
++  font-size: 0.9rem;
++  font-family: inherit;
++  padding: 0.5rem 0.5rem;
++  cursor: pointer;
++}
++
++.modal-uom-select:focus {
++  outline: none;
++  border-color: var(--color-brand);
++}
++
++.modal-uom-select::-webkit-scrollbar {
++  width: 6px;
++}
++
++.modal-uom-select::-webkit-scrollbar-track {
++  background: var(--color-surface);
++  border-radius: 0 0.5rem 0.5rem 0;
++}
++
++.modal-uom-select::-webkit-scrollbar-thumb {
++  background: var(--color-border);
++  border-radius: 999px;
++}
++
++.modal-uom-select::-webkit-scrollbar-thumb:hover {
++  background: var(--color-muted);
++}
++
+ .modal-input:focus {
+   outline: none;
+   border-color: var(--color-brand);
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index 04d792d..09e767a 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -286,7 +286,8 @@
+     var qtyPillNode = node.querySelector('.detail-item-qty-pill');
+     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+     var descriptionText = detailItem.description || '';
+-    var currentQuantity = detailItem.quantity;
++    var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
++    var uomAbbreviation = detailItem.uomAbbreviation || null;
+     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
+ 
+@@ -303,16 +304,21 @@
+       });
+     }
+ 
+-    function updateQtyPill(qty) {
++    function updateQtyPill(qty, abbr) {
+       if (!qtyPillNode) {
+         return;
+       }
+ 
+       var numericQty = Number(qty);
+-      var showPill = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && numericQty !== 1;
++      var hasUom = !!(abbr);
++      var showPill = (qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && (numericQty !== 1 || hasUom)) || hasUom;
+ 
+       if (showPill) {
+-        qtyPillNode.textContent = String(qty);
++        var pillText = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 ? String(qty) : '';
++        if (abbr) {
++          pillText = pillText ? pillText + '\u00a0' + abbr : abbr;
++        }
++        qtyPillNode.textContent = pillText;
+         qtyPillNode.style.display = '';
+         qtyPillNode.style.visibility = 'visible';
+         qtyPillNode.setAttribute('aria-hidden', 'false');
+@@ -324,7 +330,7 @@
+       }
+     }
+ 
+-    updateQtyPill(currentQuantity);
++    updateQtyPill(currentQuantity, uomAbbreviation);
+ 
+     if (descriptionText) {
+       metaNode.textContent = descriptionText;
+@@ -595,6 +601,166 @@
+     });
+   }
+ 
++  // Modal for creating a custom unit of measure.
++  // Returns a Promise that resolves with the created unit object, or null if cancelled.
++  function ShowCreateUnitModal(options) {
++    // options: { createUnitOfMeasure: async fn(name, abbr, group, behavior, step) }
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'Add Unit';
++      confirmButton.textContent = 'Add';
++      card.setAttribute('aria-label', 'Add Unit');
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      // Name
++      var nameLabel = document.createElement('label');
++      nameLabel.className = 'modal-field-label';
++      nameLabel.textContent = 'Unit name';
++      form.appendChild(nameLabel);
++      var nameInput = document.createElement('input');
++      nameInput.type = 'text';
++      nameInput.className = 'modal-input';
++      nameInput.placeholder = 'e.g. Handful';
++      form.appendChild(nameInput);
++
++      // Abbreviation
++      var abbrLabel = document.createElement('label');
++      abbrLabel.className = 'modal-field-label';
++      abbrLabel.textContent = 'Abbreviation (optional)';
++      form.appendChild(abbrLabel);
++      var abbrInput = document.createElement('input');
++      abbrInput.type = 'text';
++      abbrInput.className = 'modal-input';
++      abbrInput.placeholder = 'e.g. hdfl';
++      form.appendChild(abbrInput);
++
++      // Group
++      var groupLabel = document.createElement('label');
++      groupLabel.className = 'modal-field-label';
++      groupLabel.textContent = 'Group';
++      form.appendChild(groupLabel);
++      var groupSelect = document.createElement('select');
++      groupSelect.className = 'modal-input';
++      ['Imperial', 'Metric', 'Unit', 'Size', 'Other'].forEach(function (g) {
++        var opt = document.createElement('option');
++        opt.value = g;
++        opt.textContent = g;
++        groupSelect.appendChild(opt);
++      });
++      groupSelect.value = 'Other';
++      form.appendChild(groupSelect);
++
++      // Quantity behavior
++      var behaviorLabel = document.createElement('label');
++      behaviorLabel.className = 'modal-field-label';
++      behaviorLabel.textContent = 'Quantity behavior';
++      form.appendChild(behaviorLabel);
++      var behaviorSelect = document.createElement('select');
++      behaviorSelect.className = 'modal-input';
++      [
++        { value: 'decimal', label: 'Decimal (free entry)' },
++        { value: 'whole_or_half', label: 'Whole or half (0.5 step)' },
++        { value: 'user_defined', label: 'Custom step' }
++      ].forEach(function (item) {
++        var opt = document.createElement('option');
++        opt.value = item.value;
++        opt.textContent = item.label;
++        behaviorSelect.appendChild(opt);
++      });
++      behaviorSelect.value = 'decimal';
++      form.appendChild(behaviorSelect);
++
++      // Step (shown only for user_defined)
++      var stepLabel = document.createElement('label');
++      stepLabel.className = 'modal-field-label';
++      stepLabel.textContent = 'Step size (optional)';
++      stepLabel.hidden = true;
++      form.appendChild(stepLabel);
++      var stepInput = document.createElement('input');
++      stepInput.type = 'text';
++      stepInput.className = 'modal-input';
++      stepInput.placeholder = 'e.g. 0.25';
++      stepInput.hidden = true;
++      form.appendChild(stepInput);
++
++      behaviorSelect.addEventListener('change', function () {
++        var isCustom = behaviorSelect.value === 'user_defined';
++        stepLabel.hidden = !isCustom;
++        stepInput.hidden = !isCustom;
++      });
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++
++      bodyNode.appendChild(form);
++
++      function closeModal(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      async function handleSubmit() {
++        errorNode.textContent = '';
++        var name = String(nameInput.value || '').trim();
++        if (!name) {
++          errorNode.textContent = 'Unit name is required.';
++          nameInput.focus();
++          return;
++        }
++        var abbr = String(abbrInput.value || '').trim() || null;
++        var group = groupSelect.value;
++        var behavior = behaviorSelect.value;
++        var stepRaw = String(stepInput.value || '').trim();
++        var step = null;
++        if (behavior === 'user_defined' && stepRaw) {
++          step = parseFloat(stepRaw);
++          if (Number.isNaN(step) || step <= 0) {
++            errorNode.textContent = 'Step size must be a positive number.';
++            stepInput.focus();
++            return;
++          }
++        }
++
++        try {
++          var created = await options.createUnitOfMeasure(name, abbr, group, behavior, step);
++          closeModal(created);
++        } catch (err) {
++          errorNode.textContent = err.message || 'Unable to create unit.';
++        }
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') { closeModal(null); }
++        if (event.key === 'Enter' && event.target !== behaviorSelect && event.target !== groupSelect) {
++          event.preventDefault();
++          handleSubmit();
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) { closeModal(null); }
++      });
++      cancelButton.addEventListener('click', function () { closeModal(null); });
++      confirmButton.addEventListener('click', function () { handleSubmit(); });
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++      nameInput.focus();
++    });
++  }
++
+   function ShowDiscoveryItemModal(options) {
+     return new Promise(function (resolve) {
+       var suggestionsEnabled = options.enableSuggestions !== false;
+@@ -650,18 +816,105 @@
+       form.appendChild(nameInputWrapper);
+ 
+       var quantityInput = null;
++      var uomSelect = null;
++      var uomUnits = [];
++      var selectedUomId = options.initialUnitOfMeasureId || null;
++
+       if (showQuantityField) {
+         var quantityLabel = document.createElement('label');
+         quantityLabel.className = 'modal-field-label';
+         quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
+         form.appendChild(quantityLabel);
+ 
++        var quantityRow = document.createElement('div');
++        quantityRow.className = 'modal-quantity-row';
++
+         quantityInput = document.createElement('input');
+         quantityInput.type = 'text';
+-        quantityInput.className = 'modal-input';
++        quantityInput.className = 'modal-input modal-quantity-input';
+         quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
+         quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
+-        form.appendChild(quantityInput);
++        quantityRow.appendChild(quantityInput);
++
++        uomSelect = document.createElement('select');
++        uomSelect.className = 'modal-uom-select';
++        uomSelect.setAttribute('aria-label', 'Unit of measure');
++
++        var noneOption = document.createElement('option');
++        noneOption.value = '';
++        noneOption.textContent = 'Unit';
++        uomSelect.appendChild(noneOption);
++
++        if (options.getUnitOfMeasures) {
++          options.getUnitOfMeasures().then(function (units) {
++            uomUnits = units || [];
++            populateUomSelect();
++          }).catch(function () {});
++        }
++
++        function populateUomSelect() {
++          // Remove everything except the blank first option
++          while (uomSelect.options.length > 1) {
++            uomSelect.remove(1);
++          }
++
++          var currentGroup = null;
++          var optgroup = null;
++
++          uomUnits.forEach(function (unit) {
++            if (unit.group !== currentGroup) {
++              currentGroup = unit.group;
++              optgroup = document.createElement('optgroup');
++              optgroup.label = currentGroup;
++              uomSelect.appendChild(optgroup);
++            }
++
++            var opt = document.createElement('option');
++            opt.value = unit.id;
++            opt.textContent = unit.name + (unit.abbreviation ? ' (' + unit.abbreviation + ')' : '');
++            if (unit.id === selectedUomId) {
++              opt.selected = true;
++            }
++
++            (optgroup || uomSelect).appendChild(opt);
++          });
++
++          // Separator + add unit option
++          if (options.createUnitOfMeasure) {
++            var separator = document.createElement('option');
++            separator.disabled = true;
++            separator.textContent = '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
++            uomSelect.appendChild(separator);
++
++            var addOpt = document.createElement('option');
++            addOpt.value = '__add_unit__';
++            addOpt.textContent = '+ Add UnitΓÇª';
++            uomSelect.appendChild(addOpt);
++          }
++        }
++
++        uomSelect.addEventListener('change', function () {
++          if (uomSelect.value === '__add_unit__') {
++            // Restore previous selection while modal is open
++            uomSelect.value = selectedUomId || '';
++            ShowCreateUnitModal({
++              createUnitOfMeasure: options.createUnitOfMeasure
++            }).then(function (created) {
++              if (!created) { return; }
++              return options.getUnitOfMeasures().then(function (units) {
++                uomUnits = units || [];
++                selectedUomId = created.id;
++                populateUomSelect();
++                uomSelect.value = created.id;
++              });
++            }).catch(function () {});
++            return;
++          }
++          selectedUomId = uomSelect.value || null;
++        });
++
++        quantityRow.appendChild(uomSelect);
++        form.appendChild(quantityRow);
+       }
+ 
+       var categoryInput = null;
+@@ -1086,6 +1339,7 @@
+             close({
+               name: rawName,
+               quantity: quantityResult.value,
++              unitOfMeasureId: selectedUomId || null,
+               description: String(descriptionInput.value || '').trim(),
+               categoryId: category ? category.id || '' : '',
+               categoryName: category ? category.name || '' : ''
+@@ -1107,6 +1361,7 @@
+             item: item,
+             name: rawName,
+             quantity: quantityResult.value,
++            unitOfMeasureId: selectedUomId || null,
+             description: String(descriptionInput.value || '').trim(),
+             categoryId: category ? category.id || '' : '',
+             categoryName: category ? category.name || '' : ''
+@@ -1754,6 +2009,155 @@
+     });
+   }
+ 
++  // Modal for editing a user-defined (non-seeded) unit of measure.
++  // Returns a Promise that resolves with the updated unit object, or null if cancelled.
++  function ShowEditUnitModal(options) {
++    // options: { unit, updateUnitOfMeasure: async fn(id, updates) }
++    var unit = options.unit || {};
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'Edit Unit';
++      confirmButton.textContent = 'Save';
++      card.setAttribute('aria-label', 'Edit Unit');
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      // Name
++      var nameLabel = document.createElement('label');
++      nameLabel.className = 'modal-field-label';
++      nameLabel.textContent = 'Unit name';
++      form.appendChild(nameLabel);
++      var nameInput = document.createElement('input');
++      nameInput.type = 'text';
++      nameInput.className = 'modal-input';
++      nameInput.value = unit.name || '';
++      form.appendChild(nameInput);
++
++      // Abbreviation
++      var abbrLabel = document.createElement('label');
++      abbrLabel.className = 'modal-field-label';
++      abbrLabel.textContent = 'Abbreviation (optional)';
++      form.appendChild(abbrLabel);
++      var abbrInput = document.createElement('input');
++      abbrInput.type = 'text';
++      abbrInput.className = 'modal-input';
++      abbrInput.value = unit.abbreviation || '';
++      form.appendChild(abbrInput);
++
++      // Quantity behavior
++      var behaviorLabel = document.createElement('label');
++      behaviorLabel.className = 'modal-field-label';
++      behaviorLabel.textContent = 'Quantity behavior';
++      form.appendChild(behaviorLabel);
++      var behaviorSelect = document.createElement('select');
++      behaviorSelect.className = 'modal-input';
++      [
++        { value: 'decimal', label: 'Decimal (free entry)' },
++        { value: 'whole_or_half', label: 'Whole or half (0.5 step)' },
++        { value: 'user_defined', label: 'Custom step' }
++      ].forEach(function (item) {
++        var opt = document.createElement('option');
++        opt.value = item.value;
++        opt.textContent = item.label;
++        behaviorSelect.appendChild(opt);
++      });
++      behaviorSelect.value = unit.quantityBehavior || 'decimal';
++      form.appendChild(behaviorSelect);
++
++      // Step
++      var stepLabel = document.createElement('label');
++      stepLabel.className = 'modal-field-label';
++      stepLabel.textContent = 'Step size (optional)';
++      stepLabel.hidden = behaviorSelect.value !== 'user_defined';
++      form.appendChild(stepLabel);
++      var stepInput = document.createElement('input');
++      stepInput.type = 'text';
++      stepInput.className = 'modal-input';
++      stepInput.value = unit.quantityStep != null ? String(unit.quantityStep) : '';
++      stepInput.hidden = behaviorSelect.value !== 'user_defined';
++      form.appendChild(stepInput);
++
++      behaviorSelect.addEventListener('change', function () {
++        var isCustom = behaviorSelect.value === 'user_defined';
++        stepLabel.hidden = !isCustom;
++        stepInput.hidden = !isCustom;
++      });
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++
++      bodyNode.appendChild(form);
++
++      function closeModal(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      async function handleSubmit() {
++        errorNode.textContent = '';
++        var name = String(nameInput.value || '').trim();
++        if (!name) {
++          errorNode.textContent = 'Unit name is required.';
++          nameInput.focus();
++          return;
++        }
++        var abbr = String(abbrInput.value || '').trim() || null;
++        var behavior = behaviorSelect.value;
++        var stepRaw = String(stepInput.value || '').trim();
++        var step = null;
++        if (behavior === 'user_defined' && stepRaw) {
++          step = parseFloat(stepRaw);
++          if (Number.isNaN(step) || step <= 0) {
++            errorNode.textContent = 'Step size must be a positive number.';
++            stepInput.focus();
++            return;
++          }
++        }
++
++        try {
++          var updated = await options.updateUnitOfMeasure(unit.id, {
++            name: name,
++            abbreviation: abbr,
++            quantityBehavior: behavior,
++            quantityStep: step
++          });
++          closeModal(updated || { id: unit.id });
++        } catch (err) {
++          errorNode.textContent = err.message || 'Unable to update unit.';
++        }
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') { closeModal(null); }
++        if (event.key === 'Enter' && event.target !== behaviorSelect) {
++          event.preventDefault();
++          handleSubmit();
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) { closeModal(null); }
++      });
++      cancelButton.addEventListener('click', function () { closeModal(null); });
++      confirmButton.addEventListener('click', function () { handleSubmit(); });
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++      nameInput.focus();
++    });
++  }
++
+   function ShowPrompt(config) {
+     return showModal(function (bodyNode, confirmButton) {
+       var input = document.createElement('input');
+@@ -1829,6 +2233,20 @@
+ 
+         row.appendChild(checkbox);
+         row.appendChild(nameNode);
++
++        var qty = ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity;
++        var abbr = ingredient.uomAbbreviation || null;
++        var numericQty = Number(qty);
++        var hasQty = qty != null && !Number.isNaN(numericQty) && numericQty !== 0;
++        if (hasQty || abbr) {
++          var qtyBadge = document.createElement('span');
++          qtyBadge.className = 'modal-checklist-qty';
++          var badgeText = hasQty ? String(qty) : '';
++          if (abbr) { badgeText = badgeText ? badgeText + '\u00a0' + abbr : abbr; }
++          qtyBadge.textContent = badgeText;
++          row.appendChild(qtyBadge);
++        }
++
+         ingredientList.appendChild(row);
+         checkboxes.push({ checkbox: checkbox, ingredient: ingredient });
+       });
+@@ -2407,6 +2825,8 @@
+     ReplaceDetailItemRows: ReplaceDetailItemRows,
+     NewSettingsToggle: NewSettingsToggle,
+     ShowDiscoveryItemModal: ShowDiscoveryItemModal,
++    ShowCreateUnitModal: ShowCreateUnitModal,
++    ShowEditUnitModal: ShowEditUnitModal,
+     ShowTemplateConfigModal: ShowTemplateConfigModal,
+     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
+     ShowPrompt: ShowPrompt,
