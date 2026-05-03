@@ -794,6 +794,11 @@ body {
   border-radius: 0.625rem;
 }
 
+.recipe-accordion-header.tags {
+  padding: 0.65rem .75rem;
+  cursor: default;
+}
+
 .recipe-accordion-header-actions {
   margin-left: auto;
   display: inline-flex;
@@ -904,6 +909,17 @@ body {
   align-items: center;
   gap: 0.625rem;
   flex-wrap: wrap;
+}
+
+.recipe-version-delete-button {
+  margin-left: auto;
+  color: #e74c3c;
+  border-color: #e74c3c;
+}
+
+.recipe-version-delete-button:hover {
+  color: #c0392b;
+  border-color: #c0392b;
 }
 
 .recipe-version-save-actions {
@@ -1812,6 +1828,7 @@ body {
 .recipe-tags-picker {
   position: relative;
   flex: 0 0 auto;
+  cursor: pointer;
 }
 
 .recipe-tags-button {
@@ -1824,7 +1841,7 @@ body {
     color: var(--color-brand);
     font-size: 2.35rem;
     line-height: .5;
-    transform: rotate(90deg);
+    transform: rotate(60deg);
     font-weight: bolder;
     cursor: pointer;
 }
@@ -1942,14 +1959,21 @@ body {
 }
 
 .recipe-tag-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   color: var(--color-muted);
   font-size: 0.85rem;
 }
 
-.recipe-tags-hint {
-  margin: 0;
-  color: var(--color-muted);
-  font-size: 0.85rem;
+.recipe-tag-empty-arrow {
+  margin-top: -.25rem;
+  font-size: 1.75em;
+  line-height: 1;
+}
+
+.recipe-tag-empty-text {
+  line-height: 1.2;
 }
 
 .list-item-count-pill {

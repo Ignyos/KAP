@@ -129,7 +129,7 @@
       snapshotItems: cloneSnapshotItems(record.snapshotItems),
       snapshotInstructions: cloneSnapshotInstructions(record.snapshotInstructions)
     };
-  }}
+  }
 
   async function requireRecipeById(recipeId) {
     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeId);
@@ -815,6 +815,261 @@
     return getRecipeVersionById(recipeId, nextVersion.id);
   }
 
+  function buildDetailItemsFromSnapshot(recipeId, snapshotItems) {
+    return sortByNameAscending(cloneSnapshotItems(snapshotItems).map(function (snapshotItem, index) {
+      return {
+        id: String(snapshotItem.itemId || '') + '::' + String(index),
+        listRecordId: recipeId,
+        itemId: snapshotItem.itemId || '',
+        name: snapshotItem.name || 'Unknown Item',
+        quantity: snapshotItem.quantity,
+        description: snapshotItem.description || '',
+        categoryId: snapshotItem.categoryId || '',
+        categoryName: snapshotItem.categoryName || '',
+        item: null
+      };
+    }));
+  }
+
+  function buildInstructionItemsFromSnapshot(snapshotInstructions) {
+    return cloneSnapshotInstructions(snapshotInstructions).map(function (snapshotInstruction, index) {
+      return {
+        id: snapshotInstruction.instructionId || ('snapshot-step-' + String(index)),
+        recipeId: '',
+        stepNumber: Number(snapshotInstruction.stepNumber || index + 1),
+        text: snapshotInstruction.text || '',
+        createdDate: '',
+        updatedDate: ''
+      };
+    });
+  }
+
+  async function updateVersionSnapshot(recipeId, versionId, snapshotItems, snapshotInstructions) {
+    await ensureRecipeHasVersion(recipeId);
+    var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
+    if (!version || version.recipeId !== recipeId) {
+      throw new Error('Recipe version not found.');
+    }
+
+    version.snapshotItems = cloneSnapshotItems(snapshotItems);
+    version.snapshotInstructions = cloneSnapshotInstructions(snapshotInstructions);
+    version.updatedDate = nowIso();
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version);
+    return normalizeVersionRecord(version);
+  }
+
+  async function getVersionItems(recipeId, versionId) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    return buildDetailItemsFromSnapshot(recipeId, version.snapshotItems);
+  }
+
+  async function getVersionInstructions(recipeId, versionId) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    return buildInstructionItemsFromSnapshot(version.snapshotInstructions);
+  }
+
+  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+    var normalizedQuantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+    var normalizedDescription = window.KaPItemEntryRules.normalizeDescription(description);
+    var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+    var existing = snapshotItems.find(function (entry) {
+      return String(entry.name || '').toLowerCase() === safeName.toLowerCase();
+    });
+
+    if (existing) {
+      existing.quantity = window.KaPItemEntryRules.incrementQuantity(existing.quantity);
+    } else {
+      await requireItemById(itemId);
+      var sourceItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
+      snapshotItems.push({
+        itemId: itemId,
+        name: safeName,
+        quantity: normalizedQuantity,
+        description: normalizedDescription,
+        categoryId: (sourceItem && sourceItem.categoryId) || '',
+        categoryName: (sourceItem && sourceItem.categoryName) || ''
+      });
+    }
+
+    await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+    return getVersionItems(recipeId, versionId);
+  }
+
+  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+    var itemIndex = snapshotItems.findIndex(function (snapshotItem, index) {
+      return (String(snapshotItem.itemId || '') + '::' + String(index)) === versionItemId;
+    });
+    if (itemIndex < 0) {
+      throw new Error('Recipe item not found.');
+    }
+
+    snapshotItems[itemIndex].name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+    snapshotItems[itemIndex].quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+    snapshotItems[itemIndex].description = window.KaPItemEntryRules.normalizeDescription(description);
+
+    await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+    return getVersionItems(recipeId, versionId);
+  }
+
+  async function removeItemFromVersion(recipeId, versionId, versionItemId) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotItems = cloneSnapshotItems(version.snapshotItems).filter(function (snapshotItem, index) {
+      return (String(snapshotItem.itemId || '') + '::' + String(index)) !== versionItemId;
+    });
+
+    await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+  }
+
+  async function incrementVersionItemQuantity(recipeId, versionId, versionItemId) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+    var itemIndex = snapshotItems.findIndex(function (snapshotItem, index) {
+      return (String(snapshotItem.itemId || '') + '::' + String(index)) === versionItemId;
+    });
+    if (itemIndex < 0) {
+      throw new Error('Recipe item not found.');
+    }
+
+    var current = snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity;
+    snapshotItems[itemIndex].quantity = current + 1;
+    await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+    return getVersionItems(recipeId, versionId);
+  }
+
+  async function decrementVersionItemQuantity(recipeId, versionId, versionItemId) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+    var itemIndex = snapshotItems.findIndex(function (snapshotItem, index) {
+      return (String(snapshotItem.itemId || '') + '::' + String(index)) === versionItemId;
+    });
+    if (itemIndex < 0) {
+      throw new Error('Recipe item not found.');
+    }
+
+    var current = snapshotItems[itemIndex].quantity == null ? 1 : snapshotItems[itemIndex].quantity;
+    snapshotItems[itemIndex].quantity = Math.max(1, current - 1);
+    await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+    return getVersionItems(recipeId, versionId);
+  }
+
+  async function addInstructionToVersion(recipeId, versionId, text) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
+    snapshotInstructions.push({
+      instructionId: window.KaPIds.NewId(),
+      stepNumber: snapshotInstructions.length + 1,
+      text: ensureValidInstructionText(text)
+    });
+
+    await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
+    return getVersionInstructions(recipeId, versionId);
+  }
+
+  async function updateVersionInstruction(recipeId, versionId, instructionId, text) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
+    var existing = snapshotInstructions.find(function (instruction) {
+      return instruction.instructionId === instructionId;
+    });
+    if (!existing) {
+      throw new Error('Instruction not found.');
+    }
+
+    existing.text = ensureValidInstructionText(text);
+    await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
+    return getVersionInstructions(recipeId, versionId);
+  }
+
+  async function removeVersionInstruction(recipeId, versionId, instructionId) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions)
+      .filter(function (instruction) {
+        return instruction.instructionId !== instructionId;
+      })
+      .map(function (instruction, index) {
+        instruction.stepNumber = index + 1;
+        return instruction;
+      });
+
+    await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
+  }
+
+  async function moveVersionInstruction(recipeId, versionId, instructionId, direction) {
+    var version = await getRecipeVersionById(recipeId, versionId);
+    if (!version) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
+    var currentIndex = snapshotInstructions.findIndex(function (instruction) {
+      return instruction.instructionId === instructionId;
+    });
+    if (currentIndex < 0) {
+      throw new Error('Instruction not found.');
+    }
+
+    var delta = direction === 'up' ? -1 : 1;
+    var targetIndex = currentIndex + delta;
+    if (targetIndex < 0 || targetIndex >= snapshotInstructions.length) {
+      return getVersionInstructions(recipeId, versionId);
+    }
+
+    var moved = snapshotInstructions[currentIndex];
+    snapshotInstructions[currentIndex] = snapshotInstructions[targetIndex];
+    snapshotInstructions[targetIndex] = moved;
+    snapshotInstructions = snapshotInstructions.map(function (instruction, index) {
+      instruction.stepNumber = index + 1;
+      return instruction;
+    });
+
+    await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
+    return getVersionInstructions(recipeId, versionId);
+  }
+
   async function updateVersionNote(recipeId, versionId, noteText) {
     await ensureRecipeHasVersion(recipeId);
     var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
@@ -922,7 +1177,18 @@
     getRecipeVersions: getRecipeVersions,
     getLatestRecipeVersion: getLatestRecipeVersion,
     getRecipeVersionById: getRecipeVersionById,
+    getVersionItems: getVersionItems,
+    getVersionInstructions: getVersionInstructions,
     createNewVersion: createNewVersion,
+    addItemToVersion: addItemToVersion,
+    updateVersionItem: updateVersionItem,
+    removeItemFromVersion: removeItemFromVersion,
+    incrementVersionItemQuantity: incrementVersionItemQuantity,
+    decrementVersionItemQuantity: decrementVersionItemQuantity,
+    addInstructionToVersion: addInstructionToVersion,
+    updateVersionInstruction: updateVersionInstruction,
+    removeVersionInstruction: removeVersionInstruction,
+    moveVersionInstruction: moveVersionInstruction,
     updateVersionNote: updateVersionNote,
     updateVersionName: updateVersionName,
     deleteRecipeVersion: deleteRecipeVersion,
