@@ -682,6 +682,13 @@
         await window.KaPRecipesService.updateVersionName(record.id, activeVersion.id, newName);
         originalVersionName = newName;
         activeVersion.versionName = newName;
+
+        var selectedOption = Array.prototype.find.call(versionSelect.options, function (option) {
+          return option.value === String(activeVersion.id);
+        });
+        if (selectedOption) {
+          selectedOption.textContent = newName;
+        }
       } catch (error) {
         await showError(error.message || 'Unable to update version name.');
         versionNameInput.value = originalVersionName;
@@ -719,26 +726,24 @@
     var cloneRow = document.createElement('div');
     cloneRow.className = 'recipe-version-clone-row';
 
-    if (isViewingLatestVersion) {
-      var cloneButton = document.createElement('button');
-      cloneButton.type = 'button';
-      cloneButton.className = 'recipe-version-secondary-button';
-      cloneButton.textContent = 'Clone Version';
-      cloneButton.addEventListener('click', async function () {
-        var cloneConfig = await promptCloneVersionName(record);
-        if (!cloneConfig) {
-          return;
-        }
+    var cloneButton = document.createElement('button');
+    cloneButton.type = 'button';
+    cloneButton.className = 'recipe-version-secondary-button';
+    cloneButton.textContent = 'Clone Version';
+    cloneButton.addEventListener('click', async function () {
+      var cloneConfig = await promptCloneVersionName(record);
+      if (!cloneConfig) {
+        return;
+      }
 
-        var clonedRecord = await cloneRecipeFromActiveVersion(record, activeVersion, cloneConfig.name);
-        if (!clonedRecord) {
-          return;
-        }
+      var clonedRecord = await cloneRecipeFromActiveVersion(record, activeVersion, cloneConfig.name);
+      if (!clonedRecord) {
+        return;
+      }
 
-        hooks.onOpen(clonedRecord);
-      });
-      cloneRow.appendChild(cloneButton);
-    }
+      hooks.onOpen(clonedRecord);
+    });
+    cloneRow.appendChild(cloneButton);
 
     var cloneInfoWrap = document.createElement('span');
     cloneInfoWrap.className = 'accordion-info-wrap';
@@ -1257,13 +1262,9 @@
     }
 
     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
-    var canEdit = isViewingLatestVersion;
-    var detailItems = isViewingLatestVersion
-      ? await window.KaPRecipesService.getRecipeItems(record.id)
-      : getDetailItemsFromVersionSnapshot(activeVersion);
-    var instructions = isViewingLatestVersion
-      ? await window.KaPRecipesService.getRecipeInstructions(record.id)
-      : getInstructionItemsFromVersionSnapshot(activeVersion);
+    var canEdit = true;
+    var detailItems = await window.KaPRecipesService.getRecipeItems(record.id);
+    var instructions = await window.KaPRecipesService.getRecipeInstructions(record.id);
     var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
     var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
     record.tags = recipeTags;
@@ -1277,11 +1278,7 @@
       onAddItem: null,
       detailItems: sortedItems,
       itemRowBuilder: function (detailItem) {
-        if (!canEdit) {
-          return buildReadOnlyRecipeDetailItemRow(detailItem);
-        }
-
-        return buildRecipeDetailItemRow(record, detailItem, container, hooks, activeVersion ? activeVersion.versionNumber : undefined);
+        return buildRecipeDetailItemRow(record, detailItem, container, hooks, activeVersion ? activeVersion.id : undefined);
       },
       actions: [
         {
@@ -1345,14 +1342,14 @@
       container,
       record,
       hooks,
-      activeVersion ? activeVersion.versionNumber : null,
+      activeVersion ? activeVersion.id : null,
       canEdit
     );
     appendTagsAccordionSection(
       container,
       record,
       hooks,
-      activeVersion ? activeVersion.versionNumber : null,
+      activeVersion ? activeVersion.id : null,
       canEdit,
       descriptionSection,
       allRecipeTags
@@ -1363,7 +1360,7 @@
       detailItems,
       canEdit,
       hooks,
-      activeVersion ? activeVersion.versionNumber : null
+      activeVersion ? activeVersion.id : null
     );
 
     await appendInstructionsSection(
@@ -1372,7 +1369,7 @@
       instructions,
       canEdit,
       hooks,
-      activeVersion ? activeVersion.versionNumber : null
+      activeVersion ? activeVersion.id : null
     );
   }
 
