@@ -1967,6 +1967,7 @@ body {
 }
 
 .recipe-tag-empty-arrow {
+  margin-top: -.25rem;
   font-size: 1.75em;
   line-height: 1;
 }

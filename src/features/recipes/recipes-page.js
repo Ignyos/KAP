@@ -178,9 +178,19 @@
   }
 
   async function deleteRecipe(record) {
+    var versionWarning = '';
+    try {
+      var versions = await window.KaPRecipesService.getRecipeVersions(record.id);
+      if ((versions || []).length > 1) {
+        versionWarning = '\n\nThis recipe has ' + String(versions.length) + ' versions. Deleting it will remove all versions.';
+      }
+    } catch (error) {
+      // Keep the base confirmation message if version lookup fails.
+    }
+
     var confirmed = await window.KaPUI.ShowConfirm({
       title: 'Delete Recipe',
-      message: 'Delete "' + record.name + '"?',
+      message: 'Delete "' + record.name + '"?' + versionWarning,
       confirmLabel: 'Delete',
       isDanger: true
     });
