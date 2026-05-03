@@ -794,6 +794,10 @@ body {
   border-radius: 0.625rem;
 }
 
+  .recipe-accordion-header.tags {
+  padding: 0.65rem .75rem;
+}
+
 .recipe-accordion-header-actions {
   margin-left: auto;
   display: inline-flex;
@@ -876,6 +880,27 @@ body {
   color: var(--color-text);
   font-size: 0.92rem;
   line-height: 1.4;
+}
+
+.recipe-version-name-input {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.5625rem 0.75rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.92rem;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.recipe-version-name-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+}
+
+.recipe-version-name-input::placeholder {
+  color: var(--color-muted);
 }
 
 .recipe-version-clone-row {
@@ -1803,7 +1828,7 @@ body {
     color: var(--color-brand);
     font-size: 2.35rem;
     line-height: .5;
-    transform: rotate(90deg);
+    transform: rotate(60deg);
     font-weight: bolder;
     cursor: pointer;
 }

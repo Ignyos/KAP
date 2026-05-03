@@ -878,6 +878,27 @@ body {
   line-height: 1.4;
 }
 
+.recipe-version-name-input {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.5625rem 0.75rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.92rem;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.recipe-version-name-input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+}
+
+.recipe-version-name-input::placeholder {
+  color: var(--color-muted);
+}
+
 .recipe-version-clone-row {
   display: flex;
   align-items: center;

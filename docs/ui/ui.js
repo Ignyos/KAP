@@ -2101,7 +2101,7 @@
         option.value = String(version.versionNumber);
         var label = 'Version ' + version.versionNumber;
         if (version.versionNumber === config.latestVersionNumber) {
-          label += ' (Current)';
+          label;
         }
         option.textContent = label;
         option.selected = version.versionNumber === config.defaultVersionNumber;

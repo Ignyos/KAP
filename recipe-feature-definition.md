@@ -14,6 +14,8 @@ A Recipe is a versioned cooking artifact with:
 - Changes tracked by version (each edit creates a new version).
 - Mutable content (ingredients, instructions, notes can change per version).
 - Stable instruction identity (an instruction can be edited over time while remaining traceable).
+- Independent versions (each version is a complete copy that can be edited or deleted independently).
+- User-named versions (each version has a user-editable name, defaulting to creation date/time).
 
 ---
 
@@ -29,20 +31,25 @@ A Recipe is a versioned cooking artifact with:
 
 Version header:
 - Recipe name displayed prominently.
-- Current version shown near name: "Version (n)".
+- Current version name shown near name (e.g., "2026-05-03 14:30" or user-specified name).
 - Three-dot menu (always available) with actions:
   1. Version Note
   2. New Version
   3. Clone Recipe
 
+Version Name Editing:
+- Version name is displayed and editable in the Versions accordion.
+- Default name format: YYYY-MM-DD HH:MM (creation date/time).
+- Users can edit the name directly with a text input and save button.
+- Version name is required (cannot be empty).
+
 New Version modal:
 - Opens when "New Version" is selected.
 - Shows recipe name at top.
-- Shows next version number (current + 1).
-- Includes description input with placeholder:
-  - "Too much salt in version 1. Also adding basil this time."
+- Includes version name input (pre-filled with current date/time).
+- Shows which version is being used as base.
+- Includes optional version note input.
 - Saving creates new version based on currently selected effective state.
-- Version note is optional.
 
 Clone Recipe:
 - Copies only the currently effective state (not full version history).
@@ -52,21 +59,29 @@ Clone Recipe:
 **Model Support**
 
 - Recipe identity record (stable across all versions).
-- Version records linked by parent version ID (null for Version 1).
-- New Version always inherits from selected version's effective state.
+- Version records with:
+  - `versionName` (string): User-editable name, defaults to YYYY-MM-DD HH:MM format
+  - `versionNote` (string, optional): Creator notes about version changes
+  - `snapshotItems` and `snapshotInstructions`: Complete independent data
+  - `createdDate` and `updatedDate`: Timestamps for sorting and history
+- New Version always creates a complete independent copy of the selected version's effective state.
 - Clone creates a new Recipe identity with Version 1 containing effective state.
-- Version note field is optional (allows empty string).
+- Each version can be edited or deleted independently (except the latest version cannot be deleted, and at least one version must exist).
+- Versions are sorted by creation date (oldest first in the version selector).
 
 **Acceptance Checks**
 
-- [ ] Version number is displayed in recipe header.
+- [ ] Version name (not number) is displayed in recipe header.
+- [ ] Version name can be edited in the Versions accordion with a text input and save button.
+- [ ] Version name defaults to YYYY-MM-DD HH:MM format for new versions.
+- [ ] Version name is required (cannot save empty name).
 - [ ] Three-dot menu is accessible from header.
-- [ ] Selecting "New Version" opens modal with correct recipe name and next version number.
-- [ ] Description input has correct placeholder text.
+- [ ] Selecting "New Version" opens modal with version name and optional note inputs.
+- [ ] New Version modal pre-fills name with current date/time.
 - [ ] Saving new version does not overwrite current version.
 - [ ] Clone Recipe creates a new recipe with its own identity.
 - [ ] Clone default note includes recipe name and current local date/time.
-- [ ] Version note is optional (user can save without entering text).
+- [ ] Version names are unique per version (each version has its own editable name).
 
 ---
 

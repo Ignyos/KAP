@@ -5,6 +5,16 @@
     return new Date().toISOString();
   }
 
+  function getDefaultVersionName() {
+    var now = new Date();
+    var year = now.getFullYear();
+    var month = String(now.getMonth() + 1).padStart(2, '0');
+    var day = String(now.getDate()).padStart(2, '0');
+    var hours = String(now.getHours()).padStart(2, '0');
+    var minutes = String(now.getMinutes()).padStart(2, '0');
+    return year + '-' + month + '-' + day + ' ' + hours + ':' + minutes;
+  }
+
   function ensureValidRecipeName(name) {
     var trimmed = (name || '').trim();
     if (!trimmed) {
@@ -66,9 +76,11 @@
     });
   }
 
-  function sortByVersionNumberAscending(records) {
+  function sortByCreatedDateAscending(records) {
     return (records || []).slice().sort(function (a, b) {
-      return Number((a && a.versionNumber) || 0) - Number((b && b.versionNumber) || 0);
+      var dateA = new Date(String(a && a.createdDate) || '0');
+      var dateB = new Date(String(b && b.createdDate) || '0');
+      return dateA.getTime() - dateB.getTime();
     });
   }
 
@@ -109,7 +121,7 @@
     return {
       id: record.id,
       recipeId: record.recipeId,
-      versionNumber: Number(record.versionNumber || 0),
+      versionName: String(record.versionName || ''),
       parentVersionId: String(record.parentVersionId || ''),
       createdDate: String(record.createdDate || ''),
       updatedDate: String(record.updatedDate || ''),
@@ -117,7 +129,7 @@
       snapshotItems: cloneSnapshotItems(record.snapshotItems),
       snapshotInstructions: cloneSnapshotInstructions(record.snapshotInstructions)
     };
-  }
+  }}
 
   async function requireRecipeById(recipeId) {
     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeId);
@@ -386,7 +398,7 @@
       recipeId
     );
 
-    return sortByVersionNumberAscending(versions).map(normalizeVersionRecord);
+    return sortByCreatedDateAscending(versions).map(normalizeVersionRecord);
   }
 
   async function getLatestRecipeVersion(recipeId) {
@@ -394,15 +406,13 @@
     return versions.length > 0 ? versions[versions.length - 1] : null;
   }
 
-  async function getRecipeVersionByNumber(recipeId, versionNumber) {
+  async function getRecipeVersionById(recipeId, versionId) {
     await ensureRecipeHasVersion(recipeId);
-    var matching = await window.KaPDB.readAllFromIndex(
-      window.KaPStores.STORE_NAMES.RECIPE_VERSIONS,
-      window.KaPStores.INDEX_NAMES.RECIPE_VERSIONS_BY_RECIPE_AND_VERSION,
-      [recipeId, Number(versionNumber)]
-    );
-
-    return normalizeVersionRecord((matching || [])[0] || null);
+    var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
+    if (!version || version.recipeId !== recipeId) {
+      return null;
+    }
+    return normalizeVersionRecord(version);
   }
 
   async function syncLatestVersionSnapshot(recipeId) {
@@ -444,7 +454,7 @@
     var versionRecord = {
       id: window.KaPIds.NewId(),
       recipeId: recipeRecord.id,
-      versionNumber: 1,
+      versionName: getDefaultVersionName(),
       parentVersionId: '',
       createdDate: recipeRecord.createdDate,
       updatedDate: recipeRecord.updatedDate,
@@ -776,7 +786,7 @@
     await persistInstructionList(resequenced);
   }
 
-  async function createNewVersion(recipeId, versionNote, sourceVersionId) {
+  async function createNewVersion(recipeId, versionName, versionNote, sourceVersionId) {
     await ensureRecipeHasVersion(recipeId);
     var sourceVersion = sourceVersionId
       ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, sourceVersionId)
@@ -786,13 +796,11 @@
       throw new Error('Recipe version not found.');
     }
 
-    var latestVersion = await getLatestRecipeVersion(recipeId);
-    var nextVersionNumber = Number((latestVersion && latestVersion.versionNumber) || 0) + 1;
     var nextVersion = {
       id: window.KaPIds.NewId(),
       recipeId: recipeId,
-      versionNumber: nextVersionNumber,
-      parentVersionId: sourceVersion.id,
+      versionName: String(versionName || getDefaultVersionName()).trim(),
+      parentVersionId: '',
       createdDate: nowIso(),
       updatedDate: nowIso(),
       versionNote: String(versionNote || '').trim(),
@@ -804,7 +812,7 @@
     await replaceRecipeItemsFromSnapshot(recipeId, nextVersion.snapshotItems);
     await replaceRecipeInstructionsFromSnapshot(recipeId, nextVersion.snapshotInstructions);
     await syncLatestVersionSnapshot(recipeId);
-    return getRecipeVersionByNumber(recipeId, nextVersionNumber);
+    return getRecipeVersionById(recipeId, nextVersion.id);
   }
 
   async function updateVersionNote(recipeId, versionId, noteText) {
@@ -815,6 +823,24 @@
     }
 
     version.versionNote = String(noteText || '').trim();
+    version.updatedDate = nowIso();
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version);
+    return normalizeVersionRecord(version);
+  }
+
+  async function updateVersionName(recipeId, versionId, nameText) {
+    await ensureRecipeHasVersion(recipeId);
+    var version = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, versionId);
+    if (!version || version.recipeId !== recipeId) {
+      throw new Error('Recipe version not found.');
+    }
+
+    var trimmedName = String(nameText || '').trim();
+    if (!trimmedName) {
+      throw new Error('Version name is required.');
+    }
+
+    version.versionName = trimmedName;
     version.updatedDate = nowIso();
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, version);
     return normalizeVersionRecord(version);
@@ -895,9 +921,10 @@
     moveRecipeInstruction: moveRecipeInstruction,
     getRecipeVersions: getRecipeVersions,
     getLatestRecipeVersion: getLatestRecipeVersion,
-    getRecipeVersionByNumber: getRecipeVersionByNumber,
+    getRecipeVersionById: getRecipeVersionById,
     createNewVersion: createNewVersion,
     updateVersionNote: updateVersionNote,
+    updateVersionName: updateVersionName,
     deleteRecipeVersion: deleteRecipeVersion,
     cloneRecipe: cloneRecipe
   };
