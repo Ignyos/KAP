@@ -286,7 +286,8 @@
     var qtyPillNode = node.querySelector('.detail-item-qty-pill');
     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
     var descriptionText = detailItem.description || '';
-    var currentQuantity = detailItem.quantity;
+    var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
+    var uomAbbreviation = detailItem.uomAbbreviation || null;
     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
 
@@ -303,16 +304,21 @@
       });
     }
 
-    function updateQtyPill(qty) {
+    function updateQtyPill(qty, abbr) {
       if (!qtyPillNode) {
         return;
       }
 
       var numericQty = Number(qty);
-      var showPill = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && numericQty !== 1;
+      var hasUom = !!(abbr);
+      var showPill = (qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && (numericQty !== 1 || hasUom)) || hasUom;
 
       if (showPill) {
-        qtyPillNode.textContent = String(qty);
+        var pillText = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 ? String(qty) : '';
+        if (abbr) {
+          pillText = pillText ? pillText + '\u00a0' + abbr : abbr;
+        }
+        qtyPillNode.textContent = pillText;
         qtyPillNode.style.display = '';
         qtyPillNode.style.visibility = 'visible';
         qtyPillNode.setAttribute('aria-hidden', 'false');
@@ -324,7 +330,7 @@
       }
     }
 
-    updateQtyPill(currentQuantity);
+    updateQtyPill(currentQuantity, uomAbbreviation);
 
     if (descriptionText) {
       metaNode.textContent = descriptionText;
@@ -595,6 +601,166 @@
     });
   }
 
+  // Modal for creating a custom unit of measure.
+  // Returns a Promise that resolves with the created unit object, or null if cancelled.
+  function ShowCreateUnitModal(options) {
+    // options: { createUnitOfMeasure: async fn(name, abbr, group, behavior, step) }
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = 'Add Unit';
+      confirmButton.textContent = 'Add';
+      card.setAttribute('aria-label', 'Add Unit');
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      // Name
+      var nameLabel = document.createElement('label');
+      nameLabel.className = 'modal-field-label';
+      nameLabel.textContent = 'Unit name';
+      form.appendChild(nameLabel);
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'modal-input';
+      nameInput.placeholder = 'e.g. Handful';
+      form.appendChild(nameInput);
+
+      // Abbreviation
+      var abbrLabel = document.createElement('label');
+      abbrLabel.className = 'modal-field-label';
+      abbrLabel.textContent = 'Abbreviation (optional)';
+      form.appendChild(abbrLabel);
+      var abbrInput = document.createElement('input');
+      abbrInput.type = 'text';
+      abbrInput.className = 'modal-input';
+      abbrInput.placeholder = 'e.g. hdfl';
+      form.appendChild(abbrInput);
+
+      // Group
+      var groupLabel = document.createElement('label');
+      groupLabel.className = 'modal-field-label';
+      groupLabel.textContent = 'Group';
+      form.appendChild(groupLabel);
+      var groupSelect = document.createElement('select');
+      groupSelect.className = 'modal-input';
+      ['Imperial', 'Metric', 'Unit', 'Size', 'Other'].forEach(function (g) {
+        var opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        groupSelect.appendChild(opt);
+      });
+      groupSelect.value = 'Other';
+      form.appendChild(groupSelect);
+
+      // Quantity behavior
+      var behaviorLabel = document.createElement('label');
+      behaviorLabel.className = 'modal-field-label';
+      behaviorLabel.textContent = 'Quantity behavior';
+      form.appendChild(behaviorLabel);
+      var behaviorSelect = document.createElement('select');
+      behaviorSelect.className = 'modal-input';
+      [
+        { value: 'decimal', label: 'Decimal (free entry)' },
+        { value: 'whole_or_half', label: 'Whole or half (0.5 step)' },
+        { value: 'user_defined', label: 'Custom step' }
+      ].forEach(function (item) {
+        var opt = document.createElement('option');
+        opt.value = item.value;
+        opt.textContent = item.label;
+        behaviorSelect.appendChild(opt);
+      });
+      behaviorSelect.value = 'decimal';
+      form.appendChild(behaviorSelect);
+
+      // Step (shown only for user_defined)
+      var stepLabel = document.createElement('label');
+      stepLabel.className = 'modal-field-label';
+      stepLabel.textContent = 'Step size (optional)';
+      stepLabel.hidden = true;
+      form.appendChild(stepLabel);
+      var stepInput = document.createElement('input');
+      stepInput.type = 'text';
+      stepInput.className = 'modal-input';
+      stepInput.placeholder = 'e.g. 0.25';
+      stepInput.hidden = true;
+      form.appendChild(stepInput);
+
+      behaviorSelect.addEventListener('change', function () {
+        var isCustom = behaviorSelect.value === 'user_defined';
+        stepLabel.hidden = !isCustom;
+        stepInput.hidden = !isCustom;
+      });
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+
+      bodyNode.appendChild(form);
+
+      function closeModal(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      async function handleSubmit() {
+        errorNode.textContent = '';
+        var name = String(nameInput.value || '').trim();
+        if (!name) {
+          errorNode.textContent = 'Unit name is required.';
+          nameInput.focus();
+          return;
+        }
+        var abbr = String(abbrInput.value || '').trim() || null;
+        var group = groupSelect.value;
+        var behavior = behaviorSelect.value;
+        var stepRaw = String(stepInput.value || '').trim();
+        var step = null;
+        if (behavior === 'user_defined' && stepRaw) {
+          step = parseFloat(stepRaw);
+          if (Number.isNaN(step) || step <= 0) {
+            errorNode.textContent = 'Step size must be a positive number.';
+            stepInput.focus();
+            return;
+          }
+        }
+
+        try {
+          var created = await options.createUnitOfMeasure(name, abbr, group, behavior, step);
+          closeModal(created);
+        } catch (err) {
+          errorNode.textContent = err.message || 'Unable to create unit.';
+        }
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') { closeModal(null); }
+        if (event.key === 'Enter' && event.target !== behaviorSelect && event.target !== groupSelect) {
+          event.preventDefault();
+          handleSubmit();
+        }
+      }
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { closeModal(null); }
+      });
+      cancelButton.addEventListener('click', function () { closeModal(null); });
+      confirmButton.addEventListener('click', function () { handleSubmit(); });
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+      nameInput.focus();
+    });
+  }
+
   function ShowDiscoveryItemModal(options) {
     return new Promise(function (resolve) {
       var suggestionsEnabled = options.enableSuggestions !== false;
@@ -650,18 +816,105 @@
       form.appendChild(nameInputWrapper);
 
       var quantityInput = null;
+      var uomSelect = null;
+      var uomUnits = [];
+      var selectedUomId = options.initialUnitOfMeasureId || null;
+
       if (showQuantityField) {
         var quantityLabel = document.createElement('label');
         quantityLabel.className = 'modal-field-label';
         quantityLabel.textContent = options.quantityLabel || 'Quantity (optional)';
         form.appendChild(quantityLabel);
 
+        var quantityRow = document.createElement('div');
+        quantityRow.className = 'modal-quantity-row';
+
         quantityInput = document.createElement('input');
         quantityInput.type = 'text';
-        quantityInput.className = 'modal-input';
+        quantityInput.className = 'modal-input modal-quantity-input';
         quantityInput.placeholder = options.quantityPlaceholder || 'e.g. 2';
         quantityInput.value = options.initialQuantity == null ? '' : String(options.initialQuantity);
-        form.appendChild(quantityInput);
+        quantityRow.appendChild(quantityInput);
+
+        uomSelect = document.createElement('select');
+        uomSelect.className = 'modal-uom-select';
+        uomSelect.setAttribute('aria-label', 'Unit of measure');
+
+        var noneOption = document.createElement('option');
+        noneOption.value = '';
+        noneOption.textContent = 'Unit';
+        uomSelect.appendChild(noneOption);
+
+        if (options.getUnitOfMeasures) {
+          options.getUnitOfMeasures().then(function (units) {
+            uomUnits = units || [];
+            populateUomSelect();
+          }).catch(function () {});
+        }
+
+        function populateUomSelect() {
+          // Remove everything except the blank first option
+          while (uomSelect.options.length > 1) {
+            uomSelect.remove(1);
+          }
+
+          var currentGroup = null;
+          var optgroup = null;
+
+          uomUnits.forEach(function (unit) {
+            if (unit.group !== currentGroup) {
+              currentGroup = unit.group;
+              optgroup = document.createElement('optgroup');
+              optgroup.label = currentGroup;
+              uomSelect.appendChild(optgroup);
+            }
+
+            var opt = document.createElement('option');
+            opt.value = unit.id;
+            opt.textContent = unit.name + (unit.abbreviation ? ' (' + unit.abbreviation + ')' : '');
+            if (unit.id === selectedUomId) {
+              opt.selected = true;
+            }
+
+            (optgroup || uomSelect).appendChild(opt);
+          });
+
+          // Separator + add unit option
+          if (options.createUnitOfMeasure) {
+            var separator = document.createElement('option');
+            separator.disabled = true;
+            separator.textContent = '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
+            uomSelect.appendChild(separator);
+
+            var addOpt = document.createElement('option');
+            addOpt.value = '__add_unit__';
+            addOpt.textContent = '+ Add Unit…';
+            uomSelect.appendChild(addOpt);
+          }
+        }
+
+        uomSelect.addEventListener('change', function () {
+          if (uomSelect.value === '__add_unit__') {
+            // Restore previous selection while modal is open
+            uomSelect.value = selectedUomId || '';
+            ShowCreateUnitModal({
+              createUnitOfMeasure: options.createUnitOfMeasure
+            }).then(function (created) {
+              if (!created) { return; }
+              return options.getUnitOfMeasures().then(function (units) {
+                uomUnits = units || [];
+                selectedUomId = created.id;
+                populateUomSelect();
+                uomSelect.value = created.id;
+              });
+            }).catch(function () {});
+            return;
+          }
+          selectedUomId = uomSelect.value || null;
+        });
+
+        quantityRow.appendChild(uomSelect);
+        form.appendChild(quantityRow);
       }
 
       var categoryInput = null;
@@ -1086,6 +1339,7 @@
             close({
               name: rawName,
               quantity: quantityResult.value,
+              unitOfMeasureId: selectedUomId || null,
               description: String(descriptionInput.value || '').trim(),
               categoryId: category ? category.id || '' : '',
               categoryName: category ? category.name || '' : ''
@@ -1107,6 +1361,7 @@
             item: item,
             name: rawName,
             quantity: quantityResult.value,
+            unitOfMeasureId: selectedUomId || null,
             description: String(descriptionInput.value || '').trim(),
             categoryId: category ? category.id || '' : '',
             categoryName: category ? category.name || '' : ''
@@ -1754,6 +2009,155 @@
     });
   }
 
+  // Modal for editing a user-defined (non-seeded) unit of measure.
+  // Returns a Promise that resolves with the updated unit object, or null if cancelled.
+  function ShowEditUnitModal(options) {
+    // options: { unit, updateUnitOfMeasure: async fn(id, updates) }
+    var unit = options.unit || {};
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = 'Edit Unit';
+      confirmButton.textContent = 'Save';
+      card.setAttribute('aria-label', 'Edit Unit');
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      // Name
+      var nameLabel = document.createElement('label');
+      nameLabel.className = 'modal-field-label';
+      nameLabel.textContent = 'Unit name';
+      form.appendChild(nameLabel);
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'modal-input';
+      nameInput.value = unit.name || '';
+      form.appendChild(nameInput);
+
+      // Abbreviation
+      var abbrLabel = document.createElement('label');
+      abbrLabel.className = 'modal-field-label';
+      abbrLabel.textContent = 'Abbreviation (optional)';
+      form.appendChild(abbrLabel);
+      var abbrInput = document.createElement('input');
+      abbrInput.type = 'text';
+      abbrInput.className = 'modal-input';
+      abbrInput.value = unit.abbreviation || '';
+      form.appendChild(abbrInput);
+
+      // Quantity behavior
+      var behaviorLabel = document.createElement('label');
+      behaviorLabel.className = 'modal-field-label';
+      behaviorLabel.textContent = 'Quantity behavior';
+      form.appendChild(behaviorLabel);
+      var behaviorSelect = document.createElement('select');
+      behaviorSelect.className = 'modal-input';
+      [
+        { value: 'decimal', label: 'Decimal (free entry)' },
+        { value: 'whole_or_half', label: 'Whole or half (0.5 step)' },
+        { value: 'user_defined', label: 'Custom step' }
+      ].forEach(function (item) {
+        var opt = document.createElement('option');
+        opt.value = item.value;
+        opt.textContent = item.label;
+        behaviorSelect.appendChild(opt);
+      });
+      behaviorSelect.value = unit.quantityBehavior || 'decimal';
+      form.appendChild(behaviorSelect);
+
+      // Step
+      var stepLabel = document.createElement('label');
+      stepLabel.className = 'modal-field-label';
+      stepLabel.textContent = 'Step size (optional)';
+      stepLabel.hidden = behaviorSelect.value !== 'user_defined';
+      form.appendChild(stepLabel);
+      var stepInput = document.createElement('input');
+      stepInput.type = 'text';
+      stepInput.className = 'modal-input';
+      stepInput.value = unit.quantityStep != null ? String(unit.quantityStep) : '';
+      stepInput.hidden = behaviorSelect.value !== 'user_defined';
+      form.appendChild(stepInput);
+
+      behaviorSelect.addEventListener('change', function () {
+        var isCustom = behaviorSelect.value === 'user_defined';
+        stepLabel.hidden = !isCustom;
+        stepInput.hidden = !isCustom;
+      });
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+
+      bodyNode.appendChild(form);
+
+      function closeModal(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      async function handleSubmit() {
+        errorNode.textContent = '';
+        var name = String(nameInput.value || '').trim();
+        if (!name) {
+          errorNode.textContent = 'Unit name is required.';
+          nameInput.focus();
+          return;
+        }
+        var abbr = String(abbrInput.value || '').trim() || null;
+        var behavior = behaviorSelect.value;
+        var stepRaw = String(stepInput.value || '').trim();
+        var step = null;
+        if (behavior === 'user_defined' && stepRaw) {
+          step = parseFloat(stepRaw);
+          if (Number.isNaN(step) || step <= 0) {
+            errorNode.textContent = 'Step size must be a positive number.';
+            stepInput.focus();
+            return;
+          }
+        }
+
+        try {
+          var updated = await options.updateUnitOfMeasure(unit.id, {
+            name: name,
+            abbreviation: abbr,
+            quantityBehavior: behavior,
+            quantityStep: step
+          });
+          closeModal(updated || { id: unit.id });
+        } catch (err) {
+          errorNode.textContent = err.message || 'Unable to update unit.';
+        }
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') { closeModal(null); }
+        if (event.key === 'Enter' && event.target !== behaviorSelect) {
+          event.preventDefault();
+          handleSubmit();
+        }
+      }
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { closeModal(null); }
+      });
+      cancelButton.addEventListener('click', function () { closeModal(null); });
+      confirmButton.addEventListener('click', function () { handleSubmit(); });
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+      nameInput.focus();
+    });
+  }
+
   function ShowPrompt(config) {
     return showModal(function (bodyNode, confirmButton) {
       var input = document.createElement('input');
@@ -1829,6 +2233,20 @@
 
         row.appendChild(checkbox);
         row.appendChild(nameNode);
+
+        var qty = ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity;
+        var abbr = ingredient.uomAbbreviation || null;
+        var numericQty = Number(qty);
+        var hasQty = qty != null && !Number.isNaN(numericQty) && numericQty !== 0;
+        if (hasQty || abbr) {
+          var qtyBadge = document.createElement('span');
+          qtyBadge.className = 'modal-checklist-qty';
+          var badgeText = hasQty ? String(qty) : '';
+          if (abbr) { badgeText = badgeText ? badgeText + '\u00a0' + abbr : abbr; }
+          qtyBadge.textContent = badgeText;
+          row.appendChild(qtyBadge);
+        }
+
         ingredientList.appendChild(row);
         checkboxes.push({ checkbox: checkbox, ingredient: ingredient });
       });
@@ -2407,6 +2825,8 @@
     ReplaceDetailItemRows: ReplaceDetailItemRows,
     NewSettingsToggle: NewSettingsToggle,
     ShowDiscoveryItemModal: ShowDiscoveryItemModal,
+    ShowCreateUnitModal: ShowCreateUnitModal,
+    ShowEditUnitModal: ShowEditUnitModal,
     ShowTemplateConfigModal: ShowTemplateConfigModal,
     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,

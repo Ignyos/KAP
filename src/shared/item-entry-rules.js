@@ -25,6 +25,37 @@
     return Number(raw);
   }
 
+  function normalizeOptionalDecimalQuantity(quantity) {
+    var raw = String(quantity == null ? '' : quantity).trim();
+    if (!raw) {
+      return null;
+    }
+
+    if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) {
+      throw new Error('Quantity must be a decimal number.');
+    }
+
+    var parsed = Number(raw);
+    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
+      throw new Error('Quantity must be a decimal number.');
+    }
+
+    return parsed;
+  }
+
+  function validateQuantityForBehavior(quantityValue, quantityBehavior, quantityStep) {
+    if (quantityValue == null) {
+      return true;
+    }
+
+    var numeric = Number(quantityValue);
+    if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
+      throw new Error('Quantity must be a decimal number.');
+    }
+
+    return true;
+  }
+
   function normalizeNameKey(name) {
     return String(name || '').trim().toLowerCase();
   }
@@ -44,6 +75,8 @@
     ensureValidItemEntryName: ensureValidItemEntryName,
     normalizeDescription: normalizeDescription,
     normalizeOptionalIntegerQuantity: normalizeOptionalIntegerQuantity,
+    normalizeOptionalDecimalQuantity: normalizeOptionalDecimalQuantity,
+    validateQuantityForBehavior: validateQuantityForBehavior,
     findJoinRecordByName: findJoinRecordByName,
     incrementQuantity: incrementQuantity
   };

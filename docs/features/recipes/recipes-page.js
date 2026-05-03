@@ -257,11 +257,18 @@
   }
 
   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems, activeVersionId, isViewingLatestVersion) {
-    var result = await window.KaPUI.ShowDiscoveryItemModal(window.KaPItemDiscovery.buildAddItemModalOptions({
+    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
       title: 'Add Ingredient',
       currentContextLabel: 'recipe',
       detailItems: detailItems
-    }));
+    });
+    baseOptions.getUnitOfMeasures = function () {
+      return window.KaPRecipesService.getAllUnitOfMeasures();
+    };
+    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
+      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+    };
+    var result = await window.KaPUI.ShowDiscoveryItemModal(baseOptions);
 
     if (result === null) {
       return;
@@ -274,7 +281,8 @@
           result.item.id,
           result.name,
           result.quantity,
-          result.description
+          result.description,
+          result.unitOfMeasureId || null
         );
       } else {
         await window.KaPRecipesService.addItemToVersion(
@@ -283,7 +291,8 @@
           result.item.id,
           result.name,
           result.quantity,
-          result.description
+          result.description,
+          result.unitOfMeasureId || null
         );
       }
 
@@ -309,8 +318,16 @@
       initialCategoryId: detailItem.categoryId,
       initialCategoryName: detailItem.categoryName,
       initialDescription: detailItem.description,
-      showQuantityField: false,
+      initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
+      initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
+      showQuantityField: true,
       showCategoryField: true,
+      getUnitOfMeasures: function () {
+        return window.KaPRecipesService.getAllUnitOfMeasures();
+      },
+      createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+        return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+      },
       getAllCategories: function () {
         return window.KaPCategoriesService.getAllCategories();
       },
@@ -338,8 +355,9 @@
         recipeRecord.id,
         detailItem.id,
         result.name,
-        detailItem.quantity,
-        result.description
+        result.quantity,
+        result.description,
+        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
       );
 
       if (detailItem.itemId) {
@@ -477,24 +495,6 @@
 
   function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion) {
     return window.KaPUI.NewDetailItemRow(detailItem, {
-      onIncrement: async function () {
-        var updated = isViewingLatestVersion
-          ? await window.KaPRecipesService.incrementRecipeItemQuantity(recipeRecord.id, detailItem.id)
-          : (await window.KaPRecipesService.incrementVersionItemQuantity(recipeRecord.id, selectedVersionId, detailItem.id)).find(function (item) {
-            return item.id === detailItem.id;
-          });
-        detailItem.quantity = updated.quantity;
-        return updated.quantity;
-      },
-      onDecrement: async function () {
-        var updated = isViewingLatestVersion
-          ? await window.KaPRecipesService.decrementRecipeItemQuantity(recipeRecord.id, detailItem.id)
-          : (await window.KaPRecipesService.decrementVersionItemQuantity(recipeRecord.id, selectedVersionId, detailItem.id)).find(function (item) {
-            return item.id === detailItem.id;
-          });
-        detailItem.quantity = updated.quantity;
-        return updated.quantity;
-      },
       onEdit: async function () {
         if (isViewingLatestVersion) {
           await editRecipeItemWithPrompt(recipeRecord, detailItem);
@@ -509,8 +509,16 @@
             initialCategoryId: detailItem.categoryId,
             initialCategoryName: detailItem.categoryName,
             initialDescription: detailItem.description,
-            showQuantityField: false,
+            initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
+            initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
+            showQuantityField: true,
             showCategoryField: true,
+            getUnitOfMeasures: function () {
+              return window.KaPRecipesService.getAllUnitOfMeasures();
+            },
+            createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+              return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+            },
             getAllCategories: function () {
               return window.KaPCategoriesService.getAllCategories();
             },
@@ -535,8 +543,9 @@
               selectedVersionId,
               detailItem.id,
               result.name,
-              detailItem.quantity,
-              result.description
+              result.quantity,
+              result.description,
+              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
             );
           }
         }
@@ -1561,6 +1570,20 @@
     var detailItems = isViewingLatestVersion
       ? await window.KaPRecipesService.getRecipeItems(record.id)
       : await window.KaPRecipesService.getVersionItems(record.id, activeVersion.id);
+
+    // Pre-resolve UOM abbreviations so rows can render without async per-row lookups
+    var allUomUnits = [];
+    try {
+      allUomUnits = await window.KaPRecipesService.getAllUnitOfMeasures();
+    } catch (_e) {}
+    var uomById = {};
+    for (var u = 0; u < allUomUnits.length; u++) {
+      uomById[allUomUnits[u].id] = allUomUnits[u];
+    }
+    detailItems.forEach(function (item) {
+      var uom = item.unitOfMeasureId ? uomById[item.unitOfMeasureId] : null;
+      item.uomAbbreviation = uom ? (uom.abbreviation || uom.name || null) : null;
+    });
     var instructions = isViewingLatestVersion
       ? await window.KaPRecipesService.getRecipeInstructions(record.id)
       : await window.KaPRecipesService.getVersionInstructions(record.id, activeVersion.id);
@@ -1616,7 +1639,7 @@
                   targetListId,
                   ingredient.itemId,
                   ingredient.name,
-                  ingredient.quantity,
+                  ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity,
                   ingredient.description
                 );
               }));

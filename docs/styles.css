@@ -474,6 +474,7 @@ body {
   align-items: center;
   justify-content: center;
   min-width: 1.75rem;
+  max-width: 6rem;
   padding: 2px 0.5rem;
   border-radius: 999px;
   border: 1px solid var(--color-border);
@@ -483,6 +484,9 @@ body {
   font-weight: 600;
   line-height: 1.2;
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-header {
@@ -994,6 +998,15 @@ body {
 .modal-checklist-name {
   font-size: 0.95rem;
   color: var(--color-text);
+  flex: 1;
+}
+
+.modal-checklist-qty {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .modal-toggle-group {
@@ -1224,6 +1237,124 @@ body {
   display: grid;
   gap: 0.625rem;
   padding: 0.25rem 1.25rem 1.25rem 1.25rem;
+}
+
+.settings-uom-section {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.625rem;
+  overflow: hidden;
+  margin-top: 0.375rem;
+}
+
+.settings-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.625rem 0.875rem;
+  background: var(--color-surface);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-uom-add-button {
+  font-size: 0.85rem;
+  color: var(--color-brand);
+  background: transparent;
+  border: none;
+  padding: 0.125rem 0.25rem;
+  cursor: pointer;
+}
+
+.settings-uom-add-button:hover {
+  color: var(--color-brand-strong);
+}
+
+.settings-uom-group-header {
+  padding: 0.375rem 0.875rem 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-uom-group-header:first-of-type {
+  border-top: none;
+}
+
+.settings-uom-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.875rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-uom-name-block {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.settings-uom-name {
+  font-size: 0.93rem;
+  color: var(--color-text);
+}
+
+.settings-uom-abbr {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
+.settings-uom-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.settings-uom-behavior {
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+
+.settings-uom-inactive-tag {
+  font-size: 0.72rem;
+  padding: 1px 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted);
+}
+
+.settings-uom-edit-button {
+  font-size: 0.82rem;
+  color: var(--color-brand);
+  background: transparent;
+  border: none;
+  padding: 0.125rem 0.25rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.settings-uom-edit-button:hover {
+  color: var(--color-brand-strong);
+}
+
+.settings-uom-empty {
+  padding: 0.75rem 0.875rem;
+  color: var(--color-muted);
+  font-size: 0.88rem;
+  margin: 0;
 }
 
 .settings-row {
@@ -1481,6 +1612,53 @@ body {
   font-size: 0.95rem;
   font-family: inherit;
   padding: 0.5625rem 0.75rem;
+}
+
+.modal-quantity-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.modal-quantity-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-uom-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  padding: 0.5rem 0.5rem;
+  cursor: pointer;
+}
+
+.modal-uom-select:focus {
+  outline: none;
+  border-color: var(--color-brand);
+}
+
+.modal-uom-select::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-uom-select::-webkit-scrollbar-track {
+  background: var(--color-surface);
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.modal-uom-select::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+.modal-uom-select::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
 }
 
 .modal-input:focus {

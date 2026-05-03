@@ -163,7 +163,7 @@ Seed behavior examples:
 ---
 
 ## Migration Plan
-1. Bump IndexedDB schema version (currently 5 → 6).
+1. Bump IndexedDB schema version (currently 6 → 7).
 2. Create `unitOfMeasures` object store with indexes in `stores.js`.
 3. Seed grouped units idempotently in the `upgrade` handler in `stores.js`.
 4. Preserve existing recipe data — no destructive migration of ingredient records.
@@ -213,11 +213,11 @@ Seed behavior examples:
 ---
 
 ## Open Questions
-1. Should the edit ingredient flow expose quantity + UOM, or add-flow only for the initial slice?
-2. Should the UOM selector in the modal be a simple flat dropdown or grouped (with group headers)?
-3. How should "no unit" be represented — empty selection, a sentinel "None" option, or omit the field?
-4. For `whole_or_half` units, should users be blocked from off-step values or allowed with a warning?
-5. For `user_defined` units, should default behavior be decimal with optional step override, or step-only entry?
+1. ~~Should the edit ingredient flow expose quantity + UOM, or add-flow only for the initial slice?~~ — Resolved: edit flow exposes both quantity and UOM for all ingredient edit paths.
+2. ~~Should the UOM selector in the modal be a simple flat dropdown or grouped (with group headers)?~~ — Resolved: grouped `<select>` with `<optgroup>` per group.
+3. ~~How should "no unit" be represented?~~ — Resolved: blank leading option labelled "Unit".
+4. ~~For `whole_or_half` units, should users be blocked from off-step values or allowed with a warning?~~ — Resolved: off-step values are allowed silently; step enforcement removed for MVP.
+5. ~~For `user_defined` units, should default behavior be decimal with optional step override, or step-only entry?~~ — Resolved: `quantityBehavior` dropdown (decimal / whole or half / custom step) with optional step field shown only for custom step behavior.
 
 ---
 

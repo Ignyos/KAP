@@ -1,6 +1,6 @@
 (function () {
   var DATABASE_NAME = 'ignyos.kap';
-  var DATABASE_VERSION = 6;
+  var DATABASE_VERSION = 7;
 
   var state = {
     db: null
