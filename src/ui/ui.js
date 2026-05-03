@@ -2066,7 +2066,7 @@
   }
 
   function ShowNewVersionModal(config) {
-    // config: { availableVersions, defaultVersionNumber, latestVersionNumber }
+    // config: { availableVersions, defaultBaseVersionId, defaultVersionName }
     return new Promise(function (resolve) {
       var node = newFromTemplate('modal-template');
       var overlay = node;
@@ -2094,21 +2094,43 @@
       baseSelect.className = 'modal-input';
 
       var versions = (config.availableVersions || []).slice().sort(function (a, b) {
-        return Number(b.versionNumber || 0) - Number(a.versionNumber || 0);
+        var dateA = new Date(String(a && a.createdDate) || '0');
+        var dateB = new Date(String(b && b.createdDate) || '0');
+        return dateB.getTime() - dateA.getTime();
       });
       versions.forEach(function (version) {
         var option = document.createElement('option');
-        option.value = String(version.versionNumber);
-        var label = 'Version ' + version.versionNumber;
-        if (version.versionNumber === config.latestVersionNumber) {
-          label;
-        }
+        option.value = String(version.id || '');
+        var label = String(version.versionName || 'Unnamed version');
         option.textContent = label;
-        option.selected = version.versionNumber === config.defaultVersionNumber;
+        option.selected = String(version.id || '') === String(config.defaultBaseVersionId || '');
         baseSelect.appendChild(option);
       });
-
       form.appendChild(baseSelect);
+
+      var nameLabel = document.createElement('label');
+      nameLabel.className = 'modal-field-label';
+      nameLabel.textContent = 'Version name';
+      form.appendChild(nameLabel);
+
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'modal-input';
+      nameInput.placeholder = 'Version name (e.g., 2026-05-03 14:30)';
+      nameInput.value = String(config.defaultVersionName || '').trim();
+      form.appendChild(nameInput);
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      errorNode.style.display = 'none';
+      form.appendChild(errorNode);
+
+      nameInput.addEventListener('input', function () {
+        if (errorNode.style.display !== 'none') {
+          errorNode.style.display = 'none';
+        }
+      });
+
       bodyNode.appendChild(form);
 
       function close(result) {
@@ -2134,14 +2156,27 @@
       });
 
       confirmButton.addEventListener('click', function () {
-        close({ baseVersionNumber: Number(baseSelect.value) });
+        var versionName = String(nameInput.value || '').trim();
+        if (!versionName) {
+          errorNode.textContent = 'Version name is required.';
+          errorNode.style.display = 'block';
+          nameInput.focus();
+          return;
+        }
+
+        close({
+          baseVersionId: String(baseSelect.value || ''),
+          versionName: versionName,
+          versionNote: ''
+        });
       });
 
       document.addEventListener('keydown', onKeyDown);
       document.body.appendChild(node);
 
       requestAnimationFrame(function () {
-        baseSelect.focus();
+        nameInput.focus();
+        nameInput.setSelectionRange(nameInput.value.length, nameInput.value.length);
       });
     });
   }
