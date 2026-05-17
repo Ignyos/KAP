@@ -9,7 +9,8 @@
     MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
     CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord',
     TEXT_SIZE: 'textSize',
-    THEME: 'theme'
+    THEME: 'theme',
+    UOM_GROUP_ORDER: 'uomGroupOrder'
   };
 
   var defaults = {
@@ -27,7 +28,8 @@
       templates: {}
     },
     textSize: 'small',
-    theme: 'dark'
+    theme: 'dark',
+    uomGroupOrder: []
   };
 
   function getKey(name) {

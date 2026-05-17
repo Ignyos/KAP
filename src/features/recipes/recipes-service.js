@@ -1343,10 +1343,6 @@
       throw new Error('Unit of measure not found.');
     }
 
-    if (unit.isSeeded) {
-      throw new Error('Seeded units cannot be edited.');
-    }
-
     var nextName = updates && updates.name !== undefined ? String(updates.name || '').trim() : String(unit.name || '').trim();
     if (!nextName) {
       throw new Error('Unit name is required.');
@@ -1389,6 +1385,35 @@
     return unit;
   }
 
+  async function deleteUnitOfMeasure(unitId) {
+    var unit = await getUnitOfMeasureById(unitId);
+    if (!unit) {
+      throw new Error('Unit of measure not found.');
+    }
+    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit.id);
+  }
+
+  async function renameGroup(oldGroupName, newGroupName) {
+    var safeOld = String(oldGroupName || '').trim();
+    var safeNew = String(newGroupName || '').trim() || 'Other';
+    if (!safeOld || safeOld === safeNew) {
+      return;
+    }
+
+    var units = await getAllUnitOfMeasures({ includeInactive: true });
+    var toUpdate = units.filter(function (u) {
+      return String(u && u.group || '').trim() === safeOld;
+    });
+
+    var timestamp = nowIso();
+    for (var i = 0; i < toUpdate.length; i++) {
+      var unit = toUpdate[i];
+      unit.group = safeNew;
+      unit.updatedDate = timestamp;
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
+    }
+  }
+
   window.KaPRecipesService = {
     getAllRecipes: getAllRecipes,
     getRecipeTags: getRecipeTags,
@@ -1396,6 +1421,8 @@
     getAllUnitOfMeasures: getAllUnitOfMeasures,
     createUnitOfMeasure: createUnitOfMeasure,
     updateUnitOfMeasure: updateUnitOfMeasure,
+    deleteUnitOfMeasure: deleteUnitOfMeasure,
+    renameGroup: renameGroup,
     addTagToRecipe: addTagToRecipe,
     removeTagFromRecipe: removeTagFromRecipe,
     createRecipe: createRecipe,

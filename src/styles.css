@@ -612,6 +612,11 @@ body {
   color: #e74c3c;
 }
 
+.detail-overflow-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .detail-overflow-qty-row {
   display: flex;
   align-items: center;
@@ -1237,6 +1242,123 @@ body {
   display: grid;
   gap: 0.625rem;
   padding: 0.25rem 1.25rem 1.25rem 1.25rem;
+}
+
+/* ── Units of Measure Page ─────────────────────────────────── */
+
+.uom-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.uom-body {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+  padding: 0.75rem 0 1.5rem;
+}
+
+.uom-empty {
+  padding: 1rem 0;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+}
+
+.uom-group-section {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 0.625rem;
+}
+
+.uom-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: 0.625rem 0.625rem 0 0;
+  padding: 0.5rem 0.875rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.uom-group-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.uom-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.uom-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.uom-group-empty-row {
+  padding: 0.5rem 0.875rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.uom-row-name-block {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.uom-row-name {
+  font-size: 0.93rem;
+  color: var(--color-text);
+}
+
+.uom-row-abbr {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
+.uom-row-meta {
+  flex-shrink: 0;
+}
+
+.uom-row-behavior {
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+
+.uom-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.uom-add-button {
+  font-size: 0.85rem;
+  color: var(--color-brand);
+  background: transparent;
+  border: none;
+  padding: 0.125rem 0.25rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.uom-add-button:hover {
+  color: var(--color-brand-strong);
 }
 
 .settings-uom-section {
@@ -2205,10 +2327,5 @@ body {
   .recipe-filter-wrap {
     flex-wrap: wrap;
     padding-top: 0.625rem;
-  }
-
-  .recipe-tags-dropdown {
-    left: auto;
-    right: 0;
   }
 }

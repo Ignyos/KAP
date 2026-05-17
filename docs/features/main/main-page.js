@@ -124,7 +124,7 @@
 
     currentRoute = route;
 
-    if (route.view !== 'settings') {
+    if (route.view !== 'settings' && route.view !== 'uom') {
       state.settingsReturnPath = getPathForRoute(route);
     }
     
@@ -137,6 +137,10 @@
     } else if (route.view === 'settings') {
       renderSettingsPage().catch(function (error) {
         console.error('Error rendering settings:', error);
+      });
+    } else if (route.view === 'uom') {
+      renderUomPage().catch(function (error) {
+        console.error('Error rendering uom:', error);
       });
     } else if (route.view === 'list' && route.id) {
       renderListDetail(route.id).catch(function (error) {
@@ -535,12 +539,33 @@
     });
   }
 
+  async function renderUomPage() {
+    var contentContainer = document.getElementById('main-content');
+    if (!contentContainer) {
+      return;
+    }
+
+    await window.KaPUomPage.renderInto(contentContainer, {
+      onBack: function () {
+        window.KaPRouter.navigate(state.settingsReturnPath || '/');
+      }
+    });
+  }
+
   function openSettings() {
     if (currentRoute && currentRoute.view !== 'settings') {
       state.settingsReturnPath = getPathForRoute(currentRoute);
     }
 
     window.KaPRouter.navigate('/settings');
+  }
+
+  function openUom() {
+    if (currentRoute && currentRoute.view !== 'uom' && currentRoute.view !== 'settings') {
+      state.settingsReturnPath = getPathForRoute(currentRoute);
+    }
+
+    window.KaPRouter.navigate('/uom');
   }
 
   function isRunningStandalone() {
@@ -689,6 +714,7 @@
     var menuInstallButton = document.getElementById('menu-install-button');
     var menuAboutButton = document.getElementById('menu-about-button');
     var menuSettingsButton = document.getElementById('menu-settings-button');
+    var menuUomButton = document.getElementById('menu-uom-button');
 
     installMenuButtonRef = menuInstallButton;
     updateInstallMenuButton();
@@ -757,6 +783,14 @@
         e.stopPropagation();
         closeMenu();
         openSettings();
+      });
+    }
+
+    if (menuUomButton) {
+      menuUomButton.addEventListener('click', function (e) {
+        e.stopPropagation();
+        closeMenu();
+        openUom();
       });
     }
 

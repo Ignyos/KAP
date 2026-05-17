@@ -54,6 +54,11 @@
       return { view: 'settings', id: null };
     }
 
+    // /uom
+    if (hash === '/uom') {
+      return { view: 'uom', id: null };
+    }
+
     // Default to home for unknown routes
     return { view: 'home', id: null };
   }

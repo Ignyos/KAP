@@ -652,7 +652,10 @@
       form.appendChild(groupLabel);
       var groupSelect = document.createElement('select');
       groupSelect.className = 'modal-input';
-      ['Imperial', 'Metric', 'Unit', 'Size', 'Other'].forEach(function (g) {
+      var createGroups = (options.groups && options.groups.length > 0)
+        ? options.groups
+        : ['Imperial', 'Metric', 'Unit', 'Size', 'Other'];
+      createGroups.forEach(function (g) {
         var opt = document.createElement('option');
         opt.value = g;
         opt.textContent = g;
@@ -2054,7 +2057,28 @@
       abbrInput.value = unit.abbreviation || '';
       form.appendChild(abbrInput);
 
-      // Quantity behavior
+      // Group
+      var editGroupLabel = document.createElement('label');
+      editGroupLabel.className = 'modal-field-label';
+      editGroupLabel.textContent = 'Group';
+      form.appendChild(editGroupLabel);
+      var editGroupSelect = document.createElement('select');
+      editGroupSelect.className = 'modal-input';
+      var editGroups = (options.groups && options.groups.length > 0)
+        ? options.groups
+        : ['Imperial', 'Metric', 'Unit', 'Size', 'Other'];
+      var currentGroupInList = editGroups.indexOf(unit.group || '') >= 0;
+      if (!currentGroupInList && unit.group) {
+        editGroups = [unit.group].concat(editGroups);
+      }
+      editGroups.forEach(function (g) {
+        var opt = document.createElement('option');
+        opt.value = g;
+        opt.textContent = g;
+        editGroupSelect.appendChild(opt);
+      });
+      editGroupSelect.value = unit.group || editGroups[0] || '';
+      form.appendChild(editGroupSelect);
       var behaviorLabel = document.createElement('label');
       behaviorLabel.className = 'modal-field-label';
       behaviorLabel.textContent = 'Quantity behavior';
@@ -2130,6 +2154,7 @@
           var updated = await options.updateUnitOfMeasure(unit.id, {
             name: name,
             abbreviation: abbr,
+            group: editGroupSelect.value,
             quantityBehavior: behavior,
             quantityStep: step
           });
