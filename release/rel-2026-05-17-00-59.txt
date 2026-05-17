@@ -1,0 +1,1947 @@
+Release timestamp: 2026-05-17-00-59
+Diff source: 2026-05-03-20-40..HEAD
+Generated at: 2026-05-16 20:59:17Z
+diff --git a/docs/app-router.js b/docs/app-router.js
+index 625a88c..36ab438 100644
+--- a/docs/app-router.js
++++ b/docs/app-router.js
+@@ -54,6 +54,11 @@
+       return { view: 'settings', id: null };
+     }
+ 
++    // /uom
++    if (hash === '/uom') {
++      return { view: 'uom', id: null };
++    }
++
+     // Default to home for unknown routes
+     return { view: 'home', id: null };
+   }
+diff --git a/docs/features/main/main-page.js b/docs/features/main/main-page.js
+index 97947d5..4931765 100644
+--- a/docs/features/main/main-page.js
++++ b/docs/features/main/main-page.js
+@@ -124,7 +124,7 @@
+ 
+     currentRoute = route;
+ 
+-    if (route.view !== 'settings') {
++    if (route.view !== 'settings' && route.view !== 'uom') {
+       state.settingsReturnPath = getPathForRoute(route);
+     }
+     
+@@ -138,6 +138,10 @@
+       renderSettingsPage().catch(function (error) {
+         console.error('Error rendering settings:', error);
+       });
++    } else if (route.view === 'uom') {
++      renderUomPage().catch(function (error) {
++        console.error('Error rendering uom:', error);
++      });
+     } else if (route.view === 'list' && route.id) {
+       renderListDetail(route.id).catch(function (error) {
+         console.error('Error rendering list detail:', error);
+@@ -535,6 +539,19 @@
+     });
+   }
+ 
++  async function renderUomPage() {
++    var contentContainer = document.getElementById('main-content');
++    if (!contentContainer) {
++      return;
++    }
++
++    await window.KaPUomPage.renderInto(contentContainer, {
++      onBack: function () {
++        window.KaPRouter.navigate(state.settingsReturnPath || '/');
++      }
++    });
++  }
++
+   function openSettings() {
+     if (currentRoute && currentRoute.view !== 'settings') {
+       state.settingsReturnPath = getPathForRoute(currentRoute);
+@@ -543,6 +560,14 @@
+     window.KaPRouter.navigate('/settings');
+   }
+ 
++  function openUom() {
++    if (currentRoute && currentRoute.view !== 'uom' && currentRoute.view !== 'settings') {
++      state.settingsReturnPath = getPathForRoute(currentRoute);
++    }
++
++    window.KaPRouter.navigate('/uom');
++  }
++
+   function isRunningStandalone() {
+     var isIosStandalone = window.navigator && window.navigator.standalone === true;
+     var isDisplayModeStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+@@ -689,6 +714,7 @@
+     var menuInstallButton = document.getElementById('menu-install-button');
+     var menuAboutButton = document.getElementById('menu-about-button');
+     var menuSettingsButton = document.getElementById('menu-settings-button');
++    var menuUomButton = document.getElementById('menu-uom-button');
+ 
+     installMenuButtonRef = menuInstallButton;
+     updateInstallMenuButton();
+@@ -760,6 +786,14 @@
+       });
+     }
+ 
++    if (menuUomButton) {
++      menuUomButton.addEventListener('click', function (e) {
++        e.stopPropagation();
++        closeMenu();
++        openUom();
++      });
++    }
++
+     document.addEventListener('click', function (e) {
+       if (menuContainer && !menuContainer.contains(e.target)) {
+         closeMenu();
+diff --git a/docs/features/recipes/recipes-service.js b/docs/features/recipes/recipes-service.js
+index c96fd87..3cc2209 100644
+--- a/docs/features/recipes/recipes-service.js
++++ b/docs/features/recipes/recipes-service.js
+@@ -1343,10 +1343,6 @@
+       throw new Error('Unit of measure not found.');
+     }
+ 
+-    if (unit.isSeeded) {
+-      throw new Error('Seeded units cannot be edited.');
+-    }
+-
+     var nextName = updates && updates.name !== undefined ? String(updates.name || '').trim() : String(unit.name || '').trim();
+     if (!nextName) {
+       throw new Error('Unit name is required.');
+@@ -1389,6 +1385,35 @@
+     return unit;
+   }
+ 
++  async function deleteUnitOfMeasure(unitId) {
++    var unit = await getUnitOfMeasureById(unitId);
++    if (!unit) {
++      throw new Error('Unit of measure not found.');
++    }
++    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit.id);
++  }
++
++  async function renameGroup(oldGroupName, newGroupName) {
++    var safeOld = String(oldGroupName || '').trim();
++    var safeNew = String(newGroupName || '').trim() || 'Other';
++    if (!safeOld || safeOld === safeNew) {
++      return;
++    }
++
++    var units = await getAllUnitOfMeasures({ includeInactive: true });
++    var toUpdate = units.filter(function (u) {
++      return String(u && u.group || '').trim() === safeOld;
++    });
++
++    var timestamp = nowIso();
++    for (var i = 0; i < toUpdate.length; i++) {
++      var unit = toUpdate[i];
++      unit.group = safeNew;
++      unit.updatedDate = timestamp;
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
++    }
++  }
++
+   window.KaPRecipesService = {
+     getAllRecipes: getAllRecipes,
+     getRecipeTags: getRecipeTags,
+@@ -1396,6 +1421,8 @@
+     getAllUnitOfMeasures: getAllUnitOfMeasures,
+     createUnitOfMeasure: createUnitOfMeasure,
+     updateUnitOfMeasure: updateUnitOfMeasure,
++    deleteUnitOfMeasure: deleteUnitOfMeasure,
++    renameGroup: renameGroup,
+     addTagToRecipe: addTagToRecipe,
+     removeTagFromRecipe: removeTagFromRecipe,
+     createRecipe: createRecipe,
+diff --git a/docs/features/settings/settings-page.js b/docs/features/settings/settings-page.js
+index ccdd2fc..3a40d5d 100644
+--- a/docs/features/settings/settings-page.js
++++ b/docs/features/settings/settings-page.js
+@@ -46,132 +46,11 @@
+     body.appendChild(buildThemeRow());
+     body.appendChild(buildTextSizeRow());
+ 
+-    var uomSection = document.createElement('div');
+-    uomSection.className = 'settings-uom-section';
+-    await renderUomSectionInto(uomSection);
+-    body.appendChild(uomSection);
+-
+     section.appendChild(body);
+ 
+     container.replaceChildren(section);
+   }
+ 
+-  async function renderUomSectionInto(container) {
+-    container.replaceChildren();
+-
+-    var heading = document.createElement('div');
+-    heading.className = 'settings-section-heading';
+-
+-    var headingText = document.createElement('span');
+-    headingText.textContent = 'Units of Measure';
+-    heading.appendChild(headingText);
+-
+-    var addButton = document.createElement('button');
+-    addButton.type = 'button';
+-    addButton.className = 'record-action-button settings-uom-add-button';
+-    addButton.textContent = '+ Add Unit';
+-    addButton.addEventListener('click', async function () {
+-      var created = await window.KaPUI.ShowCreateUnitModal({
+-        createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+-          return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-        }
+-      });
+-      if (created) {
+-        await renderUomSectionInto(container);
+-      }
+-    });
+-    heading.appendChild(addButton);
+-    container.appendChild(heading);
+-
+-    var units = [];
+-    try {
+-      units = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
+-    } catch (_e) {}
+-
+-    if (units.length === 0) {
+-      var empty = document.createElement('p');
+-      empty.className = 'settings-uom-empty';
+-      empty.textContent = 'No units found.';
+-      container.appendChild(empty);
+-      return;
+-    }
+-
+-    var currentGroup = null;
+-    units.forEach(function (unit) {
+-      if (unit.group !== currentGroup) {
+-        currentGroup = unit.group;
+-        var groupHeader = document.createElement('div');
+-        groupHeader.className = 'settings-uom-group-header';
+-        groupHeader.textContent = unit.group;
+-        container.appendChild(groupHeader);
+-      }
+-
+-      var row = document.createElement('div');
+-      row.className = 'settings-uom-row';
+-
+-      var nameBlock = document.createElement('div');
+-      nameBlock.className = 'settings-uom-name-block';
+-
+-      var nameSpan = document.createElement('span');
+-      nameSpan.className = 'settings-uom-name';
+-      nameSpan.textContent = unit.name;
+-      nameBlock.appendChild(nameSpan);
+-
+-      if (unit.abbreviation) {
+-        var abbrSpan = document.createElement('span');
+-        abbrSpan.className = 'settings-uom-abbr';
+-        abbrSpan.textContent = unit.abbreviation;
+-        nameBlock.appendChild(abbrSpan);
+-      }
+-
+-      row.appendChild(nameBlock);
+-
+-      var metaBlock = document.createElement('div');
+-      metaBlock.className = 'settings-uom-meta';
+-
+-      var behaviorLabel = { decimal: 'Decimal', whole_or_half: 'Whole / half', user_defined: 'Custom step' };
+-      var behaviorSpan = document.createElement('span');
+-      behaviorSpan.className = 'settings-uom-behavior';
+-      behaviorSpan.textContent = behaviorLabel[unit.quantityBehavior] || unit.quantityBehavior || '';
+-      metaBlock.appendChild(behaviorSpan);
+-
+-      if (!unit.isActive) {
+-        var inactiveTag = document.createElement('span');
+-        inactiveTag.className = 'settings-uom-inactive-tag';
+-        inactiveTag.textContent = 'Inactive';
+-        metaBlock.appendChild(inactiveTag);
+-      }
+-
+-      row.appendChild(metaBlock);
+-
+-      if (!unit.isSeeded) {
+-        var editButton = document.createElement('button');
+-        editButton.type = 'button';
+-        editButton.className = 'record-action-button settings-uom-edit-button';
+-        editButton.textContent = 'Edit';
+-        editButton.addEventListener('click', async function () {
+-          await showEditUnitModal(unit, container);
+-        });
+-        row.appendChild(editButton);
+-      }
+-
+-      container.appendChild(row);
+-    });
+-  }
+-
+-  async function showEditUnitModal(unit, sectionContainer) {
+-    var result = await window.KaPUI.ShowEditUnitModal({
+-      unit: unit,
+-      updateUnitOfMeasure: function (id, updates) {
+-        return window.KaPRecipesService.updateUnitOfMeasure(id, updates);
+-      }
+-    });
+-
+-    if (result) {
+-      await renderUomSectionInto(sectionContainer);
+-    }
+-  }
+-
+   function buildTextSizeRow() {
+     var row = document.createElement('div');
+     row.className = 'settings-row';
+diff --git a/docs/features/uom/uom-page.js b/docs/features/uom/uom-page.js
+new file mode 100644
+index 0000000..80bbd56
+--- /dev/null
++++ b/docs/features/uom/uom-page.js
+@@ -0,0 +1,423 @@
++(function () {
++  var BEHAVIOR_LABELS = { decimal: 'Decimal', whole_or_half: 'Whole / half', user_defined: 'Custom step' };
++
++  function getGroupOrder(units) {
++    var seen = {};
++    var naturalGroups = [];
++    (units || []).forEach(function (u) {
++      var g = String(u && u.group || '').trim();
++      if (g && !seen[g]) {
++        seen[g] = true;
++        naturalGroups.push(g);
++      }
++    });
++
++    var savedOrder = window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || [];
++    var result = [];
++    var inResult = {};
++
++    savedOrder.forEach(function (g) {
++      if (g && !inResult[g]) {
++        result.push(g);
++        inResult[g] = true;
++      }
++    });
++
++    naturalGroups.forEach(function (g) {
++      if (!inResult[g]) {
++        result.push(g);
++        inResult[g] = true;
++      }
++    });
++
++    return result;
++  }
++
++  function saveGroupOrder(groups) {
++    window.KaPSettings.set(window.KaPSettings.KEYS.UOM_GROUP_ORDER, groups);
++  }
++
++  async function renderBodyInto(bodyWrap) {
++    bodyWrap.replaceChildren();
++
++    var units = [];
++    try {
++      units = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++    } catch (_e) {}
++
++    var orderedGroups = getGroupOrder(units);
++
++    if (orderedGroups.length === 0) {
++      var empty = document.createElement('p');
++      empty.className = 'uom-empty';
++      empty.textContent = 'No units found.';
++      bodyWrap.appendChild(empty);
++      return;
++    }
++
++    var unitsByGroup = {};
++    units.forEach(function (u) {
++      var g = String(u && u.group || '').trim() || 'Other';
++      if (!unitsByGroup[g]) { unitsByGroup[g] = []; }
++      unitsByGroup[g].push(u);
++    });
++
++    orderedGroups.forEach(function (groupName, groupIdx) {
++      var groupUnits = unitsByGroup[groupName] || [];
++
++      var groupSection = document.createElement('div');
++      groupSection.className = 'uom-group-section';
++
++      var groupHeader = document.createElement('div');
++      groupHeader.className = 'uom-group-header';
++
++      var groupNameSpan = document.createElement('span');
++      groupNameSpan.className = 'uom-group-name';
++      groupNameSpan.textContent = groupName;
++      groupHeader.appendChild(groupNameSpan);
++
++      var groupMenuWrap = document.createElement('div');
++      groupMenuWrap.className = 'detail-overflow-menu';
++
++      var groupMenuTrigger = document.createElement('button');
++      groupMenuTrigger.type = 'button';
++      groupMenuTrigger.className = 'record-action-button detail-overflow-trigger';
++      groupMenuTrigger.setAttribute('aria-haspopup', 'menu');
++      groupMenuTrigger.setAttribute('aria-expanded', 'false');
++      groupMenuTrigger.setAttribute('aria-label', 'Group actions');
++
++      var groupMenuDots = document.createElement('span');
++      groupMenuDots.className = 'detail-overflow-dots';
++      groupMenuDots.textContent = '\u2026';
++      groupMenuTrigger.appendChild(groupMenuDots);
++
++      var groupMenuList = document.createElement('div');
++      groupMenuList.className = 'detail-overflow-list';
++      groupMenuList.setAttribute('role', 'menu');
++
++      (function (gName, gIdx, gCount, gUnits, mTrigger, mList, mWrap) {
++        function setMenuOpen(isOpen) {
++          mList.style.display = isOpen ? 'grid' : 'none';
++          mTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
++          window.KaPUI.SetActiveOverflowMenu(mWrap, setMenuOpen, isOpen);
++          if (isOpen) {
++            mList.classList.remove('detail-overflow-list--up');
++            if (window.KaPUI.ShouldOpenOverflowUp(mTrigger, mList)) {
++              mList.classList.add('detail-overflow-list--up');
++            }
++          }
++        }
++
++        setMenuOpen(false);
++
++        var groupMenuActions = [
++          {
++            label: 'Move Up',
++            isDisabled: gIdx === 0,
++            onClick: function () {
++              var current = getGroupOrder(units);
++              var idx = current.indexOf(gName);
++              if (idx > 0) {
++                current.splice(idx, 1);
++                current.splice(idx - 1, 0, gName);
++                saveGroupOrder(current);
++                renderBodyInto(bodyWrap);
++              }
++            }
++          },
++          {
++            label: 'Move Down',
++            isDisabled: gIdx === gCount - 1,
++            onClick: function () {
++              var current = getGroupOrder(units);
++              var idx = current.indexOf(gName);
++              if (idx >= 0 && idx < current.length - 1) {
++                current.splice(idx, 1);
++                current.splice(idx + 1, 0, gName);
++                saveGroupOrder(current);
++                renderBodyInto(bodyWrap);
++              }
++            }
++          },
++          {
++            label: 'Rename',
++            onClick: async function () {
++              var newName = await window.KaPUI.ShowPrompt({
++                title: 'Rename Group',
++                value: gName,
++                confirmLabel: 'Rename'
++              });
++              if (!newName) { return; }
++              var trimmed = String(newName).trim();
++              if (!trimmed || trimmed === gName) { return; }
++              await window.KaPRecipesService.renameGroup(gName, trimmed);
++              var savedOrder = (window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || []).map(function (g) {
++                return g === gName ? trimmed : g;
++              });
++              saveGroupOrder(savedOrder);
++              await renderBodyInto(bodyWrap);
++            }
++          },
++          {
++            label: 'Remove',
++            isDanger: gUnits.length === 0,
++            isDisabled: gUnits.length > 0,
++            onClick: async function () {
++              var savedOrder = (window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || []).filter(function (g) {
++                return g !== gName;
++              });
++              saveGroupOrder(savedOrder);
++              await renderBodyInto(bodyWrap);
++            }
++          }
++        ];
++
++        groupMenuActions.forEach(function (action) {
++          var item = document.createElement('button');
++          item.type = 'button';
++          item.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
++          item.textContent = action.label;
++          item.setAttribute('role', 'menuitem');
++          if (action.isDisabled) {
++            item.disabled = true;
++          } else {
++            item.addEventListener('click', function () {
++              setMenuOpen(false);
++              action.onClick();
++            });
++          }
++          mList.appendChild(item);
++        });
++
++        mTrigger.addEventListener('click', function (event) {
++          event.stopPropagation();
++          var isOpen = mList.style.display !== 'none';
++          setMenuOpen(!isOpen);
++        });
++      })(groupName, groupIdx, orderedGroups.length, groupUnits, groupMenuTrigger, groupMenuList, groupMenuWrap);
++
++      groupMenuWrap.appendChild(groupMenuTrigger);
++      groupMenuWrap.appendChild(groupMenuList);
++      groupHeader.appendChild(groupMenuWrap);
++      groupSection.appendChild(groupHeader);
++
++      groupUnits.forEach(function (unit) {
++        var row = document.createElement('div');
++        row.className = 'uom-row';
++
++        var nameBlock = document.createElement('div');
++        nameBlock.className = 'uom-row-name-block';
++
++        var nameSpan = document.createElement('span');
++        nameSpan.className = 'uom-row-name';
++        nameSpan.textContent = unit.name;
++        nameBlock.appendChild(nameSpan);
++
++        if (unit.abbreviation) {
++          var abbrSpan = document.createElement('span');
++          abbrSpan.className = 'uom-row-abbr';
++          abbrSpan.textContent = unit.abbreviation;
++          nameBlock.appendChild(abbrSpan);
++        }
++
++        row.appendChild(nameBlock);
++
++        var metaBlock = document.createElement('div');
++        metaBlock.className = 'uom-row-meta';
++
++        var behaviorSpan = document.createElement('span');
++        behaviorSpan.className = 'uom-row-behavior';
++        behaviorSpan.textContent = BEHAVIOR_LABELS[unit.quantityBehavior] || unit.quantityBehavior || '';
++        metaBlock.appendChild(behaviorSpan);
++
++        row.appendChild(metaBlock);
++
++        var rowActions = document.createElement('div');
++        rowActions.className = 'uom-row-actions';
++
++        var menuWrap = document.createElement('div');
++        menuWrap.className = 'detail-overflow-menu';
++
++        var menuTrigger = document.createElement('button');
++        menuTrigger.type = 'button';
++        menuTrigger.className = 'record-action-button detail-overflow-trigger';
++        menuTrigger.setAttribute('aria-haspopup', 'menu');
++        menuTrigger.setAttribute('aria-expanded', 'false');
++        menuTrigger.setAttribute('aria-label', 'Unit actions');
++
++        var menuDots = document.createElement('span');
++        menuDots.className = 'detail-overflow-dots';
++        menuDots.textContent = '\u2026';
++        menuTrigger.appendChild(menuDots);
++
++        var menuList = document.createElement('div');
++        menuList.className = 'detail-overflow-list';
++        menuList.setAttribute('role', 'menu');
++
++        (function (u, mTrigger, mList, mWrap) {
++          function setMenuOpen(isOpen) {
++            mList.style.display = isOpen ? 'grid' : 'none';
++            mTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
++            window.KaPUI.SetActiveOverflowMenu(mWrap, setMenuOpen, isOpen);
++            if (isOpen) {
++              mList.classList.remove('detail-overflow-list--up');
++              if (window.KaPUI.ShouldOpenOverflowUp(mTrigger, mList)) {
++                mList.classList.add('detail-overflow-list--up');
++              }
++            }
++          }
++
++          setMenuOpen(false);
++
++          var menuActions = [
++            {
++              label: 'Edit',
++              isDanger: false,
++              onClick: async function () {
++                var allUnits = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++                var knownGroups = getGroupOrder(allUnits);
++                var result = await window.KaPUI.ShowEditUnitModal({
++                  unit: u,
++                  groups: knownGroups,
++                  updateUnitOfMeasure: function (id, updates) {
++                    return window.KaPRecipesService.updateUnitOfMeasure(id, updates);
++                  }
++                });
++                if (result) { await renderBodyInto(bodyWrap); }
++              }
++            },
++            {
++              label: 'Remove',
++              isDanger: true,
++              onClick: async function () {
++                var confirmed = await window.KaPUI.ShowConfirm({
++                  title: 'Remove Unit',
++                  message: 'Remove "' + u.name + '"?',
++                  confirmLabel: 'Remove',
++                  isDanger: true
++                });
++                if (!confirmed) { return; }
++                await window.KaPRecipesService.deleteUnitOfMeasure(u.id);
++                await renderBodyInto(bodyWrap);
++              }
++            }
++          ];
++
++          menuActions.forEach(function (action) {
++            var item = document.createElement('button');
++            item.type = 'button';
++            item.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
++            item.textContent = action.label;
++            item.setAttribute('role', 'menuitem');
++            item.addEventListener('click', function () {
++              setMenuOpen(false);
++              action.onClick();
++            });
++            mList.appendChild(item);
++          });
++
++          mTrigger.addEventListener('click', function (event) {
++            event.stopPropagation();
++            var isOpen = mList.style.display !== 'none';
++            setMenuOpen(!isOpen);
++          });
++        })(unit, menuTrigger, menuList, menuWrap);
++
++        menuWrap.appendChild(menuTrigger);
++        menuWrap.appendChild(menuList);
++        rowActions.appendChild(menuWrap);
++
++        row.appendChild(rowActions);
++        groupSection.appendChild(row);
++      });
++
++      if (groupUnits.length === 0) {
++        var groupEmptyRow = document.createElement('div');
++        groupEmptyRow.className = 'uom-group-empty-row';
++        groupEmptyRow.textContent = 'No units of measure in this group.';
++        groupSection.appendChild(groupEmptyRow);
++      }
++
++      bodyWrap.appendChild(groupSection);
++    });
++  }
++
++  async function renderInto(container, hooks) {
++    var section = document.createElement('section');
++    section.className = 'uom-shell';
++
++    var header = document.createElement('div');
++    header.className = 'detail-header uom-header';
++
++    if (hooks && typeof hooks.onBack === 'function') {
++      var backButton = document.createElement('button');
++      backButton.type = 'button';
++      backButton.className = 'detail-back-button';
++      backButton.textContent = '\u2190 Back';
++      backButton.addEventListener('click', hooks.onBack);
++      header.appendChild(backButton);
++    }
++
++    var heading = document.createElement('h2');
++    heading.className = 'detail-title';
++    heading.textContent = 'Units of Measure';
++    header.appendChild(heading);
++
++    var headerActions = document.createElement('div');
++    headerActions.className = 'detail-actions';
++
++    var addButton = document.createElement('button');
++    addButton.type = 'button';
++    addButton.className = 'record-action-button uom-add-button';
++    addButton.textContent = '+ Add Unit';
++    addButton.addEventListener('click', async function () {
++      var allUnits = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++      var knownGroups = getGroupOrder(allUnits);
++      var created = await window.KaPUI.ShowCreateUnitModal({
++        groups: knownGroups,
++        createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++          return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++        }
++      });
++      if (created) {
++        await renderBodyInto(bodyWrap);
++      }
++    });
++    headerActions.appendChild(addButton);
++
++    var addGroupButton = document.createElement('button');
++    addGroupButton.type = 'button';
++    addGroupButton.className = 'record-action-button uom-add-button';
++    addGroupButton.textContent = '+ Add Group';
++    addGroupButton.addEventListener('click', async function () {
++      var newName = await window.KaPUI.ShowPrompt({
++        title: 'New Group',
++        placeholder: 'Group name',
++        confirmLabel: 'Add'
++      });
++      if (!newName) { return; }
++      var trimmed = String(newName).trim();
++      if (!trimmed) { return; }
++      var currentOrder = window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || [];
++      if (currentOrder.some(function (g) { return g.toLowerCase() === trimmed.toLowerCase(); })) { return; }
++      saveGroupOrder(currentOrder.concat([trimmed]));
++      await renderBodyInto(bodyWrap);
++    });
++    headerActions.appendChild(addGroupButton);
++
++    header.appendChild(headerActions);
++
++    section.appendChild(header);
++
++    var bodyWrap = document.createElement('div');
++    bodyWrap.className = 'uom-body';
++    await renderBodyInto(bodyWrap);
++    section.appendChild(bodyWrap);
++
++    container.replaceChildren(section);
++  }
++
++  window.KaPUomPage = {
++    renderInto: renderInto
++  };
++})();
+diff --git a/docs/index.html b/docs/index.html
+index 5f91e23..645f0b6 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -27,6 +27,7 @@
+           <div class="header-menu-list" id="header-menu-list" role="menu" hidden>
+             <button type="button" class="header-menu-item" id="menu-install-button" role="menuitem">Install App</button>
+             <button type="button" class="header-menu-item" id="menu-about-button" role="menuitem">About</button>
++            <button type="button" class="header-menu-item" id="menu-uom-button" role="menuitem">Units of Measure</button>
+             <button type="button" class="header-menu-item" id="menu-settings-button" role="menuitem">Settings</button>
+           </div>
+         </div>
+@@ -125,6 +126,7 @@
+   <script src="./features/templates/templates-page.js?v=2026-05-03-20-40"></script>
+   <script src="./features/recipes/recipes-service.js?v=2026-05-03-20-40"></script>
+   <script src="./features/recipes/recipes-page.js?v=2026-05-03-20-40"></script>
++  <script src="./features/uom/uom-page.js?v=2026-05-03-20-40"></script>
+   <script src="./features/settings/settings-page.js?v=2026-05-03-20-40"></script>
+   <script src="./features/main/main-page.js?v=2026-05-03-20-40"></script>
+   <script src="./app-router.js?v=2026-05-03-20-40"></script>
+diff --git a/docs/shared/settings.js b/docs/shared/settings.js
+index 3b67db1..36ddc2d 100644
+--- a/docs/shared/settings.js
++++ b/docs/shared/settings.js
+@@ -9,7 +9,8 @@
+     MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
+     CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord',
+     TEXT_SIZE: 'textSize',
+-    THEME: 'theme'
++    THEME: 'theme',
++    UOM_GROUP_ORDER: 'uomGroupOrder'
+   };
+ 
+   var defaults = {
+@@ -27,7 +28,8 @@
+       templates: {}
+     },
+     textSize: 'small',
+-    theme: 'dark'
++    theme: 'dark',
++    uomGroupOrder: []
+   };
+ 
+   function getKey(name) {
+diff --git a/docs/styles.css b/docs/styles.css
+index c483415..2c64398 100644
+--- a/docs/styles.css
++++ b/docs/styles.css
+@@ -612,6 +612,11 @@ body {
+   color: #e74c3c;
+ }
+ 
++.detail-overflow-item:disabled {
++  opacity: 0.4;
++  cursor: default;
++}
++
+ .detail-overflow-qty-row {
+   display: flex;
+   align-items: center;
+@@ -1239,6 +1244,123 @@ body {
+   padding: 0.25rem 1.25rem 1.25rem 1.25rem;
+ }
+ 
++/* ΓöÇΓöÇ Units of Measure Page ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
++
++.uom-shell {
++  display: flex;
++  flex-direction: column;
++  min-height: 0;
++}
++
++.uom-body {
++  display: grid;
++  gap: 0.75rem;
++  align-content: start;
++  padding: 0.75rem 0 1.5rem;
++}
++
++.uom-empty {
++  padding: 1rem 0;
++  color: var(--color-muted);
++  font-size: 0.95rem;
++}
++
++.uom-group-section {
++  display: grid;
++  gap: 0;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++}
++
++.uom-group-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.5rem;
++  border-radius: 0.625rem 0.625rem 0 0;
++  padding: 0.5rem 0.875rem;
++  background: var(--color-surface);
++  border-bottom: 1px solid var(--color-border);
++}
++
++.uom-group-name {
++  font-size: 0.88rem;
++  font-weight: 600;
++  color: var(--color-muted);
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++}
++
++.uom-group-actions {
++  display: flex;
++  align-items: center;
++  gap: 0.25rem;
++}
++
++.uom-row {
++  display: flex;
++  align-items: center;
++  gap: 0.5rem;
++  padding: 0.5rem 0.875rem;
++  border-top: 1px solid var(--color-border);
++}
++
++.uom-group-empty-row {
++  padding: 0.5rem 0.875rem;
++  border-top: 1px solid var(--color-border);
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  font-style: italic;
++}
++
++.uom-row-name-block {
++  flex: 1;
++  display: flex;
++  align-items: baseline;
++  gap: 0.375rem;
++  min-width: 0;
++}
++
++.uom-row-name {
++  font-size: 0.93rem;
++  color: var(--color-text);
++}
++
++.uom-row-abbr {
++  font-size: 0.8rem;
++  color: var(--color-muted);
++}
++
++.uom-row-meta {
++  flex-shrink: 0;
++}
++
++.uom-row-behavior {
++  font-size: 0.78rem;
++  color: var(--color-muted);
++}
++
++.uom-row-actions {
++  display: flex;
++  align-items: center;
++  gap: 0.375rem;
++  flex-shrink: 0;
++}
++
++.uom-add-button {
++  font-size: 0.85rem;
++  color: var(--color-brand);
++  background: transparent;
++  border: none;
++  padding: 0.125rem 0.25rem;
++  cursor: pointer;
++  white-space: nowrap;
++}
++
++.uom-add-button:hover {
++  color: var(--color-brand-strong);
++}
++
+ .settings-uom-section {
+   display: grid;
+   gap: 0;
+@@ -2206,9 +2328,4 @@ body {
+     flex-wrap: wrap;
+     padding-top: 0.625rem;
+   }
+-
+-  .recipe-tags-dropdown {
+-    left: auto;
+-    right: 0;
+-  }
+ }
+diff --git a/docs/ui/ui.js b/docs/ui/ui.js
+index 09e767a..c47ec3c 100644
+--- a/docs/ui/ui.js
++++ b/docs/ui/ui.js
+@@ -652,7 +652,10 @@
+       form.appendChild(groupLabel);
+       var groupSelect = document.createElement('select');
+       groupSelect.className = 'modal-input';
+-      ['Imperial', 'Metric', 'Unit', 'Size', 'Other'].forEach(function (g) {
++      var createGroups = (options.groups && options.groups.length > 0)
++        ? options.groups
++        : ['Imperial', 'Metric', 'Unit', 'Size', 'Other'];
++      createGroups.forEach(function (g) {
+         var opt = document.createElement('option');
+         opt.value = g;
+         opt.textContent = g;
+@@ -2054,7 +2057,28 @@
+       abbrInput.value = unit.abbreviation || '';
+       form.appendChild(abbrInput);
+ 
+-      // Quantity behavior
++      // Group
++      var editGroupLabel = document.createElement('label');
++      editGroupLabel.className = 'modal-field-label';
++      editGroupLabel.textContent = 'Group';
++      form.appendChild(editGroupLabel);
++      var editGroupSelect = document.createElement('select');
++      editGroupSelect.className = 'modal-input';
++      var editGroups = (options.groups && options.groups.length > 0)
++        ? options.groups
++        : ['Imperial', 'Metric', 'Unit', 'Size', 'Other'];
++      var currentGroupInList = editGroups.indexOf(unit.group || '') >= 0;
++      if (!currentGroupInList && unit.group) {
++        editGroups = [unit.group].concat(editGroups);
++      }
++      editGroups.forEach(function (g) {
++        var opt = document.createElement('option');
++        opt.value = g;
++        opt.textContent = g;
++        editGroupSelect.appendChild(opt);
++      });
++      editGroupSelect.value = unit.group || editGroups[0] || '';
++      form.appendChild(editGroupSelect);
+       var behaviorLabel = document.createElement('label');
+       behaviorLabel.className = 'modal-field-label';
+       behaviorLabel.textContent = 'Quantity behavior';
+@@ -2130,6 +2154,7 @@
+           var updated = await options.updateUnitOfMeasure(unit.id, {
+             name: name,
+             abbreviation: abbr,
++            group: editGroupSelect.value,
+             quantityBehavior: behavior,
+             quantityStep: step
+           });
+diff --git a/src/app-router.js b/src/app-router.js
+index 625a88c..36ab438 100644
+--- a/src/app-router.js
++++ b/src/app-router.js
+@@ -54,6 +54,11 @@
+       return { view: 'settings', id: null };
+     }
+ 
++    // /uom
++    if (hash === '/uom') {
++      return { view: 'uom', id: null };
++    }
++
+     // Default to home for unknown routes
+     return { view: 'home', id: null };
+   }
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index 97947d5..4931765 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -124,7 +124,7 @@
+ 
+     currentRoute = route;
+ 
+-    if (route.view !== 'settings') {
++    if (route.view !== 'settings' && route.view !== 'uom') {
+       state.settingsReturnPath = getPathForRoute(route);
+     }
+     
+@@ -138,6 +138,10 @@
+       renderSettingsPage().catch(function (error) {
+         console.error('Error rendering settings:', error);
+       });
++    } else if (route.view === 'uom') {
++      renderUomPage().catch(function (error) {
++        console.error('Error rendering uom:', error);
++      });
+     } else if (route.view === 'list' && route.id) {
+       renderListDetail(route.id).catch(function (error) {
+         console.error('Error rendering list detail:', error);
+@@ -535,6 +539,19 @@
+     });
+   }
+ 
++  async function renderUomPage() {
++    var contentContainer = document.getElementById('main-content');
++    if (!contentContainer) {
++      return;
++    }
++
++    await window.KaPUomPage.renderInto(contentContainer, {
++      onBack: function () {
++        window.KaPRouter.navigate(state.settingsReturnPath || '/');
++      }
++    });
++  }
++
+   function openSettings() {
+     if (currentRoute && currentRoute.view !== 'settings') {
+       state.settingsReturnPath = getPathForRoute(currentRoute);
+@@ -543,6 +560,14 @@
+     window.KaPRouter.navigate('/settings');
+   }
+ 
++  function openUom() {
++    if (currentRoute && currentRoute.view !== 'uom' && currentRoute.view !== 'settings') {
++      state.settingsReturnPath = getPathForRoute(currentRoute);
++    }
++
++    window.KaPRouter.navigate('/uom');
++  }
++
+   function isRunningStandalone() {
+     var isIosStandalone = window.navigator && window.navigator.standalone === true;
+     var isDisplayModeStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+@@ -689,6 +714,7 @@
+     var menuInstallButton = document.getElementById('menu-install-button');
+     var menuAboutButton = document.getElementById('menu-about-button');
+     var menuSettingsButton = document.getElementById('menu-settings-button');
++    var menuUomButton = document.getElementById('menu-uom-button');
+ 
+     installMenuButtonRef = menuInstallButton;
+     updateInstallMenuButton();
+@@ -760,6 +786,14 @@
+       });
+     }
+ 
++    if (menuUomButton) {
++      menuUomButton.addEventListener('click', function (e) {
++        e.stopPropagation();
++        closeMenu();
++        openUom();
++      });
++    }
++
+     document.addEventListener('click', function (e) {
+       if (menuContainer && !menuContainer.contains(e.target)) {
+         closeMenu();
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index c96fd87..3cc2209 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -1343,10 +1343,6 @@
+       throw new Error('Unit of measure not found.');
+     }
+ 
+-    if (unit.isSeeded) {
+-      throw new Error('Seeded units cannot be edited.');
+-    }
+-
+     var nextName = updates && updates.name !== undefined ? String(updates.name || '').trim() : String(unit.name || '').trim();
+     if (!nextName) {
+       throw new Error('Unit name is required.');
+@@ -1389,6 +1385,35 @@
+     return unit;
+   }
+ 
++  async function deleteUnitOfMeasure(unitId) {
++    var unit = await getUnitOfMeasureById(unitId);
++    if (!unit) {
++      throw new Error('Unit of measure not found.');
++    }
++    await window.KaPDB.remove(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit.id);
++  }
++
++  async function renameGroup(oldGroupName, newGroupName) {
++    var safeOld = String(oldGroupName || '').trim();
++    var safeNew = String(newGroupName || '').trim() || 'Other';
++    if (!safeOld || safeOld === safeNew) {
++      return;
++    }
++
++    var units = await getAllUnitOfMeasures({ includeInactive: true });
++    var toUpdate = units.filter(function (u) {
++      return String(u && u.group || '').trim() === safeOld;
++    });
++
++    var timestamp = nowIso();
++    for (var i = 0; i < toUpdate.length; i++) {
++      var unit = toUpdate[i];
++      unit.group = safeNew;
++      unit.updatedDate = timestamp;
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES, unit);
++    }
++  }
++
+   window.KaPRecipesService = {
+     getAllRecipes: getAllRecipes,
+     getRecipeTags: getRecipeTags,
+@@ -1396,6 +1421,8 @@
+     getAllUnitOfMeasures: getAllUnitOfMeasures,
+     createUnitOfMeasure: createUnitOfMeasure,
+     updateUnitOfMeasure: updateUnitOfMeasure,
++    deleteUnitOfMeasure: deleteUnitOfMeasure,
++    renameGroup: renameGroup,
+     addTagToRecipe: addTagToRecipe,
+     removeTagFromRecipe: removeTagFromRecipe,
+     createRecipe: createRecipe,
+diff --git a/src/features/settings/settings-page.js b/src/features/settings/settings-page.js
+index ccdd2fc..3a40d5d 100644
+--- a/src/features/settings/settings-page.js
++++ b/src/features/settings/settings-page.js
+@@ -46,132 +46,11 @@
+     body.appendChild(buildThemeRow());
+     body.appendChild(buildTextSizeRow());
+ 
+-    var uomSection = document.createElement('div');
+-    uomSection.className = 'settings-uom-section';
+-    await renderUomSectionInto(uomSection);
+-    body.appendChild(uomSection);
+-
+     section.appendChild(body);
+ 
+     container.replaceChildren(section);
+   }
+ 
+-  async function renderUomSectionInto(container) {
+-    container.replaceChildren();
+-
+-    var heading = document.createElement('div');
+-    heading.className = 'settings-section-heading';
+-
+-    var headingText = document.createElement('span');
+-    headingText.textContent = 'Units of Measure';
+-    heading.appendChild(headingText);
+-
+-    var addButton = document.createElement('button');
+-    addButton.type = 'button';
+-    addButton.className = 'record-action-button settings-uom-add-button';
+-    addButton.textContent = '+ Add Unit';
+-    addButton.addEventListener('click', async function () {
+-      var created = await window.KaPUI.ShowCreateUnitModal({
+-        createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+-          return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-        }
+-      });
+-      if (created) {
+-        await renderUomSectionInto(container);
+-      }
+-    });
+-    heading.appendChild(addButton);
+-    container.appendChild(heading);
+-
+-    var units = [];
+-    try {
+-      units = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
+-    } catch (_e) {}
+-
+-    if (units.length === 0) {
+-      var empty = document.createElement('p');
+-      empty.className = 'settings-uom-empty';
+-      empty.textContent = 'No units found.';
+-      container.appendChild(empty);
+-      return;
+-    }
+-
+-    var currentGroup = null;
+-    units.forEach(function (unit) {
+-      if (unit.group !== currentGroup) {
+-        currentGroup = unit.group;
+-        var groupHeader = document.createElement('div');
+-        groupHeader.className = 'settings-uom-group-header';
+-        groupHeader.textContent = unit.group;
+-        container.appendChild(groupHeader);
+-      }
+-
+-      var row = document.createElement('div');
+-      row.className = 'settings-uom-row';
+-
+-      var nameBlock = document.createElement('div');
+-      nameBlock.className = 'settings-uom-name-block';
+-
+-      var nameSpan = document.createElement('span');
+-      nameSpan.className = 'settings-uom-name';
+-      nameSpan.textContent = unit.name;
+-      nameBlock.appendChild(nameSpan);
+-
+-      if (unit.abbreviation) {
+-        var abbrSpan = document.createElement('span');
+-        abbrSpan.className = 'settings-uom-abbr';
+-        abbrSpan.textContent = unit.abbreviation;
+-        nameBlock.appendChild(abbrSpan);
+-      }
+-
+-      row.appendChild(nameBlock);
+-
+-      var metaBlock = document.createElement('div');
+-      metaBlock.className = 'settings-uom-meta';
+-
+-      var behaviorLabel = { decimal: 'Decimal', whole_or_half: 'Whole / half', user_defined: 'Custom step' };
+-      var behaviorSpan = document.createElement('span');
+-      behaviorSpan.className = 'settings-uom-behavior';
+-      behaviorSpan.textContent = behaviorLabel[unit.quantityBehavior] || unit.quantityBehavior || '';
+-      metaBlock.appendChild(behaviorSpan);
+-
+-      if (!unit.isActive) {
+-        var inactiveTag = document.createElement('span');
+-        inactiveTag.className = 'settings-uom-inactive-tag';
+-        inactiveTag.textContent = 'Inactive';
+-        metaBlock.appendChild(inactiveTag);
+-      }
+-
+-      row.appendChild(metaBlock);
+-
+-      if (!unit.isSeeded) {
+-        var editButton = document.createElement('button');
+-        editButton.type = 'button';
+-        editButton.className = 'record-action-button settings-uom-edit-button';
+-        editButton.textContent = 'Edit';
+-        editButton.addEventListener('click', async function () {
+-          await showEditUnitModal(unit, container);
+-        });
+-        row.appendChild(editButton);
+-      }
+-
+-      container.appendChild(row);
+-    });
+-  }
+-
+-  async function showEditUnitModal(unit, sectionContainer) {
+-    var result = await window.KaPUI.ShowEditUnitModal({
+-      unit: unit,
+-      updateUnitOfMeasure: function (id, updates) {
+-        return window.KaPRecipesService.updateUnitOfMeasure(id, updates);
+-      }
+-    });
+-
+-    if (result) {
+-      await renderUomSectionInto(sectionContainer);
+-    }
+-  }
+-
+   function buildTextSizeRow() {
+     var row = document.createElement('div');
+     row.className = 'settings-row';
+diff --git a/src/features/uom/uom-page.js b/src/features/uom/uom-page.js
+new file mode 100644
+index 0000000..80bbd56
+--- /dev/null
++++ b/src/features/uom/uom-page.js
+@@ -0,0 +1,423 @@
++(function () {
++  var BEHAVIOR_LABELS = { decimal: 'Decimal', whole_or_half: 'Whole / half', user_defined: 'Custom step' };
++
++  function getGroupOrder(units) {
++    var seen = {};
++    var naturalGroups = [];
++    (units || []).forEach(function (u) {
++      var g = String(u && u.group || '').trim();
++      if (g && !seen[g]) {
++        seen[g] = true;
++        naturalGroups.push(g);
++      }
++    });
++
++    var savedOrder = window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || [];
++    var result = [];
++    var inResult = {};
++
++    savedOrder.forEach(function (g) {
++      if (g && !inResult[g]) {
++        result.push(g);
++        inResult[g] = true;
++      }
++    });
++
++    naturalGroups.forEach(function (g) {
++      if (!inResult[g]) {
++        result.push(g);
++        inResult[g] = true;
++      }
++    });
++
++    return result;
++  }
++
++  function saveGroupOrder(groups) {
++    window.KaPSettings.set(window.KaPSettings.KEYS.UOM_GROUP_ORDER, groups);
++  }
++
++  async function renderBodyInto(bodyWrap) {
++    bodyWrap.replaceChildren();
++
++    var units = [];
++    try {
++      units = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++    } catch (_e) {}
++
++    var orderedGroups = getGroupOrder(units);
++
++    if (orderedGroups.length === 0) {
++      var empty = document.createElement('p');
++      empty.className = 'uom-empty';
++      empty.textContent = 'No units found.';
++      bodyWrap.appendChild(empty);
++      return;
++    }
++
++    var unitsByGroup = {};
++    units.forEach(function (u) {
++      var g = String(u && u.group || '').trim() || 'Other';
++      if (!unitsByGroup[g]) { unitsByGroup[g] = []; }
++      unitsByGroup[g].push(u);
++    });
++
++    orderedGroups.forEach(function (groupName, groupIdx) {
++      var groupUnits = unitsByGroup[groupName] || [];
++
++      var groupSection = document.createElement('div');
++      groupSection.className = 'uom-group-section';
++
++      var groupHeader = document.createElement('div');
++      groupHeader.className = 'uom-group-header';
++
++      var groupNameSpan = document.createElement('span');
++      groupNameSpan.className = 'uom-group-name';
++      groupNameSpan.textContent = groupName;
++      groupHeader.appendChild(groupNameSpan);
++
++      var groupMenuWrap = document.createElement('div');
++      groupMenuWrap.className = 'detail-overflow-menu';
++
++      var groupMenuTrigger = document.createElement('button');
++      groupMenuTrigger.type = 'button';
++      groupMenuTrigger.className = 'record-action-button detail-overflow-trigger';
++      groupMenuTrigger.setAttribute('aria-haspopup', 'menu');
++      groupMenuTrigger.setAttribute('aria-expanded', 'false');
++      groupMenuTrigger.setAttribute('aria-label', 'Group actions');
++
++      var groupMenuDots = document.createElement('span');
++      groupMenuDots.className = 'detail-overflow-dots';
++      groupMenuDots.textContent = '\u2026';
++      groupMenuTrigger.appendChild(groupMenuDots);
++
++      var groupMenuList = document.createElement('div');
++      groupMenuList.className = 'detail-overflow-list';
++      groupMenuList.setAttribute('role', 'menu');
++
++      (function (gName, gIdx, gCount, gUnits, mTrigger, mList, mWrap) {
++        function setMenuOpen(isOpen) {
++          mList.style.display = isOpen ? 'grid' : 'none';
++          mTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
++          window.KaPUI.SetActiveOverflowMenu(mWrap, setMenuOpen, isOpen);
++          if (isOpen) {
++            mList.classList.remove('detail-overflow-list--up');
++            if (window.KaPUI.ShouldOpenOverflowUp(mTrigger, mList)) {
++              mList.classList.add('detail-overflow-list--up');
++            }
++          }
++        }
++
++        setMenuOpen(false);
++
++        var groupMenuActions = [
++          {
++            label: 'Move Up',
++            isDisabled: gIdx === 0,
++            onClick: function () {
++              var current = getGroupOrder(units);
++              var idx = current.indexOf(gName);
++              if (idx > 0) {
++                current.splice(idx, 1);
++                current.splice(idx - 1, 0, gName);
++                saveGroupOrder(current);
++                renderBodyInto(bodyWrap);
++              }
++            }
++          },
++          {
++            label: 'Move Down',
++            isDisabled: gIdx === gCount - 1,
++            onClick: function () {
++              var current = getGroupOrder(units);
++              var idx = current.indexOf(gName);
++              if (idx >= 0 && idx < current.length - 1) {
++                current.splice(idx, 1);
++                current.splice(idx + 1, 0, gName);
++                saveGroupOrder(current);
++                renderBodyInto(bodyWrap);
++              }
++            }
++          },
++          {
++            label: 'Rename',
++            onClick: async function () {
++              var newName = await window.KaPUI.ShowPrompt({
++                title: 'Rename Group',
++                value: gName,
++                confirmLabel: 'Rename'
++              });
++              if (!newName) { return; }
++              var trimmed = String(newName).trim();
++              if (!trimmed || trimmed === gName) { return; }
++              await window.KaPRecipesService.renameGroup(gName, trimmed);
++              var savedOrder = (window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || []).map(function (g) {
++                return g === gName ? trimmed : g;
++              });
++              saveGroupOrder(savedOrder);
++              await renderBodyInto(bodyWrap);
++            }
++          },
++          {
++            label: 'Remove',
++            isDanger: gUnits.length === 0,
++            isDisabled: gUnits.length > 0,
++            onClick: async function () {
++              var savedOrder = (window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || []).filter(function (g) {
++                return g !== gName;
++              });
++              saveGroupOrder(savedOrder);
++              await renderBodyInto(bodyWrap);
++            }
++          }
++        ];
++
++        groupMenuActions.forEach(function (action) {
++          var item = document.createElement('button');
++          item.type = 'button';
++          item.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
++          item.textContent = action.label;
++          item.setAttribute('role', 'menuitem');
++          if (action.isDisabled) {
++            item.disabled = true;
++          } else {
++            item.addEventListener('click', function () {
++              setMenuOpen(false);
++              action.onClick();
++            });
++          }
++          mList.appendChild(item);
++        });
++
++        mTrigger.addEventListener('click', function (event) {
++          event.stopPropagation();
++          var isOpen = mList.style.display !== 'none';
++          setMenuOpen(!isOpen);
++        });
++      })(groupName, groupIdx, orderedGroups.length, groupUnits, groupMenuTrigger, groupMenuList, groupMenuWrap);
++
++      groupMenuWrap.appendChild(groupMenuTrigger);
++      groupMenuWrap.appendChild(groupMenuList);
++      groupHeader.appendChild(groupMenuWrap);
++      groupSection.appendChild(groupHeader);
++
++      groupUnits.forEach(function (unit) {
++        var row = document.createElement('div');
++        row.className = 'uom-row';
++
++        var nameBlock = document.createElement('div');
++        nameBlock.className = 'uom-row-name-block';
++
++        var nameSpan = document.createElement('span');
++        nameSpan.className = 'uom-row-name';
++        nameSpan.textContent = unit.name;
++        nameBlock.appendChild(nameSpan);
++
++        if (unit.abbreviation) {
++          var abbrSpan = document.createElement('span');
++          abbrSpan.className = 'uom-row-abbr';
++          abbrSpan.textContent = unit.abbreviation;
++          nameBlock.appendChild(abbrSpan);
++        }
++
++        row.appendChild(nameBlock);
++
++        var metaBlock = document.createElement('div');
++        metaBlock.className = 'uom-row-meta';
++
++        var behaviorSpan = document.createElement('span');
++        behaviorSpan.className = 'uom-row-behavior';
++        behaviorSpan.textContent = BEHAVIOR_LABELS[unit.quantityBehavior] || unit.quantityBehavior || '';
++        metaBlock.appendChild(behaviorSpan);
++
++        row.appendChild(metaBlock);
++
++        var rowActions = document.createElement('div');
++        rowActions.className = 'uom-row-actions';
++
++        var menuWrap = document.createElement('div');
++        menuWrap.className = 'detail-overflow-menu';
++
++        var menuTrigger = document.createElement('button');
++        menuTrigger.type = 'button';
++        menuTrigger.className = 'record-action-button detail-overflow-trigger';
++        menuTrigger.setAttribute('aria-haspopup', 'menu');
++        menuTrigger.setAttribute('aria-expanded', 'false');
++        menuTrigger.setAttribute('aria-label', 'Unit actions');
++
++        var menuDots = document.createElement('span');
++        menuDots.className = 'detail-overflow-dots';
++        menuDots.textContent = '\u2026';
++        menuTrigger.appendChild(menuDots);
++
++        var menuList = document.createElement('div');
++        menuList.className = 'detail-overflow-list';
++        menuList.setAttribute('role', 'menu');
++
++        (function (u, mTrigger, mList, mWrap) {
++          function setMenuOpen(isOpen) {
++            mList.style.display = isOpen ? 'grid' : 'none';
++            mTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
++            window.KaPUI.SetActiveOverflowMenu(mWrap, setMenuOpen, isOpen);
++            if (isOpen) {
++              mList.classList.remove('detail-overflow-list--up');
++              if (window.KaPUI.ShouldOpenOverflowUp(mTrigger, mList)) {
++                mList.classList.add('detail-overflow-list--up');
++              }
++            }
++          }
++
++          setMenuOpen(false);
++
++          var menuActions = [
++            {
++              label: 'Edit',
++              isDanger: false,
++              onClick: async function () {
++                var allUnits = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++                var knownGroups = getGroupOrder(allUnits);
++                var result = await window.KaPUI.ShowEditUnitModal({
++                  unit: u,
++                  groups: knownGroups,
++                  updateUnitOfMeasure: function (id, updates) {
++                    return window.KaPRecipesService.updateUnitOfMeasure(id, updates);
++                  }
++                });
++                if (result) { await renderBodyInto(bodyWrap); }
++              }
++            },
++            {
++              label: 'Remove',
++              isDanger: true,
++              onClick: async function () {
++                var confirmed = await window.KaPUI.ShowConfirm({
++                  title: 'Remove Unit',
++                  message: 'Remove "' + u.name + '"?',
++                  confirmLabel: 'Remove',
++                  isDanger: true
++                });
++                if (!confirmed) { return; }
++                await window.KaPRecipesService.deleteUnitOfMeasure(u.id);
++                await renderBodyInto(bodyWrap);
++              }
++            }
++          ];
++
++          menuActions.forEach(function (action) {
++            var item = document.createElement('button');
++            item.type = 'button';
++            item.className = 'detail-overflow-item' + (action.isDanger ? ' detail-overflow-item--danger' : '');
++            item.textContent = action.label;
++            item.setAttribute('role', 'menuitem');
++            item.addEventListener('click', function () {
++              setMenuOpen(false);
++              action.onClick();
++            });
++            mList.appendChild(item);
++          });
++
++          mTrigger.addEventListener('click', function (event) {
++            event.stopPropagation();
++            var isOpen = mList.style.display !== 'none';
++            setMenuOpen(!isOpen);
++          });
++        })(unit, menuTrigger, menuList, menuWrap);
++
++        menuWrap.appendChild(menuTrigger);
++        menuWrap.appendChild(menuList);
++        rowActions.appendChild(menuWrap);
++
++        row.appendChild(rowActions);
++        groupSection.appendChild(row);
++      });
++
++      if (groupUnits.length === 0) {
++        var groupEmptyRow = document.createElement('div');
++        groupEmptyRow.className = 'uom-group-empty-row';
++        groupEmptyRow.textContent = 'No units of measure in this group.';
++        groupSection.appendChild(groupEmptyRow);
++      }
++
++      bodyWrap.appendChild(groupSection);
++    });
++  }
++
++  async function renderInto(container, hooks) {
++    var section = document.createElement('section');
++    section.className = 'uom-shell';
++
++    var header = document.createElement('div');
++    header.className = 'detail-header uom-header';
++
++    if (hooks && typeof hooks.onBack === 'function') {
++      var backButton = document.createElement('button');
++      backButton.type = 'button';
++      backButton.className = 'detail-back-button';
++      backButton.textContent = '\u2190 Back';
++      backButton.addEventListener('click', hooks.onBack);
++      header.appendChild(backButton);
++    }
++
++    var heading = document.createElement('h2');
++    heading.className = 'detail-title';
++    heading.textContent = 'Units of Measure';
++    header.appendChild(heading);
++
++    var headerActions = document.createElement('div');
++    headerActions.className = 'detail-actions';
++
++    var addButton = document.createElement('button');
++    addButton.type = 'button';
++    addButton.className = 'record-action-button uom-add-button';
++    addButton.textContent = '+ Add Unit';
++    addButton.addEventListener('click', async function () {
++      var allUnits = await window.KaPRecipesService.getAllUnitOfMeasures({ includeInactive: true });
++      var knownGroups = getGroupOrder(allUnits);
++      var created = await window.KaPUI.ShowCreateUnitModal({
++        groups: knownGroups,
++        createUnitOfMeasure: function (name, abbr, group, behavior, step) {
++          return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++        }
++      });
++      if (created) {
++        await renderBodyInto(bodyWrap);
++      }
++    });
++    headerActions.appendChild(addButton);
++
++    var addGroupButton = document.createElement('button');
++    addGroupButton.type = 'button';
++    addGroupButton.className = 'record-action-button uom-add-button';
++    addGroupButton.textContent = '+ Add Group';
++    addGroupButton.addEventListener('click', async function () {
++      var newName = await window.KaPUI.ShowPrompt({
++        title: 'New Group',
++        placeholder: 'Group name',
++        confirmLabel: 'Add'
++      });
++      if (!newName) { return; }
++      var trimmed = String(newName).trim();
++      if (!trimmed) { return; }
++      var currentOrder = window.KaPSettings.get(window.KaPSettings.KEYS.UOM_GROUP_ORDER) || [];
++      if (currentOrder.some(function (g) { return g.toLowerCase() === trimmed.toLowerCase(); })) { return; }
++      saveGroupOrder(currentOrder.concat([trimmed]));
++      await renderBodyInto(bodyWrap);
++    });
++    headerActions.appendChild(addGroupButton);
++
++    header.appendChild(headerActions);
++
++    section.appendChild(header);
++
++    var bodyWrap = document.createElement('div');
++    bodyWrap.className = 'uom-body';
++    await renderBodyInto(bodyWrap);
++    section.appendChild(bodyWrap);
++
++    container.replaceChildren(section);
++  }
++
++  window.KaPUomPage = {
++    renderInto: renderInto
++  };
++})();
+diff --git a/src/index.html b/src/index.html
+index 5f91e23..645f0b6 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -27,6 +27,7 @@
+           <div class="header-menu-list" id="header-menu-list" role="menu" hidden>
+             <button type="button" class="header-menu-item" id="menu-install-button" role="menuitem">Install App</button>
+             <button type="button" class="header-menu-item" id="menu-about-button" role="menuitem">About</button>
++            <button type="button" class="header-menu-item" id="menu-uom-button" role="menuitem">Units of Measure</button>
+             <button type="button" class="header-menu-item" id="menu-settings-button" role="menuitem">Settings</button>
+           </div>
+         </div>
+@@ -125,6 +126,7 @@
+   <script src="./features/templates/templates-page.js?v=2026-05-03-20-40"></script>
+   <script src="./features/recipes/recipes-service.js?v=2026-05-03-20-40"></script>
+   <script src="./features/recipes/recipes-page.js?v=2026-05-03-20-40"></script>
++  <script src="./features/uom/uom-page.js?v=2026-05-03-20-40"></script>
+   <script src="./features/settings/settings-page.js?v=2026-05-03-20-40"></script>
+   <script src="./features/main/main-page.js?v=2026-05-03-20-40"></script>
+   <script src="./app-router.js?v=2026-05-03-20-40"></script>
+diff --git a/src/shared/settings.js b/src/shared/settings.js
+index 3b67db1..36ddc2d 100644
+--- a/src/shared/settings.js
++++ b/src/shared/settings.js
+@@ -9,7 +9,8 @@
+     MAIN_PAGE_SCROLL_TOP: 'mainPageScrollTop',
+     CATEGORY_VIEW_BY_RECORD: 'categoryViewByRecord',
+     TEXT_SIZE: 'textSize',
+-    THEME: 'theme'
++    THEME: 'theme',
++    UOM_GROUP_ORDER: 'uomGroupOrder'
+   };
+ 
+   var defaults = {
+@@ -27,7 +28,8 @@
+       templates: {}
+     },
+     textSize: 'small',
+-    theme: 'dark'
++    theme: 'dark',
++    uomGroupOrder: []
+   };
+ 
+   function getKey(name) {
+diff --git a/src/styles.css b/src/styles.css
+index c483415..2c64398 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -612,6 +612,11 @@ body {
+   color: #e74c3c;
+ }
+ 
++.detail-overflow-item:disabled {
++  opacity: 0.4;
++  cursor: default;
++}
++
+ .detail-overflow-qty-row {
+   display: flex;
+   align-items: center;
+@@ -1239,6 +1244,123 @@ body {
+   padding: 0.25rem 1.25rem 1.25rem 1.25rem;
+ }
+ 
++/* ΓöÇΓöÇ Units of Measure Page ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */
++
++.uom-shell {
++  display: flex;
++  flex-direction: column;
++  min-height: 0;
++}
++
++.uom-body {
++  display: grid;
++  gap: 0.75rem;
++  align-content: start;
++  padding: 0.75rem 0 1.5rem;
++}
++
++.uom-empty {
++  padding: 1rem 0;
++  color: var(--color-muted);
++  font-size: 0.95rem;
++}
++
++.uom-group-section {
++  display: grid;
++  gap: 0;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++}
++
++.uom-group-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.5rem;
++  border-radius: 0.625rem 0.625rem 0 0;
++  padding: 0.5rem 0.875rem;
++  background: var(--color-surface);
++  border-bottom: 1px solid var(--color-border);
++}
++
++.uom-group-name {
++  font-size: 0.88rem;
++  font-weight: 600;
++  color: var(--color-muted);
++  text-transform: uppercase;
++  letter-spacing: 0.04em;
++}
++
++.uom-group-actions {
++  display: flex;
++  align-items: center;
++  gap: 0.25rem;
++}
++
++.uom-row {
++  display: flex;
++  align-items: center;
++  gap: 0.5rem;
++  padding: 0.5rem 0.875rem;
++  border-top: 1px solid var(--color-border);
++}
++
++.uom-group-empty-row {
++  padding: 0.5rem 0.875rem;
++  border-top: 1px solid var(--color-border);
++  color: var(--color-muted);
++  font-size: 0.82rem;
++  font-style: italic;
++}
++
++.uom-row-name-block {
++  flex: 1;
++  display: flex;
++  align-items: baseline;
++  gap: 0.375rem;
++  min-width: 0;
++}
++
++.uom-row-name {
++  font-size: 0.93rem;
++  color: var(--color-text);
++}
++
++.uom-row-abbr {
++  font-size: 0.8rem;
++  color: var(--color-muted);
++}
++
++.uom-row-meta {
++  flex-shrink: 0;
++}
++
++.uom-row-behavior {
++  font-size: 0.78rem;
++  color: var(--color-muted);
++}
++
++.uom-row-actions {
++  display: flex;
++  align-items: center;
++  gap: 0.375rem;
++  flex-shrink: 0;
++}
++
++.uom-add-button {
++  font-size: 0.85rem;
++  color: var(--color-brand);
++  background: transparent;
++  border: none;
++  padding: 0.125rem 0.25rem;
++  cursor: pointer;
++  white-space: nowrap;
++}
++
++.uom-add-button:hover {
++  color: var(--color-brand-strong);
++}
++
+ .settings-uom-section {
+   display: grid;
+   gap: 0;
+@@ -2206,9 +2328,4 @@ body {
+     flex-wrap: wrap;
+     padding-top: 0.625rem;
+   }
+-
+-  .recipe-tags-dropdown {
+-    left: auto;
+-    right: 0;
+-  }
+ }
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index 09e767a..c47ec3c 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -652,7 +652,10 @@
+       form.appendChild(groupLabel);
+       var groupSelect = document.createElement('select');
+       groupSelect.className = 'modal-input';
+-      ['Imperial', 'Metric', 'Unit', 'Size', 'Other'].forEach(function (g) {
++      var createGroups = (options.groups && options.groups.length > 0)
++        ? options.groups
++        : ['Imperial', 'Metric', 'Unit', 'Size', 'Other'];
++      createGroups.forEach(function (g) {
+         var opt = document.createElement('option');
+         opt.value = g;
+         opt.textContent = g;
+@@ -2054,7 +2057,28 @@
+       abbrInput.value = unit.abbreviation || '';
+       form.appendChild(abbrInput);
+ 
+-      // Quantity behavior
++      // Group
++      var editGroupLabel = document.createElement('label');
++      editGroupLabel.className = 'modal-field-label';
++      editGroupLabel.textContent = 'Group';
++      form.appendChild(editGroupLabel);
++      var editGroupSelect = document.createElement('select');
++      editGroupSelect.className = 'modal-input';
++      var editGroups = (options.groups && options.groups.length > 0)
++        ? options.groups
++        : ['Imperial', 'Metric', 'Unit', 'Size', 'Other'];
++      var currentGroupInList = editGroups.indexOf(unit.group || '') >= 0;
++      if (!currentGroupInList && unit.group) {
++        editGroups = [unit.group].concat(editGroups);
++      }
++      editGroups.forEach(function (g) {
++        var opt = document.createElement('option');
++        opt.value = g;
++        opt.textContent = g;
++        editGroupSelect.appendChild(opt);
++      });
++      editGroupSelect.value = unit.group || editGroups[0] || '';
++      form.appendChild(editGroupSelect);
+       var behaviorLabel = document.createElement('label');
+       behaviorLabel.className = 'modal-field-label';
+       behaviorLabel.textContent = 'Quantity behavior';
+@@ -2130,6 +2154,7 @@
+           var updated = await options.updateUnitOfMeasure(unit.id, {
+             name: name,
+             abbreviation: abbr,
++            group: editGroupSelect.value,
+             quantityBehavior: behavior,
+             quantityStep: step
+           });

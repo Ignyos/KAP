@@ -1,3 +1,47 @@
+# Release v2026-05-17-00-59
+
+## Overview
+This release introduces a dedicated Units of Measure page with full group and unit management, replacing the limited UoM section that was previously embedded in Settings.
+
+## New Features
+- **Units of Measure Page**: A new top-level page accessible from the main navigation menu. Displays all units organized by group and supports adding, editing, and removing units and groups.
+- **Group Management**: Each group now has a `…` action menu with Move Up, Move Down, Rename, and Remove options. Remove is disabled when the group still contains units.
+- **Add Group**: A new "+ Add Group" button on the Units of Measure page allows creating empty groups before populating them with units.
+- **Edit Any Unit**: All units, including seeded ones, can now be fully edited from the Units of Measure page.
+- **Remove Unit**: Units can be removed individually via a confirmation prompt from the unit's action menu.
+
+## Improvements
+- **Edit Unit Modal**: Now includes a Group field so users can move a unit to a different group while editing.
+- **Create Unit Modal**: Group selector now uses the current list of known groups rather than a fixed hardcoded set.
+- **Group Display Order**: The order of groups on the Units of Measure page is saved per-device and persists across sessions.
+- **Empty Group Placeholder**: Groups with no units display a placeholder row so the card layout renders correctly.
+
+## Bug Fixes
+- **Recipe Tags Dropdown on Mobile**: The tags dropdown no longer opens off-screen to the left on small displays.
+
+## Technical Changes
+- Added `deleteUnitOfMeasure` and `renameGroup` APIs to the recipe service.
+- Added `/uom` route to the app router.
+- Added `UOM_GROUP_ORDER` setting key (`uomGroupOrder`, default `[]`) for persisting group display order.
+- Removed the Units of Measure section from the Settings page.
+- Added `uom-page.js` to both `src/` and `docs/` and registered it in `index.html`.
+- Removed the `isSeeded` edit restriction from `updateUnitOfMeasure`.
+
+## Installation
+1. Clone or pull the latest code from the repository.
+2. Open `src/index.html` or `docs/index.html` in a web browser.
+
+## Requirements
+- Modern web browser with ES5 JavaScript support.
+- LocalStorage and IndexedDB support for data persistence.
+
+## Documentation
+- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+- For feature documentation and usage guides, see `application-structure.md`.
+- For recipe feature planning notes, see `recipe-feature-definition.md`.
+
+---
+
 # Release v2026-05-03-20-40
 
 ## Overview
