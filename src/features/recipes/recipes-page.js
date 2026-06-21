@@ -324,6 +324,7 @@
           itemRecord.id,
           result.name,
           result.quantity,
+          result.quantityText,
           result.description,
           result.unitOfMeasureId || null,
           result.isOptional === true
@@ -335,6 +336,7 @@
           itemRecord.id,
           result.name,
           result.quantity,
+          result.quantityText,
           result.description,
           result.unitOfMeasureId || null,
           result.isOptional === true
@@ -360,7 +362,7 @@
       initialCategoryId: detailItem.categoryId,
       initialCategoryName: detailItem.categoryName,
       initialDescription: detailItem.description,
-      initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
+      initialQuantity: detailItem.quantityText != null ? detailItem.quantityText : (detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null)),
       initialIsOptional: detailItem.isOptional === true,
       initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
       enableSuggestions: false
@@ -376,6 +378,7 @@
         detailItem.id,
         result.name,
         result.quantity,
+        result.quantityText,
         result.description,
         result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
         result.isOptional === true
@@ -527,7 +530,7 @@
             initialCategoryId: detailItem.categoryId,
             initialCategoryName: detailItem.categoryName,
             initialDescription: detailItem.description,
-            initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
+            initialQuantity: detailItem.quantityText != null ? detailItem.quantityText : (detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null)),
             initialIsOptional: detailItem.isOptional === true,
             initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
             enableSuggestions: false
@@ -540,6 +543,7 @@
               detailItem.id,
               result.name,
               result.quantity,
+              result.quantityText,
               result.description,
               result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
               result.isOptional === true
