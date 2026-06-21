@@ -152,10 +152,50 @@
     }
 
     try {
-      await window.KaPRecipesService.createRecipe(name);
+      return await window.KaPRecipesService.createRecipe(name);
     } catch (error) {
       await showError(error.message || 'Unable to create recipe.');
+      return null;
     }
+  }
+
+  function buildRecipeIngredientModalOptions(overrides) {
+    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
+      title: 'Add Ingredient',
+      currentContextLabel: 'recipe',
+      detailItems: overrides.detailItems || [],
+      quantityPlaceholder: 'e.g. 1/2 or 1.5',
+      validateQuantity: window.KaPItemDiscovery.validateOptionalDecimal,
+      showOptionalField: true,
+      optionalLabel: 'Mark ingredient as optional'
+    });
+
+    baseOptions.getUnitOfMeasures = function () {
+      return window.KaPRecipesService.getAllUnitOfMeasures();
+    };
+    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
+      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+    };
+
+    baseOptions.confirmLabel = overrides.confirmLabel || baseOptions.confirmLabel;
+    baseOptions.title = overrides.title || baseOptions.title;
+    baseOptions.itemNamePlaceholder = overrides.itemNamePlaceholder || 'Ingredient name';
+    baseOptions.categoryPlaceholder = overrides.categoryPlaceholder || 'Search or type category';
+    baseOptions.descriptionPlaceholder = overrides.descriptionPlaceholder || 'Ingredient notes';
+    baseOptions.initialName = overrides.initialName || '';
+    baseOptions.initialCategoryId = overrides.initialCategoryId || '';
+    baseOptions.initialCategoryName = overrides.initialCategoryName || '';
+    baseOptions.initialDescription = overrides.initialDescription || '';
+    baseOptions.initialQuantity = overrides.initialQuantity != null ? overrides.initialQuantity : 1;
+    baseOptions.initialIsOptional = overrides.initialIsOptional === true;
+    baseOptions.initialUnitOfMeasureId = overrides.initialUnitOfMeasureId || null;
+    baseOptions.showQuantityField = true;
+    baseOptions.showCategoryField = true;
+    baseOptions.showOptionalField = true;
+    baseOptions.enableSuggestions = overrides.enableSuggestions !== undefined
+      ? overrides.enableSuggestions === true
+      : true;
+    return baseOptions;
   }
 
   async function renameRecipe(record) {
@@ -257,17 +297,12 @@
   }
 
   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems, activeVersionId, isViewingLatestVersion) {
-    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
+    var baseOptions = buildRecipeIngredientModalOptions({
+      detailItems: detailItems,
       title: 'Add Ingredient',
-      currentContextLabel: 'recipe',
-      detailItems: detailItems
+      confirmLabel: 'Add Item',
+      enableSuggestions: true
     });
-    baseOptions.getUnitOfMeasures = function () {
-      return window.KaPRecipesService.getAllUnitOfMeasures();
-    };
-    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
-      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
-    };
     var result = await window.KaPUI.ShowDiscoveryItemModal(baseOptions);
 
     if (result === null) {
@@ -275,29 +310,39 @@
     }
 
     try {
+      var itemRecord = result.item;
+      if (!itemRecord || !itemRecord.id) {
+        itemRecord = await window.KaPItemDiscovery.resolveExactItem(result.name);
+        if (!itemRecord) {
+          itemRecord = await window.KaPItemsService.createItem(result.name, '');
+        }
+      }
+
       if (isViewingLatestVersion) {
         await window.KaPRecipesService.addItemToRecipe(
           recipeRecord.id,
-          result.item.id,
+          itemRecord.id,
           result.name,
           result.quantity,
           result.description,
-          result.unitOfMeasureId || null
+          result.unitOfMeasureId || null,
+          result.isOptional === true
         );
       } else {
         await window.KaPRecipesService.addItemToVersion(
           recipeRecord.id,
           activeVersionId,
-          result.item.id,
+          itemRecord.id,
           result.name,
           result.quantity,
           result.description,
-          result.unitOfMeasureId || null
+          result.unitOfMeasureId || null,
+          result.isOptional === true
         );
       }
 
       await window.KaPItemsService.setItemCategory(
-        result.item.id,
+        itemRecord.id,
         result.categoryId || '',
         result.categoryName || '',
         result.name
@@ -308,43 +353,18 @@
   }
 
   async function editRecipeItemWithPrompt(recipeRecord, detailItem) {
-    var result = await window.KaPUI.ShowDiscoveryItemModal({
+    var result = await window.KaPUI.ShowDiscoveryItemModal(buildRecipeIngredientModalOptions({
       title: 'Edit Ingredient',
       confirmLabel: 'Save',
-      itemNamePlaceholder: 'Ingredient name',
-      categoryPlaceholder: 'Search or type category',
-      descriptionPlaceholder: 'Ingredient notes',
       initialName: detailItem.name,
       initialCategoryId: detailItem.categoryId,
       initialCategoryName: detailItem.categoryName,
       initialDescription: detailItem.description,
       initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
+      initialIsOptional: detailItem.isOptional === true,
       initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
-      showQuantityField: true,
-      showCategoryField: true,
-      getUnitOfMeasures: function () {
-        return window.KaPRecipesService.getAllUnitOfMeasures();
-      },
-      createUnitOfMeasure: function (name, abbr, group, behavior, step) {
-        return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
-      },
-      getAllCategories: function () {
-        return window.KaPCategoriesService.getAllCategories();
-      },
-      searchCategories: function (query) {
-        return window.KaPCategoriesService.searchCategories(query);
-      },
-      resolveExactCategory: function (name) {
-        return window.KaPCategoriesService.resolveExactCategory(name);
-      },
-      createCategory: function (name) {
-        return window.KaPCategoriesService.createCategory(name);
-      },
-      deleteCategory: function (category) {
-        return window.KaPCategoriesService.deleteCategory(category.id);
-      },
       enableSuggestions: false
-    });
+    }));
 
     if (result === null) {
       return;
@@ -357,7 +377,8 @@
         result.name,
         result.quantity,
         result.description,
-        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
+        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
+        result.isOptional === true
       );
 
       if (detailItem.itemId) {
@@ -499,43 +520,18 @@
         if (isViewingLatestVersion) {
           await editRecipeItemWithPrompt(recipeRecord, detailItem);
         } else {
-          var result = await window.KaPUI.ShowDiscoveryItemModal({
+          var result = await window.KaPUI.ShowDiscoveryItemModal(buildRecipeIngredientModalOptions({
             title: 'Edit Ingredient',
             confirmLabel: 'Save',
-            itemNamePlaceholder: 'Ingredient name',
-            categoryPlaceholder: 'Search or type category',
-            descriptionPlaceholder: 'Ingredient notes',
             initialName: detailItem.name,
             initialCategoryId: detailItem.categoryId,
             initialCategoryName: detailItem.categoryName,
             initialDescription: detailItem.description,
             initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
+            initialIsOptional: detailItem.isOptional === true,
             initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
-            showQuantityField: true,
-            showCategoryField: true,
-            getUnitOfMeasures: function () {
-              return window.KaPRecipesService.getAllUnitOfMeasures();
-            },
-            createUnitOfMeasure: function (name, abbr, group, behavior, step) {
-              return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
-            },
-            getAllCategories: function () {
-              return window.KaPCategoriesService.getAllCategories();
-            },
-            searchCategories: function (query) {
-              return window.KaPCategoriesService.searchCategories(query);
-            },
-            resolveExactCategory: function (name) {
-              return window.KaPCategoriesService.resolveExactCategory(name);
-            },
-            createCategory: function (name) {
-              return window.KaPCategoriesService.createCategory(name);
-            },
-            deleteCategory: function (category) {
-              return window.KaPCategoriesService.deleteCategory(category.id);
-            },
             enableSuggestions: false
-          });
+          }));
 
           if (result !== null) {
             await window.KaPRecipesService.updateVersionItem(
@@ -545,7 +541,8 @@
               result.name,
               result.quantity,
               result.description,
-              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
+              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
+              result.isOptional === true
             );
           }
         }

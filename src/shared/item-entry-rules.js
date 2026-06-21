@@ -31,13 +31,24 @@
       return null;
     }
 
-    if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) {
-      throw new Error('Quantity must be a decimal number.');
+    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(raw)) {
+      throw new Error('Quantity must be a decimal number or fraction.');
+    }
+
+    if (raw.indexOf('/') >= 0) {
+      var parts = raw.split('/');
+      var numerator = Number(parts[0]);
+      var denominator = Number(parts[1]);
+      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+        throw new Error('Quantity must be a decimal number or fraction.');
+      }
+
+      return numerator / denominator;
     }
 
     var parsed = Number(raw);
     if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
-      throw new Error('Quantity must be a decimal number.');
+      throw new Error('Quantity must be a decimal number or fraction.');
     }
 
     return parsed;
@@ -50,7 +61,7 @@
 
     var numeric = Number(quantityValue);
     if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
-      throw new Error('Quantity must be a decimal number.');
+      throw new Error('Quantity must be a decimal number or fraction.');
     }
 
     return true;

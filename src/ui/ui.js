@@ -292,6 +292,12 @@
     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
 
     nameNode.textContent = itemName;
+    if (detailItem.isOptional === true) {
+      var optionalLabel = document.createElement('span');
+      optionalLabel.className = 'detail-item-optional-label';
+      optionalLabel.textContent = ' (optional)';
+      nameNode.appendChild(optionalLabel);
+    }
 
     if (detailItem.isCrossedOff) {
       node.classList.add('detail-item-row--crossed');
@@ -822,6 +828,7 @@
       var uomSelect = null;
       var uomUnits = [];
       var selectedUomId = options.initialUnitOfMeasureId || null;
+      var optionalInput = null;
 
       if (showQuantityField) {
         var quantityLabel = document.createElement('label');
@@ -918,6 +925,24 @@
 
         quantityRow.appendChild(uomSelect);
         form.appendChild(quantityRow);
+      }
+
+      if (options.showOptionalField === true) {
+        var optionalRow = document.createElement('label');
+        optionalRow.className = 'modal-checklist-row modal-optional-row';
+
+        optionalInput = document.createElement('input');
+        optionalInput.type = 'checkbox';
+        optionalInput.className = 'modal-checklist-checkbox';
+        optionalInput.checked = options.initialIsOptional === true;
+        optionalRow.appendChild(optionalInput);
+
+        var optionalText = document.createElement('span');
+        optionalText.className = 'modal-checklist-name';
+        optionalText.textContent = options.optionalLabel || 'Mark ingredient as optional';
+        optionalRow.appendChild(optionalText);
+
+        form.appendChild(optionalRow);
       }
 
       var categoryInput = null;
@@ -1344,6 +1369,7 @@
               quantity: quantityResult.value,
               unitOfMeasureId: selectedUomId || null,
               description: String(descriptionInput.value || '').trim(),
+              isOptional: optionalInput ? optionalInput.checked === true : false,
               categoryId: category ? category.id || '' : '',
               categoryName: category ? category.name || '' : ''
             });
@@ -1366,6 +1392,7 @@
             quantity: quantityResult.value,
             unitOfMeasureId: selectedUomId || null,
             description: String(descriptionInput.value || '').trim(),
+            isOptional: optionalInput ? optionalInput.checked === true : false,
             categoryId: category ? category.id || '' : '',
             categoryName: category ? category.name || '' : ''
           });

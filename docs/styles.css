@@ -395,6 +395,11 @@ body {
   font-weight: 500;
 }
 
+.detail-item-optional-label {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
 .detail-item-meta {
   margin-top: 0.25rem;
   color: var(--color-muted);
