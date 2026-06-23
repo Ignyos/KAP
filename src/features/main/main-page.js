@@ -19,7 +19,19 @@
       label: 'Recipes',
       getAllFn: function () { return window.KaPRecipesService.getAllRecipes(); },
       renderDetailFn: function (container, record, hooks) { return window.KaPRecipesPage.renderDetailInto(container, record, hooks); },
-      createFn: function () { return window.KaPRecipesPage.createRecipe(); }
+      createFn: async function () {
+        var name = await window.KaPUI.ShowPrompt({
+          title: 'New Recipe',
+          placeholder: 'Recipe name',
+          confirmLabel: 'Create'
+        });
+
+        if (name === null) {
+          return null;
+        }
+
+        return window.KaPRecipesService.createRecipe(name);
+      }
     }
   ];
 
@@ -448,7 +460,12 @@
     var section = findSection(sectionId);
     if (section) {
       try {
-        await section.createFn();
+        var createdRecord = await section.createFn();
+        if (sectionId === 'recipes' && createdRecord && createdRecord.id) {
+          window.KaPRouter.navigate('/recipe/' + createdRecord.id);
+          return;
+        }
+
         renderHome();
       } catch (error) {
         console.error('Error creating new item:', error);

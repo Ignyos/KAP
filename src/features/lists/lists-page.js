@@ -321,6 +321,17 @@
 
     function deleteAllCrossedOff() {
       return Promise.resolve().then(async function () {
+        var confirmed = await window.KaPUI.ShowConfirm({
+          title: 'Clear Crossed-Off Items',
+          message: 'Delete all crossed-off items from this grocery list?',
+          confirmLabel: 'Clear',
+          isDanger: true
+        });
+
+        if (!confirmed) {
+          return;
+        }
+
         await window.KaPListsService.deleteCrossedOffItems(listRecord.id);
         await renderDetailInto(container, listRecord, hooks);
       }).catch(async function (error) {

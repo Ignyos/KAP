@@ -12,6 +12,35 @@
     return { ok: true, value: Number(trimmed) };
   }
 
+  function validateOptionalDecimal(rawQuantity) {
+    var trimmed = String(rawQuantity == null ? '' : rawQuantity).trim();
+    if (!trimmed) {
+      return { ok: true, value: null };
+    }
+
+    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(trimmed)) {
+      return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
+    }
+
+    if (trimmed.indexOf('/') >= 0) {
+      var parts = trimmed.split('/');
+      var numerator = Number(parts[0]);
+      var denominator = Number(parts[1]);
+      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+        return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
+      }
+
+      return { ok: true, value: numerator / denominator };
+    }
+
+    var parsed = Number(trimmed);
+    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
+      return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
+    }
+
+    return { ok: true, value: parsed };
+  }
+
   async function resolveExactItem(name) {
     var suggestions = await window.KaPItemsService.searchItems(name);
     return suggestions.find(function (item) {
@@ -24,16 +53,22 @@
     var currentContextItemIds = detailItems.map(function (detailItem) {
       return detailItem.itemId;
     });
+    var validateQuantity = typeof config.validateQuantity === 'function'
+      ? config.validateQuantity
+      : validateOptionalInteger;
 
     return {
       title: config.title,
       confirmLabel: 'Add Item',
       itemNamePlaceholder: 'Search or type item name',
-      quantityPlaceholder: 'e.g. 2',
-      initialQuantity: 1,
+      quantityPlaceholder: config.quantityPlaceholder || 'e.g. 2',
+      initialQuantity: config.initialQuantity != null ? config.initialQuantity : 1,
       descriptionPlaceholder: 'Item notes',
       currentContextItemIds: currentContextItemIds,
       currentContextLabel: config.currentContextLabel,
+      showOptionalField: config.showOptionalField === true,
+      initialIsOptional: config.initialIsOptional === true,
+      optionalLabel: config.optionalLabel,
       getAllItems: function () {
         return window.KaPItemsService.getAllItems();
       },
@@ -62,12 +97,13 @@
       deleteCategory: function (category) {
         return window.KaPCategoriesService.deleteCategory(category.id);
       },
-      validateQuantity: validateOptionalInteger
+      validateQuantity: validateQuantity
     };
   }
 
   window.KaPItemDiscovery = {
     validateOptionalInteger: validateOptionalInteger,
+    validateOptionalDecimal: validateOptionalDecimal,
     resolveExactItem: resolveExactItem,
     buildAddItemModalOptions: buildAddItemModalOptions
   };

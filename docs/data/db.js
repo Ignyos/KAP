@@ -3,15 +3,27 @@
   var DATABASE_VERSION = 8;
 
   var state = {
-    db: null
+    db: null,
+    openingPromise: null
   };
 
-  function ensureOpen() {
-    if (!state.db) {
-      throw new Error('Database is not open. Call KaPDB.open() before performing operations.');
+  function clearOpenState(db) {
+    if (!db || state.db === db) {
+      state.db = null;
+    }
+    state.openingPromise = null;
+  }
+
+  function isConnectionClosingError(error) {
+    if (!error) {
+      return false;
     }
 
-    return state.db;
+    if (error.name === 'InvalidStateError') {
+      return true;
+    }
+
+    return String(error.message || '').toLowerCase().indexOf('connection is closing') >= 0;
   }
 
   function requestToPromise(request) {
@@ -39,41 +51,70 @@
     });
   }
 
+  async function withDatabase(action) {
+    var attempts = 0;
+
+    while (attempts < 2) {
+      var db = await open();
+
+      try {
+        return await action(db);
+      } catch (error) {
+        if (attempts === 0 && isConnectionClosingError(error)) {
+          try {
+            db.close();
+          } catch (_closeError) {
+            // Ignore close failures while recovering from an invalid connection.
+          }
+          clearOpenState(db);
+          attempts += 1;
+          continue;
+        }
+
+        throw error;
+      }
+    }
+  }
+
   async function readAll(storeName) {
-    var db = ensureOpen();
-    var tx = db.transaction(storeName, 'readonly');
-    var store = tx.objectStore(storeName);
-    var records = await requestToPromise(store.getAll());
-    await transactionDone(tx);
-    return records;
+    return withDatabase(async function (db) {
+      var tx = db.transaction(storeName, 'readonly');
+      var store = tx.objectStore(storeName);
+      var records = await requestToPromise(store.getAll());
+      await transactionDone(tx);
+      return records;
+    });
   }
 
   async function readAllFromIndex(storeName, indexName, indexKey) {
-    var db = ensureOpen();
-    var tx = db.transaction(storeName, 'readonly');
-    var store = tx.objectStore(storeName);
-    var index = store.index(indexName);
-    var records = await requestToPromise(index.getAll(indexKey));
-    await transactionDone(tx);
-    return records;
+    return withDatabase(async function (db) {
+      var tx = db.transaction(storeName, 'readonly');
+      var store = tx.objectStore(storeName);
+      var index = store.index(indexName);
+      var records = await requestToPromise(index.getAll(indexKey));
+      await transactionDone(tx);
+      return records;
+    });
   }
 
   async function readByKey(storeName, key) {
-    var db = ensureOpen();
-    var tx = db.transaction(storeName, 'readonly');
-    var store = tx.objectStore(storeName);
-    var record = await requestToPromise(store.get(key));
-    await transactionDone(tx);
-    return record;
+    return withDatabase(async function (db) {
+      var tx = db.transaction(storeName, 'readonly');
+      var store = tx.objectStore(storeName);
+      var record = await requestToPromise(store.get(key));
+      await transactionDone(tx);
+      return record;
+    });
   }
 
   async function upsert(storeName, value) {
-    var db = ensureOpen();
-    var tx = db.transaction(storeName, 'readwrite');
-    var store = tx.objectStore(storeName);
-    await requestToPromise(store.put(value));
-    await transactionDone(tx);
-    return value;
+    return withDatabase(async function (db) {
+      var tx = db.transaction(storeName, 'readwrite');
+      var store = tx.objectStore(storeName);
+      await requestToPromise(store.put(value));
+      await transactionDone(tx);
+      return value;
+    });
   }
 
   function canTrackTombstone(db, storeName, key) {
@@ -104,24 +145,25 @@
   }
 
   async function remove(storeName, key, options) {
-    var db = ensureOpen();
-    var skipTombstone = options && options.skipTombstone === true;
-    var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
-    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
-      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
-      : 'syncTombstones';
-    var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
-    var tx = db.transaction(txStores, 'readwrite');
-    var store = tx.objectStore(storeName);
+    return withDatabase(async function (db) {
+      var skipTombstone = options && options.skipTombstone === true;
+      var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
+      var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
+        ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
+        : 'syncTombstones';
+      var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
+      var tx = db.transaction(txStores, 'readwrite');
+      var store = tx.objectStore(storeName);
 
-    await requestToPromise(store.delete(key));
+      await requestToPromise(store.delete(key));
 
-    if (includeTombstone) {
-      var tombstoneStore = tx.objectStore(tombstoneStoreName);
-      await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
-    }
+      if (includeTombstone) {
+        var tombstoneStore = tx.objectStore(tombstoneStoreName);
+        await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
+      }
 
-    await transactionDone(tx);
+      await transactionDone(tx);
+    });
   }
 
   async function removeHard(storeName, key) {
@@ -129,38 +171,40 @@
   }
 
   async function clearStore(storeName) {
-    var db = ensureOpen();
-    var tx = db.transaction(storeName, 'readwrite');
-    var store = tx.objectStore(storeName);
-    await requestToPromise(store.clear());
-    await transactionDone(tx);
+    return withDatabase(async function (db) {
+      var tx = db.transaction(storeName, 'readwrite');
+      var store = tx.objectStore(storeName);
+      await requestToPromise(store.clear());
+      await transactionDone(tx);
+    });
   }
 
   async function replaceStores(recordsByStore) {
-    var db = ensureOpen();
-    var storeNames = Object.keys(recordsByStore || {});
-    if (storeNames.length === 0) {
-      return;
-    }
-
-    var tx = db.transaction(storeNames, 'readwrite');
-
-    for (var i = 0; i < storeNames.length; i++) {
-      var storeName = storeNames[i];
-      var store = tx.objectStore(storeName);
-      await requestToPromise(store.clear());
-
-      var records = recordsByStore[storeName];
-      if (!Array.isArray(records)) {
-        throw new Error('Import payload for "' + storeName + '" must be an array.');
+    return withDatabase(async function (db) {
+      var storeNames = Object.keys(recordsByStore || {});
+      if (storeNames.length === 0) {
+        return;
       }
 
-      for (var j = 0; j < records.length; j++) {
-        await requestToPromise(store.put(records[j]));
-      }
-    }
+      var tx = db.transaction(storeNames, 'readwrite');
 
-    await transactionDone(tx);
+      for (var i = 0; i < storeNames.length; i++) {
+        var storeName = storeNames[i];
+        var store = tx.objectStore(storeName);
+        await requestToPromise(store.clear());
+
+        var records = recordsByStore[storeName];
+        if (!Array.isArray(records)) {
+          throw new Error('Import payload for "' + storeName + '" must be an array.');
+        }
+
+        for (var j = 0; j < records.length; j++) {
+          await requestToPromise(store.put(records[j]));
+        }
+      }
+
+      await transactionDone(tx);
+    });
   }
 
   function open() {
@@ -168,10 +212,15 @@
       return Promise.resolve(state.db);
     }
 
-    return new Promise(function (resolve, reject) {
+    if (state.openingPromise) {
+      return state.openingPromise;
+    }
+
+    state.openingPromise = new Promise(function (resolve, reject) {
       var request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
 
       request.onerror = function () {
+        state.openingPromise = null;
         reject(request.error);
       };
 
@@ -180,10 +229,24 @@
       };
 
       request.onsuccess = function () {
-        state.db = request.result;
+        var db = request.result;
+        db.onclose = function () {
+          clearOpenState(db);
+        };
+        db.onversionchange = function () {
+          try {
+            db.close();
+          } finally {
+            clearOpenState(db);
+          }
+        };
+        state.db = db;
+        state.openingPromise = null;
         resolve(state.db);
       };
     });
+
+    return state.openingPromise;
   }
 
   window.KaPDB = {

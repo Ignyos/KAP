@@ -213,9 +213,16 @@
     return String((templateRecord && templateRecord.id) || '') + '::' + String((detailItem && detailItem.id) || '');
   }
 
+  async function getLatestTemplateDetailItem(templateId, detailItemId) {
+    var detailItems = await window.KaPTemplatesService.getTemplateItems(templateId);
+    return detailItems.find(function (item) {
+      return item.id === detailItemId;
+    }) || null;
+  }
+
   async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
     var targetKey = getTargetAddKey(templateRecord, detailItem);
-    pendingTargetAddClicksByKey[targetKey] = (pendingTargetAddClicksByKey[targetKey] || 0) + 1;
+    pendingTargetAddClicksByKey[targetKey] = true;
 
     if (processingTargetAddByKey[targetKey]) {
       return;
@@ -224,12 +231,13 @@
     processingTargetAddByKey[targetKey] = true;
 
     try {
-      while ((pendingTargetAddClicksByKey[targetKey] || 0) > 0) {
-        pendingTargetAddClicksByKey[targetKey] -= 1;
-        var didApply = await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
+      while (pendingTargetAddClicksByKey[targetKey] === true) {
+        pendingTargetAddClicksByKey[targetKey] = false;
+        var latestDetailItem = await getLatestTemplateDetailItem(templateRecord.id, detailItem.id);
+        var didApply = await addTemplateItemToTargetListImpl(templateRecord, latestDetailItem || detailItem, container, hooks);
         if (didApply === false) {
           // If target list selection is canceled, clear queued clicks for this item.
-          pendingTargetAddClicksByKey[targetKey] = 0;
+          pendingTargetAddClicksByKey[targetKey] = false;
           break;
         }
       }

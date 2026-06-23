@@ -287,11 +287,18 @@
     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
     var descriptionText = detailItem.description || '';
     var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
+    var currentQuantityText = detailItem.quantityText == null ? null : String(detailItem.quantityText);
     var uomAbbreviation = detailItem.uomAbbreviation || null;
     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
 
     nameNode.textContent = itemName;
+    if (detailItem.isOptional === true) {
+      var optionalLabel = document.createElement('span');
+      optionalLabel.className = 'detail-item-optional-label';
+      optionalLabel.textContent = ' (optional)';
+      nameNode.appendChild(optionalLabel);
+    }
 
     if (detailItem.isCrossedOff) {
       node.classList.add('detail-item-row--crossed');
@@ -304,7 +311,7 @@
       });
     }
 
-    function updateQtyPill(qty, abbr) {
+    function updateQtyPill(qty, abbr, displayQtyText) {
       if (!qtyPillNode) {
         return;
       }
@@ -314,7 +321,12 @@
       var showPill = (qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && (numericQty !== 1 || hasUom)) || hasUom;
 
       if (showPill) {
-        var pillText = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 ? String(qty) : '';
+        var pillText = '';
+        if (displayQtyText != null && String(displayQtyText).trim()) {
+          pillText = String(displayQtyText).trim();
+        } else if (qty != null && !Number.isNaN(numericQty) && numericQty !== 0) {
+          pillText = String(qty);
+        }
         if (abbr) {
           pillText = pillText ? pillText + '\u00a0' + abbr : abbr;
         }
@@ -330,7 +342,7 @@
       }
     }
 
-    updateQtyPill(currentQuantity, uomAbbreviation);
+    updateQtyPill(currentQuantity, uomAbbreviation, currentQuantityText);
 
     if (descriptionText) {
       metaNode.textContent = descriptionText;
@@ -822,6 +834,7 @@
       var uomSelect = null;
       var uomUnits = [];
       var selectedUomId = options.initialUnitOfMeasureId || null;
+      var optionalInput = null;
 
       if (showQuantityField) {
         var quantityLabel = document.createElement('label');
@@ -918,6 +931,24 @@
 
         quantityRow.appendChild(uomSelect);
         form.appendChild(quantityRow);
+      }
+
+      if (options.showOptionalField === true) {
+        var optionalRow = document.createElement('label');
+        optionalRow.className = 'modal-checklist-row modal-optional-row';
+
+        optionalInput = document.createElement('input');
+        optionalInput.type = 'checkbox';
+        optionalInput.className = 'modal-checklist-checkbox';
+        optionalInput.checked = options.initialIsOptional === true;
+        optionalRow.appendChild(optionalInput);
+
+        var optionalText = document.createElement('span');
+        optionalText.className = 'modal-checklist-name';
+        optionalText.textContent = options.optionalLabel || 'Mark ingredient as optional';
+        optionalRow.appendChild(optionalText);
+
+        form.appendChild(optionalRow);
       }
 
       var categoryInput = null;
@@ -1298,6 +1329,7 @@
           showError('');
 
           var rawName = String(nameInput.value || '').trim();
+          var rawQuantityText = quantityInput ? String(quantityInput.value || '').trim() : '';
           if (!rawName) {
             showError('Item name is required.');
             nameInput.focus();
@@ -1342,8 +1374,10 @@
             close({
               name: rawName,
               quantity: quantityResult.value,
+              quantityText: rawQuantityText || null,
               unitOfMeasureId: selectedUomId || null,
               description: String(descriptionInput.value || '').trim(),
+              isOptional: optionalInput ? optionalInput.checked === true : false,
               categoryId: category ? category.id || '' : '',
               categoryName: category ? category.name || '' : ''
             });
@@ -1364,8 +1398,10 @@
             item: item,
             name: rawName,
             quantity: quantityResult.value,
+            quantityText: rawQuantityText || null,
             unitOfMeasureId: selectedUomId || null,
             description: String(descriptionInput.value || '').trim(),
+            isOptional: optionalInput ? optionalInput.checked === true : false,
             categoryId: category ? category.id || '' : '',
             categoryName: category ? category.name || '' : ''
           });
