@@ -1,3 +1,48 @@
+# Release v2026-06-23-00-25
+
+## Overview
+This release introduces comprehensive data import and export capabilities with intelligent sync support. You can now backup and restore your data, or merge imported data with existing records to keep both local and imported changes.
+
+## New Features
+- **Data Export**: Export all your app data (lists, recipes, categories, units, and more) to a JSON file with a single click from Settings > Data > Export.
+- **Data Import with Merge Mode**: Import previously exported data and merge it with your current local data. Records are intelligently synced based on update timestamps—newer records always win.
+- **Data Import with Replace Mode**: Restore a complete backup by replacing all local data with imported data. Available as a secondary option with explicit confirmation to prevent accidents.
+- **Import Mode Selection Modal**: Single, clear modal showing both Merge and Replace options with descriptions so you understand the choice before proceeding. Merge is selected by default.
+- **Delete Synchronization**: Deletions are now tracked and propagated during import so that records deleted on one device can be deleted on another during a merge.
+
+## Improvements
+- **Data Persistence**: Settings now includes a dedicated Data section with Export and Import controls in one place.
+- **Import Summary**: After a successful import, a detailed summary shows how many records were inserted, updated, and skipped, plus how many deletions were applied.
+- **Automatic Cleanup**: Tombstones (deletion records) older than 365 days are automatically purged during export and import to keep storage lean.
+- **Responsive Import Controls**: Export and Import buttons stack vertically on mobile while remaining inline on larger screens.
+
+## Technical Changes
+- Upgraded IndexedDB schema version to 8.
+- Added `syncTombstones` store to track deleted records with timestamps for deletion propagation.
+- Added `KaPImportExportService` module handling export, import, and merge logic.
+- Implemented Last-Write-Wins collision resolution: newer record timestamps override older ones during merge.
+- Added `removeHard` and `replaceStores` database helpers to support import operations.
+- Added `ShowImportModeModal` UI helper for the single-screen import mode choice.
+- Export files are versioned (schema version 2) to support future format changes.
+- Added README.md with getting-started documentation for new users.
+
+## Installation
+1. Clone or pull the latest code from the repository.
+2. Open `src/index.html` or `docs/index.html` in a web browser.
+
+## Requirements
+- Modern web browser with ES5 JavaScript support.
+- LocalStorage and IndexedDB support for data persistence.
+- File system access to import/export JSON files.
+
+## Documentation
+- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+- For feature documentation and usage guides, see `application-structure.md`.
+- For recipe feature planning notes, see `recipe-feature-definition.md`.
+- Getting started guide: see `README.md`.
+
+---
+
 # Release v2026-05-17-00-59
 
 ## Overview

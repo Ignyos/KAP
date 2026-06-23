@@ -1,0 +1,1923 @@
+Release timestamp: 2026-06-23-00-25
+Diff source: 2026-05-17-00-59..HEAD
+Generated at: 2026-06-22 20:25:35Z
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..2fb4b37
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,30 @@
++# Kitchen & Pantry
++
++Kitchen & Pantry helps you organize grocery lists, pantry and fridge checklists, and recipes in one place.
++
++Use the app online:
++
++- https://kap.ignyos.com
++
++## What You Can Do
++
++- Create and manage grocery lists.
++- Keep pantry and fridge checklists you can reuse.
++- Create recipes and maintain multiple versions of each recipe.
++- Manage units of measure from a dedicated Units of Measure page.
++
++## Getting Started
++
++1. Open https://kap.ignyos.com.
++2. On the Home screen, choose Grocery Lists, Pantry & Fridge, or Recipes.
++3. Add your records and update them as needed.
++4. Optional: open the menu and choose Install App to add Kitchen & Pantry to your device.
++
++## How It Works
++
++- Your information is saved in your browser on your device.
++- Recipes support version history so you can create and keep separate recipe versions.
++
++## Release Updates
++
++- Release history: https://github.com/Ignyos/KAP/releases
+diff --git a/docs/data/db.js b/docs/data/db.js
+index 03572c8..1b51c1e 100644
+--- a/docs/data/db.js
++++ b/docs/data/db.js
+@@ -1,6 +1,6 @@
+ (function () {
+   var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 7;
++  var DATABASE_VERSION = 8;
+ 
+   var state = {
+     db: null
+@@ -76,11 +76,90 @@
+     return value;
+   }
+ 
+-  async function remove(storeName, key) {
++  function canTrackTombstone(db, storeName, key) {
++    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
++      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
++      : 'syncTombstones';
++    if (!db.objectStoreNames.contains(tombstoneStoreName)) {
++      return false;
++    }
++
++    if (storeName === tombstoneStoreName || key === null || key === undefined || key === '') {
++      return false;
++    }
++
++    return true;
++  }
++
++  function buildTombstone(storeName, key) {
++    var timestamp = new Date().toISOString();
++    return {
++      id: String(storeName) + '::' + String(key),
++      storeName: String(storeName),
++      recordId: String(key),
++      deletedDate: timestamp,
++      updatedDate: timestamp,
++      createdDate: timestamp
++    };
++  }
++
++  async function remove(storeName, key, options) {
+     var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
++    var skipTombstone = options && options.skipTombstone === true;
++    var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
++    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
++      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
++      : 'syncTombstones';
++    var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
++    var tx = db.transaction(txStores, 'readwrite');
+     var store = tx.objectStore(storeName);
++
+     await requestToPromise(store.delete(key));
++
++    if (includeTombstone) {
++      var tombstoneStore = tx.objectStore(tombstoneStoreName);
++      await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
++    }
++
++    await transactionDone(tx);
++  }
++
++  async function removeHard(storeName, key) {
++    await remove(storeName, key, { skipTombstone: true });
++  }
++
++  async function clearStore(storeName) {
++    var db = ensureOpen();
++    var tx = db.transaction(storeName, 'readwrite');
++    var store = tx.objectStore(storeName);
++    await requestToPromise(store.clear());
++    await transactionDone(tx);
++  }
++
++  async function replaceStores(recordsByStore) {
++    var db = ensureOpen();
++    var storeNames = Object.keys(recordsByStore || {});
++    if (storeNames.length === 0) {
++      return;
++    }
++
++    var tx = db.transaction(storeNames, 'readwrite');
++
++    for (var i = 0; i < storeNames.length; i++) {
++      var storeName = storeNames[i];
++      var store = tx.objectStore(storeName);
++      await requestToPromise(store.clear());
++
++      var records = recordsByStore[storeName];
++      if (!Array.isArray(records)) {
++        throw new Error('Import payload for "' + storeName + '" must be an array.');
++      }
++
++      for (var j = 0; j < records.length; j++) {
++        await requestToPromise(store.put(records[j]));
++      }
++    }
++
+     await transactionDone(tx);
+   }
+ 
+@@ -113,6 +192,10 @@
+     readAllFromIndex: readAllFromIndex,
+     readByKey: readByKey,
+     upsert: upsert,
+-    remove: remove
++    remove: remove,
++    removeHard: removeHard,
++    clearStore: clearStore,
++    replaceStores: replaceStores,
++    DB_VERSION: DATABASE_VERSION
+   };
+ })();
+diff --git a/docs/data/stores.js b/docs/data/stores.js
+index a3d5540..b0f3d13 100644
+--- a/docs/data/stores.js
++++ b/docs/data/stores.js
+@@ -8,7 +8,8 @@
+     RECIPE_INSTRUCTIONS: 'recipeInstructions',
+     TAGS: 'tags',
+     RECIPE_TAG_MAP: 'recipeTagMap',
+-    UNIT_OF_MEASURES: 'unitOfMeasures'
++    UNIT_OF_MEASURES: 'unitOfMeasures',
++    SYNC_TOMBSTONES: 'syncTombstones'
+   };
+ 
+   var INDEX_NAMES = {
+@@ -28,7 +29,9 @@
+     RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag',
+     UNIT_OF_MEASURES_BY_NAME: 'by_name',
+     UNIT_OF_MEASURES_BY_GROUP: 'by_group',
+-    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active'
++    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active',
++    SYNC_TOMBSTONES_BY_STORE: 'by_store_name',
++    SYNC_TOMBSTONES_BY_RECORD_KEY: 'by_store_and_record'
+   };
+ 
+   function ensureStore(db, transaction, storeName, options) {
+@@ -116,6 +119,10 @@
+     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_GROUP, 'group', { unique: false });
+     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_ACTIVE, 'isActive', { unique: false });
+ 
++    var syncTombstonesStore = ensureStore(db, transaction, STORE_NAMES.SYNC_TOMBSTONES, { keyPath: 'id' });
++    ensureIndex(syncTombstonesStore, INDEX_NAMES.SYNC_TOMBSTONES_BY_STORE, 'storeName', { unique: false });
++    ensureIndex(syncTombstonesStore, INDEX_NAMES.SYNC_TOMBSTONES_BY_RECORD_KEY, ['storeName', 'recordId'], { unique: true });
++
+     if (oldVersion < 6) {
+       var existingTagsByName = {};
+ 
+diff --git a/docs/features/settings/import-export-service.js b/docs/features/settings/import-export-service.js
+new file mode 100644
+index 0000000..cd84daa
+--- /dev/null
++++ b/docs/features/settings/import-export-service.js
+@@ -0,0 +1,372 @@
++(function () {
++  var EXPORT_SCHEMA_VERSION = 2;
++  var TOMBSTONE_STORE_NAME = 'syncTombstones';
++  var TOMBSTONE_RETENTION_DAYS = 365;
++  var DAY_IN_MS = 24 * 60 * 60 * 1000;
++
++  var EXPORT_STORE_ORDER = [
++    'items',
++    'categories',
++    'listRecords',
++    'listRecordItems',
++    'recipeVersions',
++    'recipeInstructions',
++    'tags',
++    'recipeTagMap',
++    'unitOfMeasures',
++    TOMBSTONE_STORE_NAME
++  ];
++
++  var MERGE_DATA_STORE_ORDER = EXPORT_STORE_ORDER.filter(function (storeName) {
++    return storeName !== TOMBSTONE_STORE_NAME;
++  });
++
++  function makeTimestamp() {
++    return new Date().toISOString();
++  }
++
++  function asArray(value) {
++    return Array.isArray(value) ? value : [];
++  }
++
++  function cloneForJson(value) {
++    return JSON.parse(JSON.stringify(value));
++  }
++
++  async function exportData() {
++    await window.KaPDB.open();
++    await pruneExpiredTombstones();
++
++    var stores = {};
++    for (var i = 0; i < EXPORT_STORE_ORDER.length; i++) {
++      var storeName = EXPORT_STORE_ORDER[i];
++      stores[storeName] = await window.KaPDB.readAll(storeName);
++    }
++
++    return {
++      exportSchemaVersion: EXPORT_SCHEMA_VERSION,
++      exportedAtUtc: makeTimestamp(),
++      app: {
++        name: 'Kitchen and Pantry',
++        databaseName: 'ignyos.kap',
++        databaseVersion: Number(window.KaPDB.DB_VERSION || 0)
++      },
++      stores: stores
++    };
++  }
++
++  function normalizeStoreMap(rawStores) {
++    var source = rawStores && typeof rawStores === 'object' ? rawStores : {};
++    var normalized = {};
++
++    for (var i = 0; i < EXPORT_STORE_ORDER.length; i++) {
++      var storeName = EXPORT_STORE_ORDER[i];
++      normalized[storeName] = asArray(source[storeName]);
++    }
++
++    return normalized;
++  }
++
++  function validatePayload(payload) {
++    if (!payload || typeof payload !== 'object') {
++      throw new Error('Invalid import file.');
++    }
++
++    var schemaVersion = Number(payload.exportSchemaVersion || 0);
++    if (schemaVersion <= 0 || schemaVersion > EXPORT_SCHEMA_VERSION) {
++      throw new Error('Unsupported export schema version: ' + String(payload.exportSchemaVersion || 'unknown') + '.');
++    }
++
++    if (!payload.stores || typeof payload.stores !== 'object') {
++      throw new Error('Import file is missing stores.');
++    }
++  }
++
++  function normalizeImportMode(mode) {
++    var normalized = String(mode || 'replace').trim().toLowerCase();
++    return normalized === 'merge' ? 'merge' : 'replace';
++  }
++
++  function getTimestampValue(record) {
++    var raw = record && record.updatedDate ? String(record.updatedDate) : '';
++    if (!raw) {
++      return null;
++    }
++
++    var parsed = Date.parse(raw);
++    return Number.isFinite(parsed) ? parsed : null;
++  }
++
++  function getTombstoneTimestampValue(record) {
++    var deletedRaw = record && record.deletedDate ? String(record.deletedDate) : '';
++    if (deletedRaw) {
++      var deletedParsed = Date.parse(deletedRaw);
++      if (Number.isFinite(deletedParsed)) {
++        return deletedParsed;
++      }
++    }
++
++    return getTimestampValue(record);
++  }
++
++  function getRetentionCutoffMs() {
++    return Date.now() - (TOMBSTONE_RETENTION_DAYS * DAY_IN_MS);
++  }
++
++  async function pruneExpiredTombstones() {
++    var summary = {
++      purged: 0,
++      skippedInvalid: 0
++    };
++
++    var cutoffMs = getRetentionCutoffMs();
++    var tombstones = await window.KaPDB.readAll(TOMBSTONE_STORE_NAME);
++
++    for (var i = 0; i < tombstones.length; i++) {
++      var tombstone = tombstones[i] || {};
++      var tombstoneId = getRecordId(tombstone);
++      var tombstoneTs = getTombstoneTimestampValue(tombstone);
++
++      if (!tombstoneId || tombstoneTs === null) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      if (tombstoneTs < cutoffMs) {
++        await window.KaPDB.removeHard(TOMBSTONE_STORE_NAME, tombstoneId);
++        summary.purged += 1;
++      }
++    }
++
++    return summary;
++  }
++
++  function getRecordId(record) {
++    if (!record || typeof record !== 'object') {
++      return null;
++    }
++
++    var id = record.id;
++    if (id === null || id === undefined || id === '') {
++      return null;
++    }
++
++    return String(id);
++  }
++
++  async function mergeStore(storeName, incomingRecords) {
++    var summary = {
++      inserted: 0,
++      updated: 0,
++      skippedOlder: 0,
++      skippedInvalid: 0
++    };
++
++    var localRecords = await window.KaPDB.readAll(storeName);
++    var localById = {};
++
++    for (var i = 0; i < localRecords.length; i++) {
++      var localRecord = localRecords[i];
++      var localId = getRecordId(localRecord);
++      if (localId) {
++        localById[localId] = localRecord;
++      }
++    }
++
++    for (var j = 0; j < incomingRecords.length; j++) {
++      var incomingRecord = incomingRecords[j];
++      var incomingId = getRecordId(incomingRecord);
++      if (!incomingId) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      var existingRecord = localById[incomingId];
++      if (!existingRecord) {
++        await window.KaPDB.upsert(storeName, incomingRecord);
++        localById[incomingId] = incomingRecord;
++        summary.inserted += 1;
++        continue;
++      }
++
++      var incomingTs = getTimestampValue(incomingRecord);
++      var existingTs = getTimestampValue(existingRecord);
++
++      if (incomingTs === null && existingTs !== null) {
++        summary.skippedOlder += 1;
++        continue;
++      }
++
++      if (incomingTs !== null && existingTs !== null && incomingTs < existingTs) {
++        summary.skippedOlder += 1;
++        continue;
++      }
++
++      await window.KaPDB.upsert(storeName, incomingRecord);
++      localById[incomingId] = incomingRecord;
++      summary.updated += 1;
++    }
++
++    return summary;
++  }
++
++  async function applyMergedTombstones() {
++    var summary = {
++      deleted: 0,
++      skippedOlder: 0,
++      skippedInvalid: 0
++    };
++
++    var tombstones = await window.KaPDB.readAll(TOMBSTONE_STORE_NAME);
++    for (var i = 0; i < tombstones.length; i++) {
++      var tombstone = tombstones[i] || {};
++      var storeName = String(tombstone.storeName || '');
++      var recordId = String(tombstone.recordId || '');
++
++      if (!storeName || !recordId || MERGE_DATA_STORE_ORDER.indexOf(storeName) === -1) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      var localRecord = await window.KaPDB.readByKey(storeName, recordId);
++      if (!localRecord) {
++        continue;
++      }
++
++      var tombstoneTs = getTombstoneTimestampValue(tombstone);
++      var localTs = getTimestampValue(localRecord);
++
++      if (tombstoneTs === null) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      if (localTs !== null && localTs > tombstoneTs) {
++        summary.skippedOlder += 1;
++        continue;
++      }
++
++      await window.KaPDB.removeHard(storeName, recordId);
++      summary.deleted += 1;
++    }
++
++    return summary;
++  }
++
++  async function importData(payload, mode) {
++    await window.KaPDB.open();
++    validatePayload(payload);
++
++    var stores = normalizeStoreMap(payload.stores);
++    var importMode = normalizeImportMode(mode);
++    var storeSummaries = {};
++
++    if (importMode === 'replace') {
++      await window.KaPDB.replaceStores(stores);
++
++      for (var i = 0; i < EXPORT_STORE_ORDER.length; i++) {
++        var replaceStoreName = EXPORT_STORE_ORDER[i];
++        storeSummaries[replaceStoreName] = {
++          inserted: stores[replaceStoreName].length,
++          updated: 0,
++          skippedOlder: 0,
++          skippedInvalid: 0
++        };
++      }
++    } else {
++      for (var j = 0; j < MERGE_DATA_STORE_ORDER.length; j++) {
++        var mergeStoreName = MERGE_DATA_STORE_ORDER[j];
++        storeSummaries[mergeStoreName] = await mergeStore(mergeStoreName, stores[mergeStoreName]);
++      }
++
++      storeSummaries[TOMBSTONE_STORE_NAME] = await mergeStore(TOMBSTONE_STORE_NAME, stores[TOMBSTONE_STORE_NAME]);
++    }
++
++    var tombstoneRetention = await pruneExpiredTombstones();
++    var tombstoneApplication = await applyMergedTombstones();
++
++    return {
++      mode: importMode,
++      importedAtUtc: makeTimestamp(),
++      importedStoreCounts: Object.keys(stores).reduce(function (acc, storeName) {
++        acc[storeName] = stores[storeName].length;
++        return acc;
++      }, {}),
++      storeSummaries: storeSummaries,
++      tombstoneApplication: tombstoneApplication,
++      tombstoneRetention: tombstoneRetention
++    };
++  }
++
++  function buildExportFilename() {
++    var stamp = makeTimestamp().replace(/[:]/g, '-').replace(/\..+$/, '').replace('T', '_');
++    return 'kap-export-v' + String(EXPORT_SCHEMA_VERSION) + '-' + stamp + '.json';
++  }
++
++  async function downloadExportFile() {
++    var payload = await exportData();
++    var json = JSON.stringify(cloneForJson(payload), null, 2);
++    var blob = new Blob([json], { type: 'application/json' });
++    var url = URL.createObjectURL(blob);
++
++    try {
++      var link = document.createElement('a');
++      link.href = url;
++      link.download = buildExportFilename();
++      document.body.appendChild(link);
++      link.click();
++      document.body.removeChild(link);
++    } finally {
++      URL.revokeObjectURL(url);
++    }
++
++    return payload;
++  }
++
++  async function parseJsonFile(file) {
++    if (!file) {
++      throw new Error('No file selected.');
++    }
++
++    var text = await file.text();
++    var payload = JSON.parse(text);
++    return payload;
++  }
++
++  function openFilePicker() {
++    return new Promise(function (resolve) {
++      var input = document.createElement('input');
++      input.type = 'file';
++      input.accept = 'application/json,.json';
++      input.style.display = 'none';
++
++      function cleanup() {
++        input.removeEventListener('change', onChange);
++        if (input.parentNode) {
++          document.body.removeChild(input);
++        }
++      }
++
++      function onChange() {
++        var file = input.files && input.files[0] ? input.files[0] : null;
++        cleanup();
++        resolve(file);
++      }
++
++      input.addEventListener('change', onChange);
++      document.body.appendChild(input);
++      input.click();
++    });
++  }
++
++  window.KaPImportExportService = {
++    EXPORT_SCHEMA_VERSION: EXPORT_SCHEMA_VERSION,
++    EXPORT_STORE_ORDER: EXPORT_STORE_ORDER.slice(),
++    TOMBSTONE_RETENTION_DAYS: TOMBSTONE_RETENTION_DAYS,
++    exportData: exportData,
++    importData: importData,
++    downloadExportFile: downloadExportFile,
++    openFilePicker: openFilePicker,
++    parseJsonFile: parseJsonFile
++  };
++})();
+diff --git a/docs/features/settings/settings-page.js b/docs/features/settings/settings-page.js
+index 3a40d5d..6e04d61 100644
+--- a/docs/features/settings/settings-page.js
++++ b/docs/features/settings/settings-page.js
+@@ -45,6 +45,7 @@
+     body.className = 'settings-body';
+     body.appendChild(buildThemeRow());
+     body.appendChild(buildTextSizeRow());
++    body.appendChild(buildImportExportRow());
+ 
+     section.appendChild(body);
+ 
+@@ -133,6 +134,156 @@
+     return row;
+   }
+ 
++  function buildImportExportRow() {
++    var row = document.createElement('div');
++    row.className = 'settings-row';
++
++    var label = document.createElement('span');
++    label.className = 'settings-row-label';
++    label.textContent = 'Data';
++    row.appendChild(label);
++
++    var actions = document.createElement('div');
++    actions.className = 'settings-inline-actions';
++
++    var exportButton = document.createElement('button');
++    exportButton.type = 'button';
++    exportButton.className = 'settings-action-button';
++    exportButton.textContent = 'Export';
++    exportButton.addEventListener('click', function () {
++      handleExportClick(exportButton);
++    });
++
++    var importButton = document.createElement('button');
++    importButton.type = 'button';
++    importButton.className = 'settings-action-button settings-action-button--danger';
++    importButton.textContent = 'Import';
++    importButton.addEventListener('click', function () {
++      handleImportClick(importButton);
++    });
++
++    actions.appendChild(exportButton);
++    actions.appendChild(importButton);
++    row.appendChild(actions);
++
++    return row;
++  }
++
++  async function handleExportClick(button) {
++    if (!window.KaPImportExportService) {
++      await window.KaPUI.ShowAlert({
++        title: 'Export Not Available',
++        message: 'Import/export service is not loaded.'
++      });
++      return;
++    }
++
++    button.disabled = true;
++    try {
++      await window.KaPImportExportService.downloadExportFile();
++      await window.KaPUI.ShowAlert({
++        title: 'Export Complete',
++        message: 'Your data was exported successfully.'
++      });
++    } catch (error) {
++      await window.KaPUI.ShowAlert({
++        title: 'Export Failed',
++        message: error && error.message ? error.message : 'Unable to export data.'
++      });
++    } finally {
++      button.disabled = false;
++    }
++  }
++
++  async function handleImportClick(button) {
++    if (!window.KaPImportExportService) {
++      await window.KaPUI.ShowAlert({
++        title: 'Import Not Available',
++        message: 'Import/export service is not loaded.'
++      });
++      return;
++    }
++
++    var mode = await chooseImportMode();
++    if (!mode) {
++      return;
++    }
++
++    button.disabled = true;
++    try {
++      var file = await window.KaPImportExportService.openFilePicker();
++      if (!file) {
++        return;
++      }
++
++      var payload = await window.KaPImportExportService.parseJsonFile(file);
++      var result = await window.KaPImportExportService.importData(payload, mode);
++
++      await window.KaPUI.ShowAlert({
++        title: 'Import Complete',
++        message: buildImportSummaryMessage(result)
++      });
++
++      window.location.reload();
++    } catch (error) {
++      await window.KaPUI.ShowAlert({
++        title: 'Import Failed',
++        message: error && error.message ? error.message : 'Unable to import data.'
++      });
++    } finally {
++      button.disabled = false;
++    }
++  }
++
++  async function chooseImportMode() {
++    var mode = await window.KaPUI.ShowImportModeModal();
++    if (!mode) {
++      return null;
++    }
++
++    if (mode === 'merge') {
++      return 'merge';
++    }
++
++    var useReplace = await window.KaPUI.ShowConfirm({
++      title: 'Replace Existing Data?',
++      message: 'Replace deletes all current local data and restores only the imported file.',
++      confirmLabel: 'Replace',
++      isDanger: true
++    });
++
++    return useReplace ? 'replace' : null;
++  }
++
++  function buildImportSummaryMessage(result) {
++    var modeLabel = String(result && result.mode || 'replace').toUpperCase();
++    var stores = result && result.storeSummaries ? result.storeSummaries : {};
++    var storeNames = Object.keys(stores);
++    var inserted = 0;
++    var updated = 0;
++    var skippedOlder = 0;
++    var skippedInvalid = 0;
++    var tombstoneDeleted = Number(result && result.tombstoneApplication && result.tombstoneApplication.deleted || 0);
++    var tombstonePurged = Number(result && result.tombstoneRetention && result.tombstoneRetention.purged || 0);
++
++    for (var i = 0; i < storeNames.length; i++) {
++      var summary = stores[storeNames[i]] || {};
++      inserted += Number(summary.inserted || 0);
++      updated += Number(summary.updated || 0);
++      skippedOlder += Number(summary.skippedOlder || 0);
++      skippedInvalid += Number(summary.skippedInvalid || 0);
++    }
++
++    return modeLabel + ' import complete. '
++      + 'Inserted: ' + inserted + '. '
++      + 'Updated: ' + updated + '. '
++      + 'Deleted by tombstones: ' + tombstoneDeleted + '. '
++        + 'Purged tombstones (365d): ' + tombstonePurged + '. '
++      + 'Skipped older: ' + skippedOlder + '. '
++      + 'Skipped invalid: ' + skippedInvalid + '. '
++      + 'The app will now reload.';
++  }
++
+   window.KaPSettingsPage = {
+     renderInto: renderInto
+   };
+diff --git a/docs/index.html b/docs/index.html
+index 6c72764..295d3fd 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -6,7 +6,7 @@
+   <title>Kitchen & Pantry</title>
+   <link rel="icon" type="image/svg+xml" href="./assets/icon-192.svg" />
+   <link rel="apple-touch-icon" href="./assets/icon-192.svg" />
+-  <link rel="stylesheet" href="./styles.css?v=2026-05-17-00-59" />
++  <link rel="stylesheet" href="./styles.css?v=2026-06-22-23-55" />
+ </head>
+ <body>
+   <div id="app-root" class="app-root">
+@@ -113,9 +113,9 @@
+ 
+   <script src="./shared/ids.js?v=2026-05-17-00-59"></script>
+   <script src="./shared/settings.js?v=2026-05-17-00-59"></script>
+-  <script src="./data/stores.js?v=2026-05-17-00-59"></script>
+-  <script src="./data/db.js?v=2026-05-17-00-59"></script>
+-  <script src="./ui/ui.js?v=2026-05-17-00-59"></script>
++  <script src="./data/stores.js?v=2026-06-22-23-05"></script>
++  <script src="./data/db.js?v=2026-06-22-23-05"></script>
++  <script src="./ui/ui.js?v=2026-06-22-23-55"></script>
+   <script src="./features/items/items-service.js?v=2026-05-17-00-59"></script>
+   <script src="./features/categories/categories-service.js?v=2026-05-17-00-59"></script>
+   <script src="./shared/item-discovery.js?v=2026-05-17-00-59"></script>
+@@ -127,7 +127,8 @@
+   <script src="./features/recipes/recipes-service.js?v=2026-05-17-00-59"></script>
+   <script src="./features/recipes/recipes-page.js?v=2026-05-17-00-59"></script>
+   <script src="./features/uom/uom-page.js?v=2026-05-17-00-59"></script>
+-  <script src="./features/settings/settings-page.js?v=2026-05-17-00-59"></script>
++  <script src="./features/settings/import-export-service.js?v=2026-06-22-23-35"></script>
++  <script src="./features/settings/settings-page.js?v=2026-06-22-23-55"></script>
+   <script src="./features/main/main-page.js?v=2026-05-17-00-59"></script>
+   <script src="./app-router.js?v=2026-05-17-00-59"></script>
+   <script src="./app-init.js?v=2026-05-17-00-59"></script>
+diff --git a/docs/styles.css b/docs/styles.css
+index 2c64398..0ff72c3 100644
+--- a/docs/styles.css
++++ b/docs/styles.css
+@@ -1538,6 +1538,42 @@ body {
+   outline-offset: -2px;
+ }
+ 
++.settings-inline-actions {
++  display: inline-flex;
++  gap: 0.5rem;
++  align-items: center;
++}
++
++.settings-action-button {
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.375rem 0.875rem;
++  font-size: 0.88rem;
++  background: var(--color-surface);
++  color: var(--color-text);
++  cursor: pointer;
++  transition: background 0.15s;
++}
++
++.settings-action-button:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.settings-action-button:disabled {
++  opacity: 0.6;
++  cursor: default;
++}
++
++.settings-action-button--danger {
++  border-color: #e74c3c;
++  color: #e74c3c;
++}
++
++.settings-action-button--danger:hover {
++  border-color: #c0392b;
++  color: #c0392b;
++}
++
+ @media (max-width: 640px) {
+   .settings-row {
+     align-items: stretch;
+@@ -1551,6 +1587,14 @@ body {
+     width: 100%;
+     overflow-x: auto;
+   }
++
++  .settings-inline-actions {
++    width: 100%;
++  }
++
++  .settings-action-button {
++    flex: 1;
++  }
+ }
+ 
+ /* Modal */
+@@ -1794,6 +1838,47 @@ body {
+   font-size: 0.95rem;
+ }
+ 
++.modal-choice-row {
++  display: grid;
++  grid-template-columns: auto 1fr;
++  gap: 0.75rem;
++  align-items: start;
++  padding: 0.75rem 0.875rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-surface);
++  cursor: pointer;
++}
++
++.modal-choice-row--danger {
++  border-color: #e4b4af;
++}
++
++.modal-choice-radio {
++  margin: 0.2rem 0 0;
++  width: 1rem;
++  height: 1rem;
++  accent-color: var(--color-brand);
++}
++
++.modal-choice-content {
++  display: grid;
++  gap: 0.25rem;
++}
++
++.modal-choice-title {
++  color: var(--color-text);
++  font-size: 0.95rem;
++  font-weight: 600;
++}
++
++.modal-choice-description {
++  margin: 0;
++  color: var(--color-muted);
++  font-size: 0.88rem;
++  line-height: 1.4;
++}
++
+ .modal-link {
+   color: var(--color-brand);
+   text-decoration: underline;
+diff --git a/docs/ui/ui.js b/docs/ui/ui.js
+index c47ec3c..6c1f666 100644
+--- a/docs/ui/ui.js
++++ b/docs/ui/ui.js
+@@ -2737,6 +2737,83 @@
+     });
+   }
+ 
++  function ShowImportModeModal() {
++    return showModal(function (bodyNode, confirmButton) {
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var options = [
++        {
++          value: 'merge',
++          title: 'Merge',
++          description: 'Use Merge mode? Merge keeps existing data and applies newer imported records.'
++        },
++        {
++          value: 'replace',
++          title: 'Replace',
++          description: 'Replace deletes all current local data and restores only the imported file.'
++        }
++      ];
++
++      var selectedValue = 'merge';
++
++      options.forEach(function (option, index) {
++        var label = document.createElement('label');
++        label.className = 'modal-choice-row' + (option.value === 'replace' ? ' modal-choice-row--danger' : '');
++
++        var radio = document.createElement('input');
++        radio.type = 'radio';
++        radio.name = 'kap-import-mode';
++        radio.value = option.value;
++        radio.className = 'modal-choice-radio';
++        radio.checked = index === 0;
++        radio.addEventListener('change', function () {
++          if (radio.checked) {
++            selectedValue = option.value;
++          }
++        });
++        label.appendChild(radio);
++
++        var content = document.createElement('div');
++        content.className = 'modal-choice-content';
++
++        var title = document.createElement('div');
++        title.className = 'modal-choice-title';
++        title.textContent = option.title;
++        content.appendChild(title);
++
++        var description = document.createElement('p');
++        description.className = 'modal-choice-description';
++        description.textContent = option.description;
++        content.appendChild(description);
++
++        label.appendChild(content);
++        form.appendChild(label);
++      });
++
++      bodyNode.appendChild(form);
++
++      requestAnimationFrame(function () {
++        var firstRadio = form.querySelector('.modal-choice-radio');
++        if (firstRadio) {
++          firstRadio.focus();
++        } else {
++          confirmButton.focus();
++        }
++      });
++
++      return function () {
++        return selectedValue;
++      };
++    }, {
++      title: 'Import Data',
++      confirmLabel: 'Import',
++      cancelValue: null,
++      isDanger: false,
++      compact: false
++    });
++  }
++
+   function ShowConfirm(config) {
+     return showModal(function (bodyNode, confirmButton, cancelButton) {
+       if (config.message) {
+@@ -2858,6 +2935,7 @@
+     ShowAddToListModal: ShowAddToListModal,
+     ShowNewVersionModal: ShowNewVersionModal,
+     ShowRecipeCloneModal: ShowRecipeCloneModal,
++    ShowImportModeModal: ShowImportModeModal,
+     ShowConfirm: ShowConfirm,
+     ShowAlert: ShowAlert,
+     ShowAboutModal: ShowAboutModal,
+diff --git a/src/data/db.js b/src/data/db.js
+index 03572c8..1b51c1e 100644
+--- a/src/data/db.js
++++ b/src/data/db.js
+@@ -1,6 +1,6 @@
+ (function () {
+   var DATABASE_NAME = 'ignyos.kap';
+-  var DATABASE_VERSION = 7;
++  var DATABASE_VERSION = 8;
+ 
+   var state = {
+     db: null
+@@ -76,11 +76,90 @@
+     return value;
+   }
+ 
+-  async function remove(storeName, key) {
++  function canTrackTombstone(db, storeName, key) {
++    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
++      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
++      : 'syncTombstones';
++    if (!db.objectStoreNames.contains(tombstoneStoreName)) {
++      return false;
++    }
++
++    if (storeName === tombstoneStoreName || key === null || key === undefined || key === '') {
++      return false;
++    }
++
++    return true;
++  }
++
++  function buildTombstone(storeName, key) {
++    var timestamp = new Date().toISOString();
++    return {
++      id: String(storeName) + '::' + String(key),
++      storeName: String(storeName),
++      recordId: String(key),
++      deletedDate: timestamp,
++      updatedDate: timestamp,
++      createdDate: timestamp
++    };
++  }
++
++  async function remove(storeName, key, options) {
+     var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
++    var skipTombstone = options && options.skipTombstone === true;
++    var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
++    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
++      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
++      : 'syncTombstones';
++    var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
++    var tx = db.transaction(txStores, 'readwrite');
+     var store = tx.objectStore(storeName);
++
+     await requestToPromise(store.delete(key));
++
++    if (includeTombstone) {
++      var tombstoneStore = tx.objectStore(tombstoneStoreName);
++      await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
++    }
++
++    await transactionDone(tx);
++  }
++
++  async function removeHard(storeName, key) {
++    await remove(storeName, key, { skipTombstone: true });
++  }
++
++  async function clearStore(storeName) {
++    var db = ensureOpen();
++    var tx = db.transaction(storeName, 'readwrite');
++    var store = tx.objectStore(storeName);
++    await requestToPromise(store.clear());
++    await transactionDone(tx);
++  }
++
++  async function replaceStores(recordsByStore) {
++    var db = ensureOpen();
++    var storeNames = Object.keys(recordsByStore || {});
++    if (storeNames.length === 0) {
++      return;
++    }
++
++    var tx = db.transaction(storeNames, 'readwrite');
++
++    for (var i = 0; i < storeNames.length; i++) {
++      var storeName = storeNames[i];
++      var store = tx.objectStore(storeName);
++      await requestToPromise(store.clear());
++
++      var records = recordsByStore[storeName];
++      if (!Array.isArray(records)) {
++        throw new Error('Import payload for "' + storeName + '" must be an array.');
++      }
++
++      for (var j = 0; j < records.length; j++) {
++        await requestToPromise(store.put(records[j]));
++      }
++    }
++
+     await transactionDone(tx);
+   }
+ 
+@@ -113,6 +192,10 @@
+     readAllFromIndex: readAllFromIndex,
+     readByKey: readByKey,
+     upsert: upsert,
+-    remove: remove
++    remove: remove,
++    removeHard: removeHard,
++    clearStore: clearStore,
++    replaceStores: replaceStores,
++    DB_VERSION: DATABASE_VERSION
+   };
+ })();
+diff --git a/src/data/stores.js b/src/data/stores.js
+index a3d5540..b0f3d13 100644
+--- a/src/data/stores.js
++++ b/src/data/stores.js
+@@ -8,7 +8,8 @@
+     RECIPE_INSTRUCTIONS: 'recipeInstructions',
+     TAGS: 'tags',
+     RECIPE_TAG_MAP: 'recipeTagMap',
+-    UNIT_OF_MEASURES: 'unitOfMeasures'
++    UNIT_OF_MEASURES: 'unitOfMeasures',
++    SYNC_TOMBSTONES: 'syncTombstones'
+   };
+ 
+   var INDEX_NAMES = {
+@@ -28,7 +29,9 @@
+     RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag',
+     UNIT_OF_MEASURES_BY_NAME: 'by_name',
+     UNIT_OF_MEASURES_BY_GROUP: 'by_group',
+-    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active'
++    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active',
++    SYNC_TOMBSTONES_BY_STORE: 'by_store_name',
++    SYNC_TOMBSTONES_BY_RECORD_KEY: 'by_store_and_record'
+   };
+ 
+   function ensureStore(db, transaction, storeName, options) {
+@@ -116,6 +119,10 @@
+     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_GROUP, 'group', { unique: false });
+     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_ACTIVE, 'isActive', { unique: false });
+ 
++    var syncTombstonesStore = ensureStore(db, transaction, STORE_NAMES.SYNC_TOMBSTONES, { keyPath: 'id' });
++    ensureIndex(syncTombstonesStore, INDEX_NAMES.SYNC_TOMBSTONES_BY_STORE, 'storeName', { unique: false });
++    ensureIndex(syncTombstonesStore, INDEX_NAMES.SYNC_TOMBSTONES_BY_RECORD_KEY, ['storeName', 'recordId'], { unique: true });
++
+     if (oldVersion < 6) {
+       var existingTagsByName = {};
+ 
+diff --git a/src/features/settings/import-export-service.js b/src/features/settings/import-export-service.js
+new file mode 100644
+index 0000000..cd84daa
+--- /dev/null
++++ b/src/features/settings/import-export-service.js
+@@ -0,0 +1,372 @@
++(function () {
++  var EXPORT_SCHEMA_VERSION = 2;
++  var TOMBSTONE_STORE_NAME = 'syncTombstones';
++  var TOMBSTONE_RETENTION_DAYS = 365;
++  var DAY_IN_MS = 24 * 60 * 60 * 1000;
++
++  var EXPORT_STORE_ORDER = [
++    'items',
++    'categories',
++    'listRecords',
++    'listRecordItems',
++    'recipeVersions',
++    'recipeInstructions',
++    'tags',
++    'recipeTagMap',
++    'unitOfMeasures',
++    TOMBSTONE_STORE_NAME
++  ];
++
++  var MERGE_DATA_STORE_ORDER = EXPORT_STORE_ORDER.filter(function (storeName) {
++    return storeName !== TOMBSTONE_STORE_NAME;
++  });
++
++  function makeTimestamp() {
++    return new Date().toISOString();
++  }
++
++  function asArray(value) {
++    return Array.isArray(value) ? value : [];
++  }
++
++  function cloneForJson(value) {
++    return JSON.parse(JSON.stringify(value));
++  }
++
++  async function exportData() {
++    await window.KaPDB.open();
++    await pruneExpiredTombstones();
++
++    var stores = {};
++    for (var i = 0; i < EXPORT_STORE_ORDER.length; i++) {
++      var storeName = EXPORT_STORE_ORDER[i];
++      stores[storeName] = await window.KaPDB.readAll(storeName);
++    }
++
++    return {
++      exportSchemaVersion: EXPORT_SCHEMA_VERSION,
++      exportedAtUtc: makeTimestamp(),
++      app: {
++        name: 'Kitchen and Pantry',
++        databaseName: 'ignyos.kap',
++        databaseVersion: Number(window.KaPDB.DB_VERSION || 0)
++      },
++      stores: stores
++    };
++  }
++
++  function normalizeStoreMap(rawStores) {
++    var source = rawStores && typeof rawStores === 'object' ? rawStores : {};
++    var normalized = {};
++
++    for (var i = 0; i < EXPORT_STORE_ORDER.length; i++) {
++      var storeName = EXPORT_STORE_ORDER[i];
++      normalized[storeName] = asArray(source[storeName]);
++    }
++
++    return normalized;
++  }
++
++  function validatePayload(payload) {
++    if (!payload || typeof payload !== 'object') {
++      throw new Error('Invalid import file.');
++    }
++
++    var schemaVersion = Number(payload.exportSchemaVersion || 0);
++    if (schemaVersion <= 0 || schemaVersion > EXPORT_SCHEMA_VERSION) {
++      throw new Error('Unsupported export schema version: ' + String(payload.exportSchemaVersion || 'unknown') + '.');
++    }
++
++    if (!payload.stores || typeof payload.stores !== 'object') {
++      throw new Error('Import file is missing stores.');
++    }
++  }
++
++  function normalizeImportMode(mode) {
++    var normalized = String(mode || 'replace').trim().toLowerCase();
++    return normalized === 'merge' ? 'merge' : 'replace';
++  }
++
++  function getTimestampValue(record) {
++    var raw = record && record.updatedDate ? String(record.updatedDate) : '';
++    if (!raw) {
++      return null;
++    }
++
++    var parsed = Date.parse(raw);
++    return Number.isFinite(parsed) ? parsed : null;
++  }
++
++  function getTombstoneTimestampValue(record) {
++    var deletedRaw = record && record.deletedDate ? String(record.deletedDate) : '';
++    if (deletedRaw) {
++      var deletedParsed = Date.parse(deletedRaw);
++      if (Number.isFinite(deletedParsed)) {
++        return deletedParsed;
++      }
++    }
++
++    return getTimestampValue(record);
++  }
++
++  function getRetentionCutoffMs() {
++    return Date.now() - (TOMBSTONE_RETENTION_DAYS * DAY_IN_MS);
++  }
++
++  async function pruneExpiredTombstones() {
++    var summary = {
++      purged: 0,
++      skippedInvalid: 0
++    };
++
++    var cutoffMs = getRetentionCutoffMs();
++    var tombstones = await window.KaPDB.readAll(TOMBSTONE_STORE_NAME);
++
++    for (var i = 0; i < tombstones.length; i++) {
++      var tombstone = tombstones[i] || {};
++      var tombstoneId = getRecordId(tombstone);
++      var tombstoneTs = getTombstoneTimestampValue(tombstone);
++
++      if (!tombstoneId || tombstoneTs === null) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      if (tombstoneTs < cutoffMs) {
++        await window.KaPDB.removeHard(TOMBSTONE_STORE_NAME, tombstoneId);
++        summary.purged += 1;
++      }
++    }
++
++    return summary;
++  }
++
++  function getRecordId(record) {
++    if (!record || typeof record !== 'object') {
++      return null;
++    }
++
++    var id = record.id;
++    if (id === null || id === undefined || id === '') {
++      return null;
++    }
++
++    return String(id);
++  }
++
++  async function mergeStore(storeName, incomingRecords) {
++    var summary = {
++      inserted: 0,
++      updated: 0,
++      skippedOlder: 0,
++      skippedInvalid: 0
++    };
++
++    var localRecords = await window.KaPDB.readAll(storeName);
++    var localById = {};
++
++    for (var i = 0; i < localRecords.length; i++) {
++      var localRecord = localRecords[i];
++      var localId = getRecordId(localRecord);
++      if (localId) {
++        localById[localId] = localRecord;
++      }
++    }
++
++    for (var j = 0; j < incomingRecords.length; j++) {
++      var incomingRecord = incomingRecords[j];
++      var incomingId = getRecordId(incomingRecord);
++      if (!incomingId) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      var existingRecord = localById[incomingId];
++      if (!existingRecord) {
++        await window.KaPDB.upsert(storeName, incomingRecord);
++        localById[incomingId] = incomingRecord;
++        summary.inserted += 1;
++        continue;
++      }
++
++      var incomingTs = getTimestampValue(incomingRecord);
++      var existingTs = getTimestampValue(existingRecord);
++
++      if (incomingTs === null && existingTs !== null) {
++        summary.skippedOlder += 1;
++        continue;
++      }
++
++      if (incomingTs !== null && existingTs !== null && incomingTs < existingTs) {
++        summary.skippedOlder += 1;
++        continue;
++      }
++
++      await window.KaPDB.upsert(storeName, incomingRecord);
++      localById[incomingId] = incomingRecord;
++      summary.updated += 1;
++    }
++
++    return summary;
++  }
++
++  async function applyMergedTombstones() {
++    var summary = {
++      deleted: 0,
++      skippedOlder: 0,
++      skippedInvalid: 0
++    };
++
++    var tombstones = await window.KaPDB.readAll(TOMBSTONE_STORE_NAME);
++    for (var i = 0; i < tombstones.length; i++) {
++      var tombstone = tombstones[i] || {};
++      var storeName = String(tombstone.storeName || '');
++      var recordId = String(tombstone.recordId || '');
++
++      if (!storeName || !recordId || MERGE_DATA_STORE_ORDER.indexOf(storeName) === -1) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      var localRecord = await window.KaPDB.readByKey(storeName, recordId);
++      if (!localRecord) {
++        continue;
++      }
++
++      var tombstoneTs = getTombstoneTimestampValue(tombstone);
++      var localTs = getTimestampValue(localRecord);
++
++      if (tombstoneTs === null) {
++        summary.skippedInvalid += 1;
++        continue;
++      }
++
++      if (localTs !== null && localTs > tombstoneTs) {
++        summary.skippedOlder += 1;
++        continue;
++      }
++
++      await window.KaPDB.removeHard(storeName, recordId);
++      summary.deleted += 1;
++    }
++
++    return summary;
++  }
++
++  async function importData(payload, mode) {
++    await window.KaPDB.open();
++    validatePayload(payload);
++
++    var stores = normalizeStoreMap(payload.stores);
++    var importMode = normalizeImportMode(mode);
++    var storeSummaries = {};
++
++    if (importMode === 'replace') {
++      await window.KaPDB.replaceStores(stores);
++
++      for (var i = 0; i < EXPORT_STORE_ORDER.length; i++) {
++        var replaceStoreName = EXPORT_STORE_ORDER[i];
++        storeSummaries[replaceStoreName] = {
++          inserted: stores[replaceStoreName].length,
++          updated: 0,
++          skippedOlder: 0,
++          skippedInvalid: 0
++        };
++      }
++    } else {
++      for (var j = 0; j < MERGE_DATA_STORE_ORDER.length; j++) {
++        var mergeStoreName = MERGE_DATA_STORE_ORDER[j];
++        storeSummaries[mergeStoreName] = await mergeStore(mergeStoreName, stores[mergeStoreName]);
++      }
++
++      storeSummaries[TOMBSTONE_STORE_NAME] = await mergeStore(TOMBSTONE_STORE_NAME, stores[TOMBSTONE_STORE_NAME]);
++    }
++
++    var tombstoneRetention = await pruneExpiredTombstones();
++    var tombstoneApplication = await applyMergedTombstones();
++
++    return {
++      mode: importMode,
++      importedAtUtc: makeTimestamp(),
++      importedStoreCounts: Object.keys(stores).reduce(function (acc, storeName) {
++        acc[storeName] = stores[storeName].length;
++        return acc;
++      }, {}),
++      storeSummaries: storeSummaries,
++      tombstoneApplication: tombstoneApplication,
++      tombstoneRetention: tombstoneRetention
++    };
++  }
++
++  function buildExportFilename() {
++    var stamp = makeTimestamp().replace(/[:]/g, '-').replace(/\..+$/, '').replace('T', '_');
++    return 'kap-export-v' + String(EXPORT_SCHEMA_VERSION) + '-' + stamp + '.json';
++  }
++
++  async function downloadExportFile() {
++    var payload = await exportData();
++    var json = JSON.stringify(cloneForJson(payload), null, 2);
++    var blob = new Blob([json], { type: 'application/json' });
++    var url = URL.createObjectURL(blob);
++
++    try {
++      var link = document.createElement('a');
++      link.href = url;
++      link.download = buildExportFilename();
++      document.body.appendChild(link);
++      link.click();
++      document.body.removeChild(link);
++    } finally {
++      URL.revokeObjectURL(url);
++    }
++
++    return payload;
++  }
++
++  async function parseJsonFile(file) {
++    if (!file) {
++      throw new Error('No file selected.');
++    }
++
++    var text = await file.text();
++    var payload = JSON.parse(text);
++    return payload;
++  }
++
++  function openFilePicker() {
++    return new Promise(function (resolve) {
++      var input = document.createElement('input');
++      input.type = 'file';
++      input.accept = 'application/json,.json';
++      input.style.display = 'none';
++
++      function cleanup() {
++        input.removeEventListener('change', onChange);
++        if (input.parentNode) {
++          document.body.removeChild(input);
++        }
++      }
++
++      function onChange() {
++        var file = input.files && input.files[0] ? input.files[0] : null;
++        cleanup();
++        resolve(file);
++      }
++
++      input.addEventListener('change', onChange);
++      document.body.appendChild(input);
++      input.click();
++    });
++  }
++
++  window.KaPImportExportService = {
++    EXPORT_SCHEMA_VERSION: EXPORT_SCHEMA_VERSION,
++    EXPORT_STORE_ORDER: EXPORT_STORE_ORDER.slice(),
++    TOMBSTONE_RETENTION_DAYS: TOMBSTONE_RETENTION_DAYS,
++    exportData: exportData,
++    importData: importData,
++    downloadExportFile: downloadExportFile,
++    openFilePicker: openFilePicker,
++    parseJsonFile: parseJsonFile
++  };
++})();
+diff --git a/src/features/settings/settings-page.js b/src/features/settings/settings-page.js
+index 3a40d5d..6e04d61 100644
+--- a/src/features/settings/settings-page.js
++++ b/src/features/settings/settings-page.js
+@@ -45,6 +45,7 @@
+     body.className = 'settings-body';
+     body.appendChild(buildThemeRow());
+     body.appendChild(buildTextSizeRow());
++    body.appendChild(buildImportExportRow());
+ 
+     section.appendChild(body);
+ 
+@@ -133,6 +134,156 @@
+     return row;
+   }
+ 
++  function buildImportExportRow() {
++    var row = document.createElement('div');
++    row.className = 'settings-row';
++
++    var label = document.createElement('span');
++    label.className = 'settings-row-label';
++    label.textContent = 'Data';
++    row.appendChild(label);
++
++    var actions = document.createElement('div');
++    actions.className = 'settings-inline-actions';
++
++    var exportButton = document.createElement('button');
++    exportButton.type = 'button';
++    exportButton.className = 'settings-action-button';
++    exportButton.textContent = 'Export';
++    exportButton.addEventListener('click', function () {
++      handleExportClick(exportButton);
++    });
++
++    var importButton = document.createElement('button');
++    importButton.type = 'button';
++    importButton.className = 'settings-action-button settings-action-button--danger';
++    importButton.textContent = 'Import';
++    importButton.addEventListener('click', function () {
++      handleImportClick(importButton);
++    });
++
++    actions.appendChild(exportButton);
++    actions.appendChild(importButton);
++    row.appendChild(actions);
++
++    return row;
++  }
++
++  async function handleExportClick(button) {
++    if (!window.KaPImportExportService) {
++      await window.KaPUI.ShowAlert({
++        title: 'Export Not Available',
++        message: 'Import/export service is not loaded.'
++      });
++      return;
++    }
++
++    button.disabled = true;
++    try {
++      await window.KaPImportExportService.downloadExportFile();
++      await window.KaPUI.ShowAlert({
++        title: 'Export Complete',
++        message: 'Your data was exported successfully.'
++      });
++    } catch (error) {
++      await window.KaPUI.ShowAlert({
++        title: 'Export Failed',
++        message: error && error.message ? error.message : 'Unable to export data.'
++      });
++    } finally {
++      button.disabled = false;
++    }
++  }
++
++  async function handleImportClick(button) {
++    if (!window.KaPImportExportService) {
++      await window.KaPUI.ShowAlert({
++        title: 'Import Not Available',
++        message: 'Import/export service is not loaded.'
++      });
++      return;
++    }
++
++    var mode = await chooseImportMode();
++    if (!mode) {
++      return;
++    }
++
++    button.disabled = true;
++    try {
++      var file = await window.KaPImportExportService.openFilePicker();
++      if (!file) {
++        return;
++      }
++
++      var payload = await window.KaPImportExportService.parseJsonFile(file);
++      var result = await window.KaPImportExportService.importData(payload, mode);
++
++      await window.KaPUI.ShowAlert({
++        title: 'Import Complete',
++        message: buildImportSummaryMessage(result)
++      });
++
++      window.location.reload();
++    } catch (error) {
++      await window.KaPUI.ShowAlert({
++        title: 'Import Failed',
++        message: error && error.message ? error.message : 'Unable to import data.'
++      });
++    } finally {
++      button.disabled = false;
++    }
++  }
++
++  async function chooseImportMode() {
++    var mode = await window.KaPUI.ShowImportModeModal();
++    if (!mode) {
++      return null;
++    }
++
++    if (mode === 'merge') {
++      return 'merge';
++    }
++
++    var useReplace = await window.KaPUI.ShowConfirm({
++      title: 'Replace Existing Data?',
++      message: 'Replace deletes all current local data and restores only the imported file.',
++      confirmLabel: 'Replace',
++      isDanger: true
++    });
++
++    return useReplace ? 'replace' : null;
++  }
++
++  function buildImportSummaryMessage(result) {
++    var modeLabel = String(result && result.mode || 'replace').toUpperCase();
++    var stores = result && result.storeSummaries ? result.storeSummaries : {};
++    var storeNames = Object.keys(stores);
++    var inserted = 0;
++    var updated = 0;
++    var skippedOlder = 0;
++    var skippedInvalid = 0;
++    var tombstoneDeleted = Number(result && result.tombstoneApplication && result.tombstoneApplication.deleted || 0);
++    var tombstonePurged = Number(result && result.tombstoneRetention && result.tombstoneRetention.purged || 0);
++
++    for (var i = 0; i < storeNames.length; i++) {
++      var summary = stores[storeNames[i]] || {};
++      inserted += Number(summary.inserted || 0);
++      updated += Number(summary.updated || 0);
++      skippedOlder += Number(summary.skippedOlder || 0);
++      skippedInvalid += Number(summary.skippedInvalid || 0);
++    }
++
++    return modeLabel + ' import complete. '
++      + 'Inserted: ' + inserted + '. '
++      + 'Updated: ' + updated + '. '
++      + 'Deleted by tombstones: ' + tombstoneDeleted + '. '
++        + 'Purged tombstones (365d): ' + tombstonePurged + '. '
++      + 'Skipped older: ' + skippedOlder + '. '
++      + 'Skipped invalid: ' + skippedInvalid + '. '
++      + 'The app will now reload.';
++  }
++
+   window.KaPSettingsPage = {
+     renderInto: renderInto
+   };
+diff --git a/src/index.html b/src/index.html
+index 6c72764..295d3fd 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -6,7 +6,7 @@
+   <title>Kitchen & Pantry</title>
+   <link rel="icon" type="image/svg+xml" href="./assets/icon-192.svg" />
+   <link rel="apple-touch-icon" href="./assets/icon-192.svg" />
+-  <link rel="stylesheet" href="./styles.css?v=2026-05-17-00-59" />
++  <link rel="stylesheet" href="./styles.css?v=2026-06-22-23-55" />
+ </head>
+ <body>
+   <div id="app-root" class="app-root">
+@@ -113,9 +113,9 @@
+ 
+   <script src="./shared/ids.js?v=2026-05-17-00-59"></script>
+   <script src="./shared/settings.js?v=2026-05-17-00-59"></script>
+-  <script src="./data/stores.js?v=2026-05-17-00-59"></script>
+-  <script src="./data/db.js?v=2026-05-17-00-59"></script>
+-  <script src="./ui/ui.js?v=2026-05-17-00-59"></script>
++  <script src="./data/stores.js?v=2026-06-22-23-05"></script>
++  <script src="./data/db.js?v=2026-06-22-23-05"></script>
++  <script src="./ui/ui.js?v=2026-06-22-23-55"></script>
+   <script src="./features/items/items-service.js?v=2026-05-17-00-59"></script>
+   <script src="./features/categories/categories-service.js?v=2026-05-17-00-59"></script>
+   <script src="./shared/item-discovery.js?v=2026-05-17-00-59"></script>
+@@ -127,7 +127,8 @@
+   <script src="./features/recipes/recipes-service.js?v=2026-05-17-00-59"></script>
+   <script src="./features/recipes/recipes-page.js?v=2026-05-17-00-59"></script>
+   <script src="./features/uom/uom-page.js?v=2026-05-17-00-59"></script>
+-  <script src="./features/settings/settings-page.js?v=2026-05-17-00-59"></script>
++  <script src="./features/settings/import-export-service.js?v=2026-06-22-23-35"></script>
++  <script src="./features/settings/settings-page.js?v=2026-06-22-23-55"></script>
+   <script src="./features/main/main-page.js?v=2026-05-17-00-59"></script>
+   <script src="./app-router.js?v=2026-05-17-00-59"></script>
+   <script src="./app-init.js?v=2026-05-17-00-59"></script>
+diff --git a/src/styles.css b/src/styles.css
+index 2c64398..0ff72c3 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -1538,6 +1538,42 @@ body {
+   outline-offset: -2px;
+ }
+ 
++.settings-inline-actions {
++  display: inline-flex;
++  gap: 0.5rem;
++  align-items: center;
++}
++
++.settings-action-button {
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.375rem 0.875rem;
++  font-size: 0.88rem;
++  background: var(--color-surface);
++  color: var(--color-text);
++  cursor: pointer;
++  transition: background 0.15s;
++}
++
++.settings-action-button:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.settings-action-button:disabled {
++  opacity: 0.6;
++  cursor: default;
++}
++
++.settings-action-button--danger {
++  border-color: #e74c3c;
++  color: #e74c3c;
++}
++
++.settings-action-button--danger:hover {
++  border-color: #c0392b;
++  color: #c0392b;
++}
++
+ @media (max-width: 640px) {
+   .settings-row {
+     align-items: stretch;
+@@ -1551,6 +1587,14 @@ body {
+     width: 100%;
+     overflow-x: auto;
+   }
++
++  .settings-inline-actions {
++    width: 100%;
++  }
++
++  .settings-action-button {
++    flex: 1;
++  }
+ }
+ 
+ /* Modal */
+@@ -1794,6 +1838,47 @@ body {
+   font-size: 0.95rem;
+ }
+ 
++.modal-choice-row {
++  display: grid;
++  grid-template-columns: auto 1fr;
++  gap: 0.75rem;
++  align-items: start;
++  padding: 0.75rem 0.875rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-surface);
++  cursor: pointer;
++}
++
++.modal-choice-row--danger {
++  border-color: #e4b4af;
++}
++
++.modal-choice-radio {
++  margin: 0.2rem 0 0;
++  width: 1rem;
++  height: 1rem;
++  accent-color: var(--color-brand);
++}
++
++.modal-choice-content {
++  display: grid;
++  gap: 0.25rem;
++}
++
++.modal-choice-title {
++  color: var(--color-text);
++  font-size: 0.95rem;
++  font-weight: 600;
++}
++
++.modal-choice-description {
++  margin: 0;
++  color: var(--color-muted);
++  font-size: 0.88rem;
++  line-height: 1.4;
++}
++
+ .modal-link {
+   color: var(--color-brand);
+   text-decoration: underline;
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index c47ec3c..6c1f666 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -2737,6 +2737,83 @@
+     });
+   }
+ 
++  function ShowImportModeModal() {
++    return showModal(function (bodyNode, confirmButton) {
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var options = [
++        {
++          value: 'merge',
++          title: 'Merge',
++          description: 'Use Merge mode? Merge keeps existing data and applies newer imported records.'
++        },
++        {
++          value: 'replace',
++          title: 'Replace',
++          description: 'Replace deletes all current local data and restores only the imported file.'
++        }
++      ];
++
++      var selectedValue = 'merge';
++
++      options.forEach(function (option, index) {
++        var label = document.createElement('label');
++        label.className = 'modal-choice-row' + (option.value === 'replace' ? ' modal-choice-row--danger' : '');
++
++        var radio = document.createElement('input');
++        radio.type = 'radio';
++        radio.name = 'kap-import-mode';
++        radio.value = option.value;
++        radio.className = 'modal-choice-radio';
++        radio.checked = index === 0;
++        radio.addEventListener('change', function () {
++          if (radio.checked) {
++            selectedValue = option.value;
++          }
++        });
++        label.appendChild(radio);
++
++        var content = document.createElement('div');
++        content.className = 'modal-choice-content';
++
++        var title = document.createElement('div');
++        title.className = 'modal-choice-title';
++        title.textContent = option.title;
++        content.appendChild(title);
++
++        var description = document.createElement('p');
++        description.className = 'modal-choice-description';
++        description.textContent = option.description;
++        content.appendChild(description);
++
++        label.appendChild(content);
++        form.appendChild(label);
++      });
++
++      bodyNode.appendChild(form);
++
++      requestAnimationFrame(function () {
++        var firstRadio = form.querySelector('.modal-choice-radio');
++        if (firstRadio) {
++          firstRadio.focus();
++        } else {
++          confirmButton.focus();
++        }
++      });
++
++      return function () {
++        return selectedValue;
++      };
++    }, {
++      title: 'Import Data',
++      confirmLabel: 'Import',
++      cancelValue: null,
++      isDanger: false,
++      compact: false
++    });
++  }
++
+   function ShowConfirm(config) {
+     return showModal(function (bodyNode, confirmButton, cancelButton) {
+       if (config.message) {
+@@ -2858,6 +2935,7 @@
+     ShowAddToListModal: ShowAddToListModal,
+     ShowNewVersionModal: ShowNewVersionModal,
+     ShowRecipeCloneModal: ShowRecipeCloneModal,
++    ShowImportModeModal: ShowImportModeModal,
+     ShowConfirm: ShowConfirm,
+     ShowAlert: ShowAlert,
+     ShowAboutModal: ShowAboutModal,
