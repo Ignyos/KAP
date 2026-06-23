@@ -2737,6 +2737,83 @@
     });
   }
 
+  function ShowImportModeModal() {
+    return showModal(function (bodyNode, confirmButton) {
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var options = [
+        {
+          value: 'merge',
+          title: 'Merge',
+          description: 'Use Merge mode? Merge keeps existing data and applies newer imported records.'
+        },
+        {
+          value: 'replace',
+          title: 'Replace',
+          description: 'Replace deletes all current local data and restores only the imported file.'
+        }
+      ];
+
+      var selectedValue = 'merge';
+
+      options.forEach(function (option, index) {
+        var label = document.createElement('label');
+        label.className = 'modal-choice-row' + (option.value === 'replace' ? ' modal-choice-row--danger' : '');
+
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'kap-import-mode';
+        radio.value = option.value;
+        radio.className = 'modal-choice-radio';
+        radio.checked = index === 0;
+        radio.addEventListener('change', function () {
+          if (radio.checked) {
+            selectedValue = option.value;
+          }
+        });
+        label.appendChild(radio);
+
+        var content = document.createElement('div');
+        content.className = 'modal-choice-content';
+
+        var title = document.createElement('div');
+        title.className = 'modal-choice-title';
+        title.textContent = option.title;
+        content.appendChild(title);
+
+        var description = document.createElement('p');
+        description.className = 'modal-choice-description';
+        description.textContent = option.description;
+        content.appendChild(description);
+
+        label.appendChild(content);
+        form.appendChild(label);
+      });
+
+      bodyNode.appendChild(form);
+
+      requestAnimationFrame(function () {
+        var firstRadio = form.querySelector('.modal-choice-radio');
+        if (firstRadio) {
+          firstRadio.focus();
+        } else {
+          confirmButton.focus();
+        }
+      });
+
+      return function () {
+        return selectedValue;
+      };
+    }, {
+      title: 'Import Data',
+      confirmLabel: 'Import',
+      cancelValue: null,
+      isDanger: false,
+      compact: false
+    });
+  }
+
   function ShowConfirm(config) {
     return showModal(function (bodyNode, confirmButton, cancelButton) {
       if (config.message) {
@@ -2858,6 +2935,7 @@
     ShowAddToListModal: ShowAddToListModal,
     ShowNewVersionModal: ShowNewVersionModal,
     ShowRecipeCloneModal: ShowRecipeCloneModal,
+    ShowImportModeModal: ShowImportModeModal,
     ShowConfirm: ShowConfirm,
     ShowAlert: ShowAlert,
     ShowAboutModal: ShowAboutModal,

@@ -1,6 +1,6 @@
 (function () {
   var DATABASE_NAME = 'ignyos.kap';
-  var DATABASE_VERSION = 7;
+  var DATABASE_VERSION = 8;
 
   var state = {
     db: null
@@ -76,11 +76,90 @@
     return value;
   }
 
-  async function remove(storeName, key) {
+  function canTrackTombstone(db, storeName, key) {
+    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
+      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
+      : 'syncTombstones';
+    if (!db.objectStoreNames.contains(tombstoneStoreName)) {
+      return false;
+    }
+
+    if (storeName === tombstoneStoreName || key === null || key === undefined || key === '') {
+      return false;
+    }
+
+    return true;
+  }
+
+  function buildTombstone(storeName, key) {
+    var timestamp = new Date().toISOString();
+    return {
+      id: String(storeName) + '::' + String(key),
+      storeName: String(storeName),
+      recordId: String(key),
+      deletedDate: timestamp,
+      updatedDate: timestamp,
+      createdDate: timestamp
+    };
+  }
+
+  async function remove(storeName, key, options) {
+    var db = ensureOpen();
+    var skipTombstone = options && options.skipTombstone === true;
+    var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
+    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
+      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
+      : 'syncTombstones';
+    var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
+    var tx = db.transaction(txStores, 'readwrite');
+    var store = tx.objectStore(storeName);
+
+    await requestToPromise(store.delete(key));
+
+    if (includeTombstone) {
+      var tombstoneStore = tx.objectStore(tombstoneStoreName);
+      await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
+    }
+
+    await transactionDone(tx);
+  }
+
+  async function removeHard(storeName, key) {
+    await remove(storeName, key, { skipTombstone: true });
+  }
+
+  async function clearStore(storeName) {
     var db = ensureOpen();
     var tx = db.transaction(storeName, 'readwrite');
     var store = tx.objectStore(storeName);
-    await requestToPromise(store.delete(key));
+    await requestToPromise(store.clear());
+    await transactionDone(tx);
+  }
+
+  async function replaceStores(recordsByStore) {
+    var db = ensureOpen();
+    var storeNames = Object.keys(recordsByStore || {});
+    if (storeNames.length === 0) {
+      return;
+    }
+
+    var tx = db.transaction(storeNames, 'readwrite');
+
+    for (var i = 0; i < storeNames.length; i++) {
+      var storeName = storeNames[i];
+      var store = tx.objectStore(storeName);
+      await requestToPromise(store.clear());
+
+      var records = recordsByStore[storeName];
+      if (!Array.isArray(records)) {
+        throw new Error('Import payload for "' + storeName + '" must be an array.');
+      }
+
+      for (var j = 0; j < records.length; j++) {
+        await requestToPromise(store.put(records[j]));
+      }
+    }
+
     await transactionDone(tx);
   }
 
@@ -113,6 +192,10 @@
     readAllFromIndex: readAllFromIndex,
     readByKey: readByKey,
     upsert: upsert,
-    remove: remove
+    remove: remove,
+    removeHard: removeHard,
+    clearStore: clearStore,
+    replaceStores: replaceStores,
+    DB_VERSION: DATABASE_VERSION
   };
 })();

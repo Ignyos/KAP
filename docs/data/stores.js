@@ -8,7 +8,8 @@
     RECIPE_INSTRUCTIONS: 'recipeInstructions',
     TAGS: 'tags',
     RECIPE_TAG_MAP: 'recipeTagMap',
-    UNIT_OF_MEASURES: 'unitOfMeasures'
+    UNIT_OF_MEASURES: 'unitOfMeasures',
+    SYNC_TOMBSTONES: 'syncTombstones'
   };
 
   var INDEX_NAMES = {
@@ -28,7 +29,9 @@
     RECIPE_TAG_MAP_BY_RECIPE_AND_TAG: 'by_recipe_and_tag',
     UNIT_OF_MEASURES_BY_NAME: 'by_name',
     UNIT_OF_MEASURES_BY_GROUP: 'by_group',
-    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active'
+    UNIT_OF_MEASURES_BY_ACTIVE: 'by_active',
+    SYNC_TOMBSTONES_BY_STORE: 'by_store_name',
+    SYNC_TOMBSTONES_BY_RECORD_KEY: 'by_store_and_record'
   };
 
   function ensureStore(db, transaction, storeName, options) {
@@ -115,6 +118,10 @@
     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_NAME, 'name', { unique: false });
     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_GROUP, 'group', { unique: false });
     ensureIndex(unitOfMeasuresStore, INDEX_NAMES.UNIT_OF_MEASURES_BY_ACTIVE, 'isActive', { unique: false });
+
+    var syncTombstonesStore = ensureStore(db, transaction, STORE_NAMES.SYNC_TOMBSTONES, { keyPath: 'id' });
+    ensureIndex(syncTombstonesStore, INDEX_NAMES.SYNC_TOMBSTONES_BY_STORE, 'storeName', { unique: false });
+    ensureIndex(syncTombstonesStore, INDEX_NAMES.SYNC_TOMBSTONES_BY_RECORD_KEY, ['storeName', 'recordId'], { unique: true });
 
     if (oldVersion < 6) {
       var existingTagsByName = {};
