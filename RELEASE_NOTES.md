@@ -1,3 +1,45 @@
+# Release v2026-06-23-00-56
+
+## Overview
+This release improves recipe entry, grocery list cleanup, and database reliability. You can now enter fractional ingredient quantities, mark ingredients as optional, and confirm destructive list cleanup actions before they run.
+
+## New Features
+- **Optional Ingredients**: Recipe ingredient entry and editing now support an optional flag, and optional items are labeled in recipe details.
+- **Fractional Quantities**: Ingredient quantity fields now accept fractions like `1/2`, and recipe detail views preserve the quantity text you entered.
+- **New Recipe Flow**: Creating a recipe now prompts for the recipe name and opens the new recipe immediately after it is created.
+
+## Improvements
+- **Ingredient Display**: Recipe rows now show the entered quantity text in the quantity pill, making fractions easier to read.
+- **Template Item Adds**: Adding a template item now uses the latest template detail record, which helps avoid stale item data when clicking repeatedly.
+- **Database Resilience**: IndexedDB access now retries through reopening when a connection is closing, reducing failures during normal navigation and data updates.
+
+## Bug Fixes
+- **Clear Crossed-Off Items**: Clearing crossed-off grocery list items now asks for confirmation before deleting them.
+- **Recipe Editing**: Recipe ingredient add and edit flows now preserve quantity text and optional state when saving changes.
+
+## Technical Changes
+- Added `quantityText` and `isOptional` fields to recipe item records and version snapshots.
+- Added fractional quantity validation helpers for item entry.
+- Added `withDatabase()` connection handling and open-state recovery in the DB layer.
+- Added `db-change-deployment-gate-checklist.md` and `recipe-scaling-requirements.md` to document deployment and recipe scaling follow-up work.
+
+## Installation
+1. Clone or pull the latest code from the repository.
+2. Open `src/index.html` or `docs/index.html` in a web browser.
+
+## Requirements
+- Modern web browser with ES5 JavaScript support.
+- LocalStorage and IndexedDB support for data persistence.
+
+## Documentation
+- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+- For feature documentation and usage guides, see `application-structure.md`.
+- For recipe feature planning notes, see `recipe-feature-definition.md`.
+- Deployment checklist: `requirements/db-change-deployment-gate-checklist.md`
+- Recipe scaling requirements: `requirements/recipe-scaling-requirements.md`
+
+---
+
 # Release v2026-06-23-00-25
 
 ## Overview

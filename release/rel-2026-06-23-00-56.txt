@@ -1,0 +1,2305 @@
+Release timestamp: 2026-06-23-00-56
+Diff source: 2026-06-23-00-25..HEAD
+Generated at: 2026-06-22 20:56:04Z
+diff --git a/docs/data/db.js b/docs/data/db.js
+index 1b51c1e..d55761d 100644
+--- a/docs/data/db.js
++++ b/docs/data/db.js
+@@ -3,15 +3,27 @@
+   var DATABASE_VERSION = 8;
+ 
+   var state = {
+-    db: null
++    db: null,
++    openingPromise: null
+   };
+ 
+-  function ensureOpen() {
+-    if (!state.db) {
+-      throw new Error('Database is not open. Call KaPDB.open() before performing operations.');
++  function clearOpenState(db) {
++    if (!db || state.db === db) {
++      state.db = null;
++    }
++    state.openingPromise = null;
++  }
++
++  function isConnectionClosingError(error) {
++    if (!error) {
++      return false;
++    }
++
++    if (error.name === 'InvalidStateError') {
++      return true;
+     }
+ 
+-    return state.db;
++    return String(error.message || '').toLowerCase().indexOf('connection is closing') >= 0;
+   }
+ 
+   function requestToPromise(request) {
+@@ -39,41 +51,70 @@
+     });
+   }
+ 
++  async function withDatabase(action) {
++    var attempts = 0;
++
++    while (attempts < 2) {
++      var db = await open();
++
++      try {
++        return await action(db);
++      } catch (error) {
++        if (attempts === 0 && isConnectionClosingError(error)) {
++          try {
++            db.close();
++          } catch (_closeError) {
++            // Ignore close failures while recovering from an invalid connection.
++          }
++          clearOpenState(db);
++          attempts += 1;
++          continue;
++        }
++
++        throw error;
++      }
++    }
++  }
++
+   async function readAll(storeName) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var records = await requestToPromise(store.getAll());
+-    await transactionDone(tx);
+-    return records;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readonly');
++      var store = tx.objectStore(storeName);
++      var records = await requestToPromise(store.getAll());
++      await transactionDone(tx);
++      return records;
++    });
+   }
+ 
+   async function readAllFromIndex(storeName, indexName, indexKey) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var index = store.index(indexName);
+-    var records = await requestToPromise(index.getAll(indexKey));
+-    await transactionDone(tx);
+-    return records;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readonly');
++      var store = tx.objectStore(storeName);
++      var index = store.index(indexName);
++      var records = await requestToPromise(index.getAll(indexKey));
++      await transactionDone(tx);
++      return records;
++    });
+   }
+ 
+   async function readByKey(storeName, key) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var record = await requestToPromise(store.get(key));
+-    await transactionDone(tx);
+-    return record;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readonly');
++      var store = tx.objectStore(storeName);
++      var record = await requestToPromise(store.get(key));
++      await transactionDone(tx);
++      return record;
++    });
+   }
+ 
+   async function upsert(storeName, value) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
+-    var store = tx.objectStore(storeName);
+-    await requestToPromise(store.put(value));
+-    await transactionDone(tx);
+-    return value;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readwrite');
++      var store = tx.objectStore(storeName);
++      await requestToPromise(store.put(value));
++      await transactionDone(tx);
++      return value;
++    });
+   }
+ 
+   function canTrackTombstone(db, storeName, key) {
+@@ -104,24 +145,25 @@
+   }
+ 
+   async function remove(storeName, key, options) {
+-    var db = ensureOpen();
+-    var skipTombstone = options && options.skipTombstone === true;
+-    var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
+-    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
+-      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
+-      : 'syncTombstones';
+-    var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
+-    var tx = db.transaction(txStores, 'readwrite');
+-    var store = tx.objectStore(storeName);
++    return withDatabase(async function (db) {
++      var skipTombstone = options && options.skipTombstone === true;
++      var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
++      var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
++        ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
++        : 'syncTombstones';
++      var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
++      var tx = db.transaction(txStores, 'readwrite');
++      var store = tx.objectStore(storeName);
+ 
+-    await requestToPromise(store.delete(key));
++      await requestToPromise(store.delete(key));
+ 
+-    if (includeTombstone) {
+-      var tombstoneStore = tx.objectStore(tombstoneStoreName);
+-      await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
+-    }
++      if (includeTombstone) {
++        var tombstoneStore = tx.objectStore(tombstoneStoreName);
++        await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
++      }
+ 
+-    await transactionDone(tx);
++      await transactionDone(tx);
++    });
+   }
+ 
+   async function removeHard(storeName, key) {
+@@ -129,38 +171,40 @@
+   }
+ 
+   async function clearStore(storeName) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
+-    var store = tx.objectStore(storeName);
+-    await requestToPromise(store.clear());
+-    await transactionDone(tx);
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readwrite');
++      var store = tx.objectStore(storeName);
++      await requestToPromise(store.clear());
++      await transactionDone(tx);
++    });
+   }
+ 
+   async function replaceStores(recordsByStore) {
+-    var db = ensureOpen();
+-    var storeNames = Object.keys(recordsByStore || {});
+-    if (storeNames.length === 0) {
+-      return;
+-    }
++    return withDatabase(async function (db) {
++      var storeNames = Object.keys(recordsByStore || {});
++      if (storeNames.length === 0) {
++        return;
++      }
+ 
+-    var tx = db.transaction(storeNames, 'readwrite');
++      var tx = db.transaction(storeNames, 'readwrite');
+ 
+-    for (var i = 0; i < storeNames.length; i++) {
+-      var storeName = storeNames[i];
+-      var store = tx.objectStore(storeName);
+-      await requestToPromise(store.clear());
++      for (var i = 0; i < storeNames.length; i++) {
++        var storeName = storeNames[i];
++        var store = tx.objectStore(storeName);
++        await requestToPromise(store.clear());
+ 
+-      var records = recordsByStore[storeName];
+-      if (!Array.isArray(records)) {
+-        throw new Error('Import payload for "' + storeName + '" must be an array.');
+-      }
++        var records = recordsByStore[storeName];
++        if (!Array.isArray(records)) {
++          throw new Error('Import payload for "' + storeName + '" must be an array.');
++        }
+ 
+-      for (var j = 0; j < records.length; j++) {
+-        await requestToPromise(store.put(records[j]));
++        for (var j = 0; j < records.length; j++) {
++          await requestToPromise(store.put(records[j]));
++        }
+       }
+-    }
+ 
+-    await transactionDone(tx);
++      await transactionDone(tx);
++    });
+   }
+ 
+   function open() {
+@@ -168,10 +212,15 @@
+       return Promise.resolve(state.db);
+     }
+ 
+-    return new Promise(function (resolve, reject) {
++    if (state.openingPromise) {
++      return state.openingPromise;
++    }
++
++    state.openingPromise = new Promise(function (resolve, reject) {
+       var request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+ 
+       request.onerror = function () {
++        state.openingPromise = null;
+         reject(request.error);
+       };
+ 
+@@ -180,10 +229,24 @@
+       };
+ 
+       request.onsuccess = function () {
+-        state.db = request.result;
++        var db = request.result;
++        db.onclose = function () {
++          clearOpenState(db);
++        };
++        db.onversionchange = function () {
++          try {
++            db.close();
++          } finally {
++            clearOpenState(db);
++          }
++        };
++        state.db = db;
++        state.openingPromise = null;
+         resolve(state.db);
+       };
+     });
++
++    return state.openingPromise;
+   }
+ 
+   window.KaPDB = {
+diff --git a/docs/features/lists/lists-page.js b/docs/features/lists/lists-page.js
+index 152f85d..137e583 100644
+--- a/docs/features/lists/lists-page.js
++++ b/docs/features/lists/lists-page.js
+@@ -321,6 +321,17 @@
+ 
+     function deleteAllCrossedOff() {
+       return Promise.resolve().then(async function () {
++        var confirmed = await window.KaPUI.ShowConfirm({
++          title: 'Clear Crossed-Off Items',
++          message: 'Delete all crossed-off items from this grocery list?',
++          confirmLabel: 'Clear',
++          isDanger: true
++        });
++
++        if (!confirmed) {
++          return;
++        }
++
+         await window.KaPListsService.deleteCrossedOffItems(listRecord.id);
+         await renderDetailInto(container, listRecord, hooks);
+       }).catch(async function (error) {
+diff --git a/docs/features/main/main-page.js b/docs/features/main/main-page.js
+index 4931765..1c1834c 100644
+--- a/docs/features/main/main-page.js
++++ b/docs/features/main/main-page.js
+@@ -19,7 +19,19 @@
+       label: 'Recipes',
+       getAllFn: function () { return window.KaPRecipesService.getAllRecipes(); },
+       renderDetailFn: function (container, record, hooks) { return window.KaPRecipesPage.renderDetailInto(container, record, hooks); },
+-      createFn: function () { return window.KaPRecipesPage.createRecipe(); }
++      createFn: async function () {
++        var name = await window.KaPUI.ShowPrompt({
++          title: 'New Recipe',
++          placeholder: 'Recipe name',
++          confirmLabel: 'Create'
++        });
++
++        if (name === null) {
++          return null;
++        }
++
++        return window.KaPRecipesService.createRecipe(name);
++      }
+     }
+   ];
+ 
+@@ -448,7 +460,12 @@
+     var section = findSection(sectionId);
+     if (section) {
+       try {
+-        await section.createFn();
++        var createdRecord = await section.createFn();
++        if (sectionId === 'recipes' && createdRecord && createdRecord.id) {
++          window.KaPRouter.navigate('/recipe/' + createdRecord.id);
++          return;
++        }
++
+         renderHome();
+       } catch (error) {
+         console.error('Error creating new item:', error);
+diff --git a/docs/features/recipes/recipes-page.js b/docs/features/recipes/recipes-page.js
+index b86df5e..b1c3fca 100644
+--- a/docs/features/recipes/recipes-page.js
++++ b/docs/features/recipes/recipes-page.js
+@@ -152,12 +152,52 @@
+     }
+ 
+     try {
+-      await window.KaPRecipesService.createRecipe(name);
++      return await window.KaPRecipesService.createRecipe(name);
+     } catch (error) {
+       await showError(error.message || 'Unable to create recipe.');
++      return null;
+     }
+   }
+ 
++  function buildRecipeIngredientModalOptions(overrides) {
++    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
++      title: 'Add Ingredient',
++      currentContextLabel: 'recipe',
++      detailItems: overrides.detailItems || [],
++      quantityPlaceholder: 'e.g. 1/2 or 1.5',
++      validateQuantity: window.KaPItemDiscovery.validateOptionalDecimal,
++      showOptionalField: true,
++      optionalLabel: 'Mark ingredient as optional'
++    });
++
++    baseOptions.getUnitOfMeasures = function () {
++      return window.KaPRecipesService.getAllUnitOfMeasures();
++    };
++    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
++      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++    };
++
++    baseOptions.confirmLabel = overrides.confirmLabel || baseOptions.confirmLabel;
++    baseOptions.title = overrides.title || baseOptions.title;
++    baseOptions.itemNamePlaceholder = overrides.itemNamePlaceholder || 'Ingredient name';
++    baseOptions.categoryPlaceholder = overrides.categoryPlaceholder || 'Search or type category';
++    baseOptions.descriptionPlaceholder = overrides.descriptionPlaceholder || 'Ingredient notes';
++    baseOptions.initialName = overrides.initialName || '';
++    baseOptions.initialCategoryId = overrides.initialCategoryId || '';
++    baseOptions.initialCategoryName = overrides.initialCategoryName || '';
++    baseOptions.initialDescription = overrides.initialDescription || '';
++    baseOptions.initialQuantity = overrides.initialQuantity != null ? overrides.initialQuantity : 1;
++    baseOptions.initialIsOptional = overrides.initialIsOptional === true;
++    baseOptions.initialUnitOfMeasureId = overrides.initialUnitOfMeasureId || null;
++    baseOptions.showQuantityField = true;
++    baseOptions.showCategoryField = true;
++    baseOptions.showOptionalField = true;
++    baseOptions.enableSuggestions = overrides.enableSuggestions !== undefined
++      ? overrides.enableSuggestions === true
++      : true;
++    return baseOptions;
++  }
++
+   async function renameRecipe(record) {
+     var nextName = await window.KaPUI.ShowPrompt({
+       title: 'Edit Recipe',
+@@ -257,17 +297,12 @@
+   }
+ 
+   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems, activeVersionId, isViewingLatestVersion) {
+-    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
++    var baseOptions = buildRecipeIngredientModalOptions({
++      detailItems: detailItems,
+       title: 'Add Ingredient',
+-      currentContextLabel: 'recipe',
+-      detailItems: detailItems
++      confirmLabel: 'Add Item',
++      enableSuggestions: true
+     });
+-    baseOptions.getUnitOfMeasures = function () {
+-      return window.KaPRecipesService.getAllUnitOfMeasures();
+-    };
+-    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
+-      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-    };
+     var result = await window.KaPUI.ShowDiscoveryItemModal(baseOptions);
+ 
+     if (result === null) {
+@@ -275,29 +310,41 @@
+     }
+ 
+     try {
++      var itemRecord = result.item;
++      if (!itemRecord || !itemRecord.id) {
++        itemRecord = await window.KaPItemDiscovery.resolveExactItem(result.name);
++        if (!itemRecord) {
++          itemRecord = await window.KaPItemsService.createItem(result.name, '');
++        }
++      }
++
+       if (isViewingLatestVersion) {
+         await window.KaPRecipesService.addItemToRecipe(
+           recipeRecord.id,
+-          result.item.id,
++          itemRecord.id,
+           result.name,
+           result.quantity,
++          result.quantityText,
+           result.description,
+-          result.unitOfMeasureId || null
++          result.unitOfMeasureId || null,
++          result.isOptional === true
+         );
+       } else {
+         await window.KaPRecipesService.addItemToVersion(
+           recipeRecord.id,
+           activeVersionId,
+-          result.item.id,
++          itemRecord.id,
+           result.name,
+           result.quantity,
++          result.quantityText,
+           result.description,
+-          result.unitOfMeasureId || null
++          result.unitOfMeasureId || null,
++          result.isOptional === true
+         );
+       }
+ 
+       await window.KaPItemsService.setItemCategory(
+-        result.item.id,
++        itemRecord.id,
+         result.categoryId || '',
+         result.categoryName || '',
+         result.name
+@@ -308,43 +355,18 @@
+   }
+ 
+   async function editRecipeItemWithPrompt(recipeRecord, detailItem) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal({
++    var result = await window.KaPUI.ShowDiscoveryItemModal(buildRecipeIngredientModalOptions({
+       title: 'Edit Ingredient',
+       confirmLabel: 'Save',
+-      itemNamePlaceholder: 'Ingredient name',
+-      categoryPlaceholder: 'Search or type category',
+-      descriptionPlaceholder: 'Ingredient notes',
+       initialName: detailItem.name,
+       initialCategoryId: detailItem.categoryId,
+       initialCategoryName: detailItem.categoryName,
+       initialDescription: detailItem.description,
+-      initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++      initialQuantity: detailItem.quantityText != null ? detailItem.quantityText : (detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null)),
++      initialIsOptional: detailItem.isOptional === true,
+       initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
+-      showQuantityField: true,
+-      showCategoryField: true,
+-      getUnitOfMeasures: function () {
+-        return window.KaPRecipesService.getAllUnitOfMeasures();
+-      },
+-      createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+-        return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-      },
+-      getAllCategories: function () {
+-        return window.KaPCategoriesService.getAllCategories();
+-      },
+-      searchCategories: function (query) {
+-        return window.KaPCategoriesService.searchCategories(query);
+-      },
+-      resolveExactCategory: function (name) {
+-        return window.KaPCategoriesService.resolveExactCategory(name);
+-      },
+-      createCategory: function (name) {
+-        return window.KaPCategoriesService.createCategory(name);
+-      },
+-      deleteCategory: function (category) {
+-        return window.KaPCategoriesService.deleteCategory(category.id);
+-      },
+       enableSuggestions: false
+-    });
++    }));
+ 
+     if (result === null) {
+       return;
+@@ -356,8 +378,10 @@
+         detailItem.id,
+         result.name,
+         result.quantity,
++        result.quantityText,
+         result.description,
+-        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
++        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
++        result.isOptional === true
+       );
+ 
+       if (detailItem.itemId) {
+@@ -499,43 +523,18 @@
+         if (isViewingLatestVersion) {
+           await editRecipeItemWithPrompt(recipeRecord, detailItem);
+         } else {
+-          var result = await window.KaPUI.ShowDiscoveryItemModal({
++          var result = await window.KaPUI.ShowDiscoveryItemModal(buildRecipeIngredientModalOptions({
+             title: 'Edit Ingredient',
+             confirmLabel: 'Save',
+-            itemNamePlaceholder: 'Ingredient name',
+-            categoryPlaceholder: 'Search or type category',
+-            descriptionPlaceholder: 'Ingredient notes',
+             initialName: detailItem.name,
+             initialCategoryId: detailItem.categoryId,
+             initialCategoryName: detailItem.categoryName,
+             initialDescription: detailItem.description,
+-            initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++            initialQuantity: detailItem.quantityText != null ? detailItem.quantityText : (detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null)),
++            initialIsOptional: detailItem.isOptional === true,
+             initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
+-            showQuantityField: true,
+-            showCategoryField: true,
+-            getUnitOfMeasures: function () {
+-              return window.KaPRecipesService.getAllUnitOfMeasures();
+-            },
+-            createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+-              return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-            },
+-            getAllCategories: function () {
+-              return window.KaPCategoriesService.getAllCategories();
+-            },
+-            searchCategories: function (query) {
+-              return window.KaPCategoriesService.searchCategories(query);
+-            },
+-            resolveExactCategory: function (name) {
+-              return window.KaPCategoriesService.resolveExactCategory(name);
+-            },
+-            createCategory: function (name) {
+-              return window.KaPCategoriesService.createCategory(name);
+-            },
+-            deleteCategory: function (category) {
+-              return window.KaPCategoriesService.deleteCategory(category.id);
+-            },
+             enableSuggestions: false
+-          });
++          }));
+ 
+           if (result !== null) {
+             await window.KaPRecipesService.updateVersionItem(
+@@ -544,8 +543,10 @@
+               detailItem.id,
+               result.name,
+               result.quantity,
++              result.quantityText,
+               result.description,
+-              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
++              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
++              result.isOptional === true
+             );
+           }
+         }
+diff --git a/docs/features/recipes/recipes-service.js b/docs/features/recipes/recipes-service.js
+index 3cc2209..9fc734c 100644
+--- a/docs/features/recipes/recipes-service.js
++++ b/docs/features/recipes/recipes-service.js
+@@ -46,6 +46,11 @@
+     return window.KaPItemEntryRules.normalizeOptionalDecimalQuantity(quantity);
+   }
+ 
++  function normalizeOptionalRecipeQuantityText(quantityText) {
++    var raw = String(quantityText == null ? '' : quantityText).trim();
++    return raw || null;
++  }
++
+   function normalizeTagName(tagName) {
+     return String(tagName || '').trim().toLowerCase();
+   }
+@@ -110,10 +115,12 @@
+         name: String((entry && entry.name) || ''),
+         quantity: quantityValue,
+         quantityValue: quantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(entry && entry.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(entry && entry.unitOfMeasureId),
+         description: String((entry && entry.description) || ''),
+         categoryId: String((entry && entry.categoryId) || ''),
+-        categoryName: String((entry && entry.categoryName) || '')
++        categoryName: String((entry && entry.categoryName) || ''),
++        isOptional: entry && entry.isOptional === true
+       };
+     });
+   }
+@@ -406,10 +413,12 @@
+           name: joinRecord.name || (item && item.name) || 'Unknown Item',
+           quantity: quantityValue,
+           quantityValue: quantityValue,
++          quantityText: normalizeOptionalRecipeQuantityText(joinRecord.quantityText),
+           unitOfMeasureId: normalizeOptionalUnitOfMeasureId(joinRecord.unitOfMeasureId),
+           description: joinRecord.description,
+           categoryId: (item && item.categoryId) || '',
+           categoryName: (item && item.categoryName) || '',
++          isOptional: joinRecord.isOptional === true,
+           item: item || null
+         };
+       })
+@@ -479,10 +488,12 @@
+         name: detailItem.name || '',
+         quantity: quantityValue,
+         quantityValue: quantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(detailItem.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(detailItem.unitOfMeasureId),
+         description: detailItem.description || '',
+         categoryId: detailItem.categoryId || '',
+-        categoryName: detailItem.categoryName || ''
++        categoryName: detailItem.categoryName || '',
++        isOptional: detailItem.isOptional === true
+       };
+     });
+ 
+@@ -615,7 +626,7 @@
+     return instructionRecords.length;
+   }
+ 
+-  async function addItemToRecipe(recipeId, itemId, name, quantity, description, unitOfMeasureId) {
++  async function addItemToRecipe(recipeId, itemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     await requireRecipeById(recipeId);
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var joinRecords = await readJoinRecordsByRecipeId(recipeId);
+@@ -626,6 +637,8 @@
+       var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
+       existingByName.quantity = incremented;
+       existingByName.quantityValue = incremented;
++      existingByName.quantityText = String(incremented);
++      existingByName.isOptional = existingByName.isOptional === true || isOptional === true;
+       if (unitOfMeasureId !== undefined) {
+         existingByName.unitOfMeasureId = await ensureValidQuantityForUnit(
+           existingByName.quantityValue,
+@@ -639,6 +652,7 @@
+ 
+     await requireItemById(itemId);
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     var normalizedUnitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     var joinRecord = {
+       id: window.KaPIds.NewId(),
+@@ -647,8 +661,10 @@
+       name: safeName,
+       quantity: normalizedQuantity,
+       quantityValue: normalizedQuantity,
++      quantityText: normalizedQuantityText,
+       unitOfMeasureId: normalizedUnitOfMeasureId,
+-      description: window.KaPItemEntryRules.normalizeDescription(description)
++      description: window.KaPItemEntryRules.normalizeDescription(description),
++      isOptional: isOptional === true
+     };
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+@@ -656,7 +672,7 @@
+     return joinRecord;
+   }
+ 
+-  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description, unitOfMeasureId) {
++  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     await requireRecipeById(recipeId);
+     var existing = await findJoinRecordById(recipeId, recipeItemId);
+     if (!existing) {
+@@ -665,14 +681,17 @@
+ 
+     existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     existing.quantity = normalizedQuantity;
+     existing.quantityValue = normalizedQuantity;
++    existing.quantityText = normalizedQuantityText;
+     if (unitOfMeasureId !== undefined) {
+       existing.unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     } else {
+       await ensureValidQuantityForUnit(normalizedQuantity, existing.unitOfMeasureId);
+     }
+     existing.description = window.KaPItemEntryRules.normalizeDescription(description);
++    existing.isOptional = isOptional === true;
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+@@ -831,6 +850,7 @@
+         name: snapshotItem.name,
+         quantity: normalizedQuantityValue,
+         quantityValue: normalizedQuantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(snapshotItem.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description
+       };
+@@ -907,10 +927,12 @@
+         name: snapshotItem.name || 'Unknown Item',
+         quantity: quantityValue,
+         quantityValue: quantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(snapshotItem.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description || '',
+         categoryId: snapshotItem.categoryId || '',
+         categoryName: snapshotItem.categoryName || '',
++        isOptional: snapshotItem.isOptional === true,
+         item: null
+       };
+     }));
+@@ -961,7 +983,7 @@
+     return buildInstructionItemsFromSnapshot(version.snapshotInstructions);
+   }
+ 
+-  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description, unitOfMeasureId) {
++  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+@@ -969,6 +991,7 @@
+ 
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     var normalizedDescription = window.KaPItemEntryRules.normalizeDescription(description);
+     var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+     var existing = snapshotItems.find(function (entry) {
+@@ -980,6 +1003,8 @@
+       var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
+       existing.quantity = incremented;
+       existing.quantityValue = incremented;
++      existing.quantityText = String(incremented);
++      existing.isOptional = existing.isOptional === true || isOptional === true;
+       if (unitOfMeasureId !== undefined) {
+         existing.unitOfMeasureId = await ensureValidQuantityForUnit(existing.quantityValue, unitOfMeasureId);
+       }
+@@ -992,8 +1017,10 @@
+         name: safeName,
+         quantity: normalizedQuantity,
+         quantityValue: normalizedQuantity,
++        quantityText: normalizedQuantityText,
+         unitOfMeasureId: normalizedUnitOfMeasureId,
+         description: normalizedDescription,
++        isOptional: isOptional === true,
+         categoryId: (sourceItem && sourceItem.categoryId) || '',
+         categoryName: (sourceItem && sourceItem.categoryName) || ''
+       });
+@@ -1003,7 +1030,7 @@
+     return getVersionItems(recipeId, versionId);
+   }
+ 
+-  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description, unitOfMeasureId) {
++  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+@@ -1018,15 +1045,18 @@
+     }
+ 
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     snapshotItems[itemIndex].name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     snapshotItems[itemIndex].quantity = normalizedQuantity;
+     snapshotItems[itemIndex].quantityValue = normalizedQuantity;
++    snapshotItems[itemIndex].quantityText = normalizedQuantityText;
+     if (unitOfMeasureId !== undefined) {
+       snapshotItems[itemIndex].unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     } else {
+       await ensureValidQuantityForUnit(normalizedQuantity, snapshotItems[itemIndex].unitOfMeasureId);
+     }
+     snapshotItems[itemIndex].description = window.KaPItemEntryRules.normalizeDescription(description);
++    snapshotItems[itemIndex].isOptional = isOptional === true;
+ 
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+     return getVersionItems(recipeId, versionId);
+diff --git a/docs/features/templates/templates-page.js b/docs/features/templates/templates-page.js
+index e2f1ece..29c898b 100644
+--- a/docs/features/templates/templates-page.js
++++ b/docs/features/templates/templates-page.js
+@@ -213,9 +213,16 @@
+     return String((templateRecord && templateRecord.id) || '') + '::' + String((detailItem && detailItem.id) || '');
+   }
+ 
++  async function getLatestTemplateDetailItem(templateId, detailItemId) {
++    var detailItems = await window.KaPTemplatesService.getTemplateItems(templateId);
++    return detailItems.find(function (item) {
++      return item.id === detailItemId;
++    }) || null;
++  }
++
+   async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
+     var targetKey = getTargetAddKey(templateRecord, detailItem);
+-    pendingTargetAddClicksByKey[targetKey] = (pendingTargetAddClicksByKey[targetKey] || 0) + 1;
++    pendingTargetAddClicksByKey[targetKey] = true;
+ 
+     if (processingTargetAddByKey[targetKey]) {
+       return;
+@@ -224,12 +231,13 @@
+     processingTargetAddByKey[targetKey] = true;
+ 
+     try {
+-      while ((pendingTargetAddClicksByKey[targetKey] || 0) > 0) {
+-        pendingTargetAddClicksByKey[targetKey] -= 1;
+-        var didApply = await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
++      while (pendingTargetAddClicksByKey[targetKey] === true) {
++        pendingTargetAddClicksByKey[targetKey] = false;
++        var latestDetailItem = await getLatestTemplateDetailItem(templateRecord.id, detailItem.id);
++        var didApply = await addTemplateItemToTargetListImpl(templateRecord, latestDetailItem || detailItem, container, hooks);
+         if (didApply === false) {
+           // If target list selection is canceled, clear queued clicks for this item.
+-          pendingTargetAddClicksByKey[targetKey] = 0;
++          pendingTargetAddClicksByKey[targetKey] = false;
+           break;
+         }
+       }
+diff --git a/docs/shared/item-discovery.js b/docs/shared/item-discovery.js
+index a8db2de..adae6b4 100644
+--- a/docs/shared/item-discovery.js
++++ b/docs/shared/item-discovery.js
+@@ -12,6 +12,35 @@
+     return { ok: true, value: Number(trimmed) };
+   }
+ 
++  function validateOptionalDecimal(rawQuantity) {
++    var trimmed = String(rawQuantity == null ? '' : rawQuantity).trim();
++    if (!trimmed) {
++      return { ok: true, value: null };
++    }
++
++    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(trimmed)) {
++      return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++    }
++
++    if (trimmed.indexOf('/') >= 0) {
++      var parts = trimmed.split('/');
++      var numerator = Number(parts[0]);
++      var denominator = Number(parts[1]);
++      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
++        return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++      }
++
++      return { ok: true, value: numerator / denominator };
++    }
++
++    var parsed = Number(trimmed);
++    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
++      return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++    }
++
++    return { ok: true, value: parsed };
++  }
++
+   async function resolveExactItem(name) {
+     var suggestions = await window.KaPItemsService.searchItems(name);
+     return suggestions.find(function (item) {
+@@ -24,16 +53,22 @@
+     var currentContextItemIds = detailItems.map(function (detailItem) {
+       return detailItem.itemId;
+     });
++    var validateQuantity = typeof config.validateQuantity === 'function'
++      ? config.validateQuantity
++      : validateOptionalInteger;
+ 
+     return {
+       title: config.title,
+       confirmLabel: 'Add Item',
+       itemNamePlaceholder: 'Search or type item name',
+-      quantityPlaceholder: 'e.g. 2',
+-      initialQuantity: 1,
++      quantityPlaceholder: config.quantityPlaceholder || 'e.g. 2',
++      initialQuantity: config.initialQuantity != null ? config.initialQuantity : 1,
+       descriptionPlaceholder: 'Item notes',
+       currentContextItemIds: currentContextItemIds,
+       currentContextLabel: config.currentContextLabel,
++      showOptionalField: config.showOptionalField === true,
++      initialIsOptional: config.initialIsOptional === true,
++      optionalLabel: config.optionalLabel,
+       getAllItems: function () {
+         return window.KaPItemsService.getAllItems();
+       },
+@@ -62,12 +97,13 @@
+       deleteCategory: function (category) {
+         return window.KaPCategoriesService.deleteCategory(category.id);
+       },
+-      validateQuantity: validateOptionalInteger
++      validateQuantity: validateQuantity
+     };
+   }
+ 
+   window.KaPItemDiscovery = {
+     validateOptionalInteger: validateOptionalInteger,
++    validateOptionalDecimal: validateOptionalDecimal,
+     resolveExactItem: resolveExactItem,
+     buildAddItemModalOptions: buildAddItemModalOptions
+   };
+diff --git a/docs/shared/item-entry-rules.js b/docs/shared/item-entry-rules.js
+index a6b62d9..f80af87 100644
+--- a/docs/shared/item-entry-rules.js
++++ b/docs/shared/item-entry-rules.js
+@@ -31,13 +31,24 @@
+       return null;
+     }
+ 
+-    if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) {
+-      throw new Error('Quantity must be a decimal number.');
++    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(raw)) {
++      throw new Error('Quantity must be a decimal number or fraction.');
++    }
++
++    if (raw.indexOf('/') >= 0) {
++      var parts = raw.split('/');
++      var numerator = Number(parts[0]);
++      var denominator = Number(parts[1]);
++      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
++        throw new Error('Quantity must be a decimal number or fraction.');
++      }
++
++      return numerator / denominator;
+     }
+ 
+     var parsed = Number(raw);
+     if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
+-      throw new Error('Quantity must be a decimal number.');
++      throw new Error('Quantity must be a decimal number or fraction.');
+     }
+ 
+     return parsed;
+@@ -50,7 +61,7 @@
+ 
+     var numeric = Number(quantityValue);
+     if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
+-      throw new Error('Quantity must be a decimal number.');
++      throw new Error('Quantity must be a decimal number or fraction.');
+     }
+ 
+     return true;
+diff --git a/docs/styles.css b/docs/styles.css
+index 0ff72c3..428e634 100644
+--- a/docs/styles.css
++++ b/docs/styles.css
+@@ -395,6 +395,11 @@ body {
+   font-weight: 500;
+ }
+ 
++.detail-item-optional-label {
++  color: var(--color-muted);
++  font-weight: 400;
++}
++
+ .detail-item-meta {
+   margin-top: 0.25rem;
+   color: var(--color-muted);
+diff --git a/docs/ui/ui.js b/docs/ui/ui.js
+index 6c1f666..5b165a7 100644
+--- a/docs/ui/ui.js
++++ b/docs/ui/ui.js
+@@ -287,11 +287,18 @@
+     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+     var descriptionText = detailItem.description || '';
+     var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
++    var currentQuantityText = detailItem.quantityText == null ? null : String(detailItem.quantityText);
+     var uomAbbreviation = detailItem.uomAbbreviation || null;
+     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
+ 
+     nameNode.textContent = itemName;
++    if (detailItem.isOptional === true) {
++      var optionalLabel = document.createElement('span');
++      optionalLabel.className = 'detail-item-optional-label';
++      optionalLabel.textContent = ' (optional)';
++      nameNode.appendChild(optionalLabel);
++    }
+ 
+     if (detailItem.isCrossedOff) {
+       node.classList.add('detail-item-row--crossed');
+@@ -304,7 +311,7 @@
+       });
+     }
+ 
+-    function updateQtyPill(qty, abbr) {
++    function updateQtyPill(qty, abbr, displayQtyText) {
+       if (!qtyPillNode) {
+         return;
+       }
+@@ -314,7 +321,12 @@
+       var showPill = (qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && (numericQty !== 1 || hasUom)) || hasUom;
+ 
+       if (showPill) {
+-        var pillText = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 ? String(qty) : '';
++        var pillText = '';
++        if (displayQtyText != null && String(displayQtyText).trim()) {
++          pillText = String(displayQtyText).trim();
++        } else if (qty != null && !Number.isNaN(numericQty) && numericQty !== 0) {
++          pillText = String(qty);
++        }
+         if (abbr) {
+           pillText = pillText ? pillText + '\u00a0' + abbr : abbr;
+         }
+@@ -330,7 +342,7 @@
+       }
+     }
+ 
+-    updateQtyPill(currentQuantity, uomAbbreviation);
++    updateQtyPill(currentQuantity, uomAbbreviation, currentQuantityText);
+ 
+     if (descriptionText) {
+       metaNode.textContent = descriptionText;
+@@ -822,6 +834,7 @@
+       var uomSelect = null;
+       var uomUnits = [];
+       var selectedUomId = options.initialUnitOfMeasureId || null;
++      var optionalInput = null;
+ 
+       if (showQuantityField) {
+         var quantityLabel = document.createElement('label');
+@@ -920,6 +933,24 @@
+         form.appendChild(quantityRow);
+       }
+ 
++      if (options.showOptionalField === true) {
++        var optionalRow = document.createElement('label');
++        optionalRow.className = 'modal-checklist-row modal-optional-row';
++
++        optionalInput = document.createElement('input');
++        optionalInput.type = 'checkbox';
++        optionalInput.className = 'modal-checklist-checkbox';
++        optionalInput.checked = options.initialIsOptional === true;
++        optionalRow.appendChild(optionalInput);
++
++        var optionalText = document.createElement('span');
++        optionalText.className = 'modal-checklist-name';
++        optionalText.textContent = options.optionalLabel || 'Mark ingredient as optional';
++        optionalRow.appendChild(optionalText);
++
++        form.appendChild(optionalRow);
++      }
++
+       var categoryInput = null;
+       var categoryInputWrapper = null;
+       var categorySuggestionsList = null;
+@@ -1298,6 +1329,7 @@
+           showError('');
+ 
+           var rawName = String(nameInput.value || '').trim();
++          var rawQuantityText = quantityInput ? String(quantityInput.value || '').trim() : '';
+           if (!rawName) {
+             showError('Item name is required.');
+             nameInput.focus();
+@@ -1342,8 +1374,10 @@
+             close({
+               name: rawName,
+               quantity: quantityResult.value,
++              quantityText: rawQuantityText || null,
+               unitOfMeasureId: selectedUomId || null,
+               description: String(descriptionInput.value || '').trim(),
++              isOptional: optionalInput ? optionalInput.checked === true : false,
+               categoryId: category ? category.id || '' : '',
+               categoryName: category ? category.name || '' : ''
+             });
+@@ -1364,8 +1398,10 @@
+             item: item,
+             name: rawName,
+             quantity: quantityResult.value,
++            quantityText: rawQuantityText || null,
+             unitOfMeasureId: selectedUomId || null,
+             description: String(descriptionInput.value || '').trim(),
++            isOptional: optionalInput ? optionalInput.checked === true : false,
+             categoryId: category ? category.id || '' : '',
+             categoryName: category ? category.name || '' : ''
+           });
+diff --git a/requirements/db-change-deployment-gate-checklist.md b/requirements/db-change-deployment-gate-checklist.md
+new file mode 100644
+index 0000000..762cb79
+--- /dev/null
++++ b/requirements/db-change-deployment-gate-checklist.md
+@@ -0,0 +1,44 @@
++# DB Change Deployment Gate Checklist
++
++## Purpose
++Use this checklist before deploying any branch that changes database schema, DB access behavior, or data write/read workflow.
++
++## Release Gate
++1. Import/export feature exists on the currently deployed data shape.
++2. Export can complete successfully for real user data volume.
++3. Import can restore a previously exported file into a clean app state.
++4. Export/import round-trip preserves all critical records and relationships.
++5. A manual backup is taken from the current production-like app state before deployment.
++6. Backup file can be opened and sanity-checked (non-empty, expected sections/records).
++7. Restore drill is performed at least once before deployment decision.
++8. Deployment branch passes smoke tests on a clean database.
++9. Deployment branch passes smoke tests on migrated data from a prior version.
++10. No unhandled IndexedDB errors occur during startup, create, edit, delete, and navigation flows.
++11. Recipe, list, template, category, and item data remain readable after migration.
++12. Versioned recipe data (ingredients/instructions/tags) remains intact after migration.
++13. Any new optional fields have backward-safe defaults for existing records.
++14. Service worker and asset cache-busting versions are updated for release artifacts.
++15. Rollback path is defined and tested (install previous build + restore backup).
++
++## Smoke Test Scope (Minimum)
++1. Create, edit, delete grocery list.
++2. Create, edit, delete pantry entry; add item to target list.
++3. Create recipe; add/edit/remove ingredient; add/edit/remove instruction.
++4. Open recipe versions and switch versions.
++5. Navigate home and section detail pages without runtime errors.
++
++## Backup/Restore Procedure (Operator)
++1. Open stable build (pre-DB-change branch) on isolated origin/profile.
++2. Run export and save file with timestamp.
++3. Copy backup file to a second location.
++4. Install candidate build on test origin/profile.
++5. Run import using backup file.
++6. Execute smoke tests and validate record counts/spot checks.
++
++## Go/No-Go Criteria
++- Go only if all Release Gate items are checked.
++- No-Go if any data-loss, unreadable-record, or startup/runtime DB error occurs.
++
++## Notes
++- Git branches do not isolate IndexedDB data.
++- Use separate browser profiles or separate origins/ports when validating multiple branches.
+diff --git a/requirements/recipe-scaling-requirements.md b/requirements/recipe-scaling-requirements.md
+new file mode 100644
+index 0000000..285a033
+--- /dev/null
++++ b/requirements/recipe-scaling-requirements.md
+@@ -0,0 +1,62 @@
++# Recipe Scaling Requirements
++
++## Purpose
++Capture the next-step requirements for recipe scaling behavior in Kitchen & Pantry.
++
++## Confirmed Current State
++- Recipe ingredients now retain both:
++  - A user-readable quantity text value (example: `1/2`).
++  - A numeric quantity value for computation.
++- Ingredient quantity text should remain user-readable in the UI and should not be replaced with decimal formatting when the user entered a fraction.
++- The stored base recipe should remain unchanged when users view scaled quantities.
++
++## Confirmed Goals
++- Users can scale a recipe up or down from its base quantities.
++- Scaled quantities are computed from stored numeric values.
++- Base recipe ingredient values remain unchanged.
++- UI output remains readable for cooking workflows (example expectation: `1/2 cup` can scale to `1 cup`).
++
++## Functional Requirements (Next Step)
++1. Add a scaling control on recipe detail view.
++2. Scaling applies to ingredient quantities only for the current rendered view.
++3. Scaling factor multiplies numeric ingredient quantity values.
++4. Scaled values are formatted for display separately from stored base values.
++5. Original ingredient quantity text is preserved as entered for base view.
++6. Unit labels continue to display with each quantity.
++7. Optional ingredient state remains unchanged by scaling.
++
++## Data Requirements
++1. Persist base quantity text exactly as user entered.
++2. Persist base numeric quantity for calculations.
++3. Do not overwrite base quantity text during scaling operations.
++4. Do not overwrite base numeric quantity during scaling operations.
++
++## Non-Functional Requirements
++1. Scaling interaction should be immediate in the UI (no page navigation required).
++2. Scaling should be deterministic for a given factor and ingredient set.
++3. Existing recipes without quantity text should still scale using numeric values.
++
++## Open Questions
++- What scaling inputs are required in v1: fixed multipliers (`0.5x`, `1x`, `2x`) or custom numeric factor?
++- What display format rules should be used for scaled quantities:
++  - Prefer fractions where possible?
++  - Always decimal for some units?
++  - Unit-specific formatting behavior?
++- What rounding policy is required for scaled values?
++- Should scaling state persist per recipe between visits?
++- Should instruction text also support scaling hints (not quantity replacement), or remain unchanged?
++- Is recipe yield required in this step or a later step?
++
++## Out of Scope (This Step)
++- Import/export behavior.
++- Nutrition recalculation.
++- Automatic unit conversion (example: cups to tablespoons).
++- Mutation of stored base recipe values.
++
++## Suggested Implementation Sequence
++1. Define scaling state model in recipe detail view.
++2. Implement pure scaling computation from numeric values.
++3. Implement display formatter for scaled quantity output.
++4. Add UI controls for factor selection.
++5. Verify unchanged persistence of base values.
++6. Add regression checks for fraction display expectations.
+diff --git a/src/data/db.js b/src/data/db.js
+index 1b51c1e..d55761d 100644
+--- a/src/data/db.js
++++ b/src/data/db.js
+@@ -3,15 +3,27 @@
+   var DATABASE_VERSION = 8;
+ 
+   var state = {
+-    db: null
++    db: null,
++    openingPromise: null
+   };
+ 
+-  function ensureOpen() {
+-    if (!state.db) {
+-      throw new Error('Database is not open. Call KaPDB.open() before performing operations.');
++  function clearOpenState(db) {
++    if (!db || state.db === db) {
++      state.db = null;
++    }
++    state.openingPromise = null;
++  }
++
++  function isConnectionClosingError(error) {
++    if (!error) {
++      return false;
++    }
++
++    if (error.name === 'InvalidStateError') {
++      return true;
+     }
+ 
+-    return state.db;
++    return String(error.message || '').toLowerCase().indexOf('connection is closing') >= 0;
+   }
+ 
+   function requestToPromise(request) {
+@@ -39,41 +51,70 @@
+     });
+   }
+ 
++  async function withDatabase(action) {
++    var attempts = 0;
++
++    while (attempts < 2) {
++      var db = await open();
++
++      try {
++        return await action(db);
++      } catch (error) {
++        if (attempts === 0 && isConnectionClosingError(error)) {
++          try {
++            db.close();
++          } catch (_closeError) {
++            // Ignore close failures while recovering from an invalid connection.
++          }
++          clearOpenState(db);
++          attempts += 1;
++          continue;
++        }
++
++        throw error;
++      }
++    }
++  }
++
+   async function readAll(storeName) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var records = await requestToPromise(store.getAll());
+-    await transactionDone(tx);
+-    return records;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readonly');
++      var store = tx.objectStore(storeName);
++      var records = await requestToPromise(store.getAll());
++      await transactionDone(tx);
++      return records;
++    });
+   }
+ 
+   async function readAllFromIndex(storeName, indexName, indexKey) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var index = store.index(indexName);
+-    var records = await requestToPromise(index.getAll(indexKey));
+-    await transactionDone(tx);
+-    return records;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readonly');
++      var store = tx.objectStore(storeName);
++      var index = store.index(indexName);
++      var records = await requestToPromise(index.getAll(indexKey));
++      await transactionDone(tx);
++      return records;
++    });
+   }
+ 
+   async function readByKey(storeName, key) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readonly');
+-    var store = tx.objectStore(storeName);
+-    var record = await requestToPromise(store.get(key));
+-    await transactionDone(tx);
+-    return record;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readonly');
++      var store = tx.objectStore(storeName);
++      var record = await requestToPromise(store.get(key));
++      await transactionDone(tx);
++      return record;
++    });
+   }
+ 
+   async function upsert(storeName, value) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
+-    var store = tx.objectStore(storeName);
+-    await requestToPromise(store.put(value));
+-    await transactionDone(tx);
+-    return value;
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readwrite');
++      var store = tx.objectStore(storeName);
++      await requestToPromise(store.put(value));
++      await transactionDone(tx);
++      return value;
++    });
+   }
+ 
+   function canTrackTombstone(db, storeName, key) {
+@@ -104,24 +145,25 @@
+   }
+ 
+   async function remove(storeName, key, options) {
+-    var db = ensureOpen();
+-    var skipTombstone = options && options.skipTombstone === true;
+-    var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
+-    var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
+-      ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
+-      : 'syncTombstones';
+-    var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
+-    var tx = db.transaction(txStores, 'readwrite');
+-    var store = tx.objectStore(storeName);
++    return withDatabase(async function (db) {
++      var skipTombstone = options && options.skipTombstone === true;
++      var includeTombstone = !skipTombstone && canTrackTombstone(db, storeName, key);
++      var tombstoneStoreName = window.KaPStores && window.KaPStores.STORE_NAMES
++        ? window.KaPStores.STORE_NAMES.SYNC_TOMBSTONES
++        : 'syncTombstones';
++      var txStores = includeTombstone ? [storeName, tombstoneStoreName] : [storeName];
++      var tx = db.transaction(txStores, 'readwrite');
++      var store = tx.objectStore(storeName);
+ 
+-    await requestToPromise(store.delete(key));
++      await requestToPromise(store.delete(key));
+ 
+-    if (includeTombstone) {
+-      var tombstoneStore = tx.objectStore(tombstoneStoreName);
+-      await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
+-    }
++      if (includeTombstone) {
++        var tombstoneStore = tx.objectStore(tombstoneStoreName);
++        await requestToPromise(tombstoneStore.put(buildTombstone(storeName, key)));
++      }
+ 
+-    await transactionDone(tx);
++      await transactionDone(tx);
++    });
+   }
+ 
+   async function removeHard(storeName, key) {
+@@ -129,38 +171,40 @@
+   }
+ 
+   async function clearStore(storeName) {
+-    var db = ensureOpen();
+-    var tx = db.transaction(storeName, 'readwrite');
+-    var store = tx.objectStore(storeName);
+-    await requestToPromise(store.clear());
+-    await transactionDone(tx);
++    return withDatabase(async function (db) {
++      var tx = db.transaction(storeName, 'readwrite');
++      var store = tx.objectStore(storeName);
++      await requestToPromise(store.clear());
++      await transactionDone(tx);
++    });
+   }
+ 
+   async function replaceStores(recordsByStore) {
+-    var db = ensureOpen();
+-    var storeNames = Object.keys(recordsByStore || {});
+-    if (storeNames.length === 0) {
+-      return;
+-    }
++    return withDatabase(async function (db) {
++      var storeNames = Object.keys(recordsByStore || {});
++      if (storeNames.length === 0) {
++        return;
++      }
+ 
+-    var tx = db.transaction(storeNames, 'readwrite');
++      var tx = db.transaction(storeNames, 'readwrite');
+ 
+-    for (var i = 0; i < storeNames.length; i++) {
+-      var storeName = storeNames[i];
+-      var store = tx.objectStore(storeName);
+-      await requestToPromise(store.clear());
++      for (var i = 0; i < storeNames.length; i++) {
++        var storeName = storeNames[i];
++        var store = tx.objectStore(storeName);
++        await requestToPromise(store.clear());
+ 
+-      var records = recordsByStore[storeName];
+-      if (!Array.isArray(records)) {
+-        throw new Error('Import payload for "' + storeName + '" must be an array.');
+-      }
++        var records = recordsByStore[storeName];
++        if (!Array.isArray(records)) {
++          throw new Error('Import payload for "' + storeName + '" must be an array.');
++        }
+ 
+-      for (var j = 0; j < records.length; j++) {
+-        await requestToPromise(store.put(records[j]));
++        for (var j = 0; j < records.length; j++) {
++          await requestToPromise(store.put(records[j]));
++        }
+       }
+-    }
+ 
+-    await transactionDone(tx);
++      await transactionDone(tx);
++    });
+   }
+ 
+   function open() {
+@@ -168,10 +212,15 @@
+       return Promise.resolve(state.db);
+     }
+ 
+-    return new Promise(function (resolve, reject) {
++    if (state.openingPromise) {
++      return state.openingPromise;
++    }
++
++    state.openingPromise = new Promise(function (resolve, reject) {
+       var request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+ 
+       request.onerror = function () {
++        state.openingPromise = null;
+         reject(request.error);
+       };
+ 
+@@ -180,10 +229,24 @@
+       };
+ 
+       request.onsuccess = function () {
+-        state.db = request.result;
++        var db = request.result;
++        db.onclose = function () {
++          clearOpenState(db);
++        };
++        db.onversionchange = function () {
++          try {
++            db.close();
++          } finally {
++            clearOpenState(db);
++          }
++        };
++        state.db = db;
++        state.openingPromise = null;
+         resolve(state.db);
+       };
+     });
++
++    return state.openingPromise;
+   }
+ 
+   window.KaPDB = {
+diff --git a/src/features/lists/lists-page.js b/src/features/lists/lists-page.js
+index 152f85d..137e583 100644
+--- a/src/features/lists/lists-page.js
++++ b/src/features/lists/lists-page.js
+@@ -321,6 +321,17 @@
+ 
+     function deleteAllCrossedOff() {
+       return Promise.resolve().then(async function () {
++        var confirmed = await window.KaPUI.ShowConfirm({
++          title: 'Clear Crossed-Off Items',
++          message: 'Delete all crossed-off items from this grocery list?',
++          confirmLabel: 'Clear',
++          isDanger: true
++        });
++
++        if (!confirmed) {
++          return;
++        }
++
+         await window.KaPListsService.deleteCrossedOffItems(listRecord.id);
+         await renderDetailInto(container, listRecord, hooks);
+       }).catch(async function (error) {
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index 4931765..1c1834c 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -19,7 +19,19 @@
+       label: 'Recipes',
+       getAllFn: function () { return window.KaPRecipesService.getAllRecipes(); },
+       renderDetailFn: function (container, record, hooks) { return window.KaPRecipesPage.renderDetailInto(container, record, hooks); },
+-      createFn: function () { return window.KaPRecipesPage.createRecipe(); }
++      createFn: async function () {
++        var name = await window.KaPUI.ShowPrompt({
++          title: 'New Recipe',
++          placeholder: 'Recipe name',
++          confirmLabel: 'Create'
++        });
++
++        if (name === null) {
++          return null;
++        }
++
++        return window.KaPRecipesService.createRecipe(name);
++      }
+     }
+   ];
+ 
+@@ -448,7 +460,12 @@
+     var section = findSection(sectionId);
+     if (section) {
+       try {
+-        await section.createFn();
++        var createdRecord = await section.createFn();
++        if (sectionId === 'recipes' && createdRecord && createdRecord.id) {
++          window.KaPRouter.navigate('/recipe/' + createdRecord.id);
++          return;
++        }
++
+         renderHome();
+       } catch (error) {
+         console.error('Error creating new item:', error);
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index b86df5e..b1c3fca 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -152,12 +152,52 @@
+     }
+ 
+     try {
+-      await window.KaPRecipesService.createRecipe(name);
++      return await window.KaPRecipesService.createRecipe(name);
+     } catch (error) {
+       await showError(error.message || 'Unable to create recipe.');
++      return null;
+     }
+   }
+ 
++  function buildRecipeIngredientModalOptions(overrides) {
++    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
++      title: 'Add Ingredient',
++      currentContextLabel: 'recipe',
++      detailItems: overrides.detailItems || [],
++      quantityPlaceholder: 'e.g. 1/2 or 1.5',
++      validateQuantity: window.KaPItemDiscovery.validateOptionalDecimal,
++      showOptionalField: true,
++      optionalLabel: 'Mark ingredient as optional'
++    });
++
++    baseOptions.getUnitOfMeasures = function () {
++      return window.KaPRecipesService.getAllUnitOfMeasures();
++    };
++    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
++      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
++    };
++
++    baseOptions.confirmLabel = overrides.confirmLabel || baseOptions.confirmLabel;
++    baseOptions.title = overrides.title || baseOptions.title;
++    baseOptions.itemNamePlaceholder = overrides.itemNamePlaceholder || 'Ingredient name';
++    baseOptions.categoryPlaceholder = overrides.categoryPlaceholder || 'Search or type category';
++    baseOptions.descriptionPlaceholder = overrides.descriptionPlaceholder || 'Ingredient notes';
++    baseOptions.initialName = overrides.initialName || '';
++    baseOptions.initialCategoryId = overrides.initialCategoryId || '';
++    baseOptions.initialCategoryName = overrides.initialCategoryName || '';
++    baseOptions.initialDescription = overrides.initialDescription || '';
++    baseOptions.initialQuantity = overrides.initialQuantity != null ? overrides.initialQuantity : 1;
++    baseOptions.initialIsOptional = overrides.initialIsOptional === true;
++    baseOptions.initialUnitOfMeasureId = overrides.initialUnitOfMeasureId || null;
++    baseOptions.showQuantityField = true;
++    baseOptions.showCategoryField = true;
++    baseOptions.showOptionalField = true;
++    baseOptions.enableSuggestions = overrides.enableSuggestions !== undefined
++      ? overrides.enableSuggestions === true
++      : true;
++    return baseOptions;
++  }
++
+   async function renameRecipe(record) {
+     var nextName = await window.KaPUI.ShowPrompt({
+       title: 'Edit Recipe',
+@@ -257,17 +297,12 @@
+   }
+ 
+   async function addRecipeItemWithDiscoveryModal(recipeRecord, detailItems, activeVersionId, isViewingLatestVersion) {
+-    var baseOptions = window.KaPItemDiscovery.buildAddItemModalOptions({
++    var baseOptions = buildRecipeIngredientModalOptions({
++      detailItems: detailItems,
+       title: 'Add Ingredient',
+-      currentContextLabel: 'recipe',
+-      detailItems: detailItems
++      confirmLabel: 'Add Item',
++      enableSuggestions: true
+     });
+-    baseOptions.getUnitOfMeasures = function () {
+-      return window.KaPRecipesService.getAllUnitOfMeasures();
+-    };
+-    baseOptions.createUnitOfMeasure = function (name, abbr, group, behavior, step) {
+-      return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-    };
+     var result = await window.KaPUI.ShowDiscoveryItemModal(baseOptions);
+ 
+     if (result === null) {
+@@ -275,29 +310,41 @@
+     }
+ 
+     try {
++      var itemRecord = result.item;
++      if (!itemRecord || !itemRecord.id) {
++        itemRecord = await window.KaPItemDiscovery.resolveExactItem(result.name);
++        if (!itemRecord) {
++          itemRecord = await window.KaPItemsService.createItem(result.name, '');
++        }
++      }
++
+       if (isViewingLatestVersion) {
+         await window.KaPRecipesService.addItemToRecipe(
+           recipeRecord.id,
+-          result.item.id,
++          itemRecord.id,
+           result.name,
+           result.quantity,
++          result.quantityText,
+           result.description,
+-          result.unitOfMeasureId || null
++          result.unitOfMeasureId || null,
++          result.isOptional === true
+         );
+       } else {
+         await window.KaPRecipesService.addItemToVersion(
+           recipeRecord.id,
+           activeVersionId,
+-          result.item.id,
++          itemRecord.id,
+           result.name,
+           result.quantity,
++          result.quantityText,
+           result.description,
+-          result.unitOfMeasureId || null
++          result.unitOfMeasureId || null,
++          result.isOptional === true
+         );
+       }
+ 
+       await window.KaPItemsService.setItemCategory(
+-        result.item.id,
++        itemRecord.id,
+         result.categoryId || '',
+         result.categoryName || '',
+         result.name
+@@ -308,43 +355,18 @@
+   }
+ 
+   async function editRecipeItemWithPrompt(recipeRecord, detailItem) {
+-    var result = await window.KaPUI.ShowDiscoveryItemModal({
++    var result = await window.KaPUI.ShowDiscoveryItemModal(buildRecipeIngredientModalOptions({
+       title: 'Edit Ingredient',
+       confirmLabel: 'Save',
+-      itemNamePlaceholder: 'Ingredient name',
+-      categoryPlaceholder: 'Search or type category',
+-      descriptionPlaceholder: 'Ingredient notes',
+       initialName: detailItem.name,
+       initialCategoryId: detailItem.categoryId,
+       initialCategoryName: detailItem.categoryName,
+       initialDescription: detailItem.description,
+-      initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++      initialQuantity: detailItem.quantityText != null ? detailItem.quantityText : (detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null)),
++      initialIsOptional: detailItem.isOptional === true,
+       initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
+-      showQuantityField: true,
+-      showCategoryField: true,
+-      getUnitOfMeasures: function () {
+-        return window.KaPRecipesService.getAllUnitOfMeasures();
+-      },
+-      createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+-        return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-      },
+-      getAllCategories: function () {
+-        return window.KaPCategoriesService.getAllCategories();
+-      },
+-      searchCategories: function (query) {
+-        return window.KaPCategoriesService.searchCategories(query);
+-      },
+-      resolveExactCategory: function (name) {
+-        return window.KaPCategoriesService.resolveExactCategory(name);
+-      },
+-      createCategory: function (name) {
+-        return window.KaPCategoriesService.createCategory(name);
+-      },
+-      deleteCategory: function (category) {
+-        return window.KaPCategoriesService.deleteCategory(category.id);
+-      },
+       enableSuggestions: false
+-    });
++    }));
+ 
+     if (result === null) {
+       return;
+@@ -356,8 +378,10 @@
+         detailItem.id,
+         result.name,
+         result.quantity,
++        result.quantityText,
+         result.description,
+-        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
++        result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
++        result.isOptional === true
+       );
+ 
+       if (detailItem.itemId) {
+@@ -499,43 +523,18 @@
+         if (isViewingLatestVersion) {
+           await editRecipeItemWithPrompt(recipeRecord, detailItem);
+         } else {
+-          var result = await window.KaPUI.ShowDiscoveryItemModal({
++          var result = await window.KaPUI.ShowDiscoveryItemModal(buildRecipeIngredientModalOptions({
+             title: 'Edit Ingredient',
+             confirmLabel: 'Save',
+-            itemNamePlaceholder: 'Ingredient name',
+-            categoryPlaceholder: 'Search or type category',
+-            descriptionPlaceholder: 'Ingredient notes',
+             initialName: detailItem.name,
+             initialCategoryId: detailItem.categoryId,
+             initialCategoryName: detailItem.categoryName,
+             initialDescription: detailItem.description,
+-            initialQuantity: detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null),
++            initialQuantity: detailItem.quantityText != null ? detailItem.quantityText : (detailItem.quantityValue != null ? detailItem.quantityValue : (detailItem.quantity != null ? detailItem.quantity : null)),
++            initialIsOptional: detailItem.isOptional === true,
+             initialUnitOfMeasureId: detailItem.unitOfMeasureId || null,
+-            showQuantityField: true,
+-            showCategoryField: true,
+-            getUnitOfMeasures: function () {
+-              return window.KaPRecipesService.getAllUnitOfMeasures();
+-            },
+-            createUnitOfMeasure: function (name, abbr, group, behavior, step) {
+-              return window.KaPRecipesService.createUnitOfMeasure(name, abbr, group, behavior, step);
+-            },
+-            getAllCategories: function () {
+-              return window.KaPCategoriesService.getAllCategories();
+-            },
+-            searchCategories: function (query) {
+-              return window.KaPCategoriesService.searchCategories(query);
+-            },
+-            resolveExactCategory: function (name) {
+-              return window.KaPCategoriesService.resolveExactCategory(name);
+-            },
+-            createCategory: function (name) {
+-              return window.KaPCategoriesService.createCategory(name);
+-            },
+-            deleteCategory: function (category) {
+-              return window.KaPCategoriesService.deleteCategory(category.id);
+-            },
+             enableSuggestions: false
+-          });
++          }));
+ 
+           if (result !== null) {
+             await window.KaPRecipesService.updateVersionItem(
+@@ -544,8 +543,10 @@
+               detailItem.id,
+               result.name,
+               result.quantity,
++              result.quantityText,
+               result.description,
+-              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId
++              result.unitOfMeasureId !== undefined ? result.unitOfMeasureId : detailItem.unitOfMeasureId,
++              result.isOptional === true
+             );
+           }
+         }
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index 3cc2209..9fc734c 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -46,6 +46,11 @@
+     return window.KaPItemEntryRules.normalizeOptionalDecimalQuantity(quantity);
+   }
+ 
++  function normalizeOptionalRecipeQuantityText(quantityText) {
++    var raw = String(quantityText == null ? '' : quantityText).trim();
++    return raw || null;
++  }
++
+   function normalizeTagName(tagName) {
+     return String(tagName || '').trim().toLowerCase();
+   }
+@@ -110,10 +115,12 @@
+         name: String((entry && entry.name) || ''),
+         quantity: quantityValue,
+         quantityValue: quantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(entry && entry.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(entry && entry.unitOfMeasureId),
+         description: String((entry && entry.description) || ''),
+         categoryId: String((entry && entry.categoryId) || ''),
+-        categoryName: String((entry && entry.categoryName) || '')
++        categoryName: String((entry && entry.categoryName) || ''),
++        isOptional: entry && entry.isOptional === true
+       };
+     });
+   }
+@@ -406,10 +413,12 @@
+           name: joinRecord.name || (item && item.name) || 'Unknown Item',
+           quantity: quantityValue,
+           quantityValue: quantityValue,
++          quantityText: normalizeOptionalRecipeQuantityText(joinRecord.quantityText),
+           unitOfMeasureId: normalizeOptionalUnitOfMeasureId(joinRecord.unitOfMeasureId),
+           description: joinRecord.description,
+           categoryId: (item && item.categoryId) || '',
+           categoryName: (item && item.categoryName) || '',
++          isOptional: joinRecord.isOptional === true,
+           item: item || null
+         };
+       })
+@@ -479,10 +488,12 @@
+         name: detailItem.name || '',
+         quantity: quantityValue,
+         quantityValue: quantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(detailItem.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(detailItem.unitOfMeasureId),
+         description: detailItem.description || '',
+         categoryId: detailItem.categoryId || '',
+-        categoryName: detailItem.categoryName || ''
++        categoryName: detailItem.categoryName || '',
++        isOptional: detailItem.isOptional === true
+       };
+     });
+ 
+@@ -615,7 +626,7 @@
+     return instructionRecords.length;
+   }
+ 
+-  async function addItemToRecipe(recipeId, itemId, name, quantity, description, unitOfMeasureId) {
++  async function addItemToRecipe(recipeId, itemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     await requireRecipeById(recipeId);
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var joinRecords = await readJoinRecordsByRecipeId(recipeId);
+@@ -626,6 +637,8 @@
+       var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
+       existingByName.quantity = incremented;
+       existingByName.quantityValue = incremented;
++      existingByName.quantityText = String(incremented);
++      existingByName.isOptional = existingByName.isOptional === true || isOptional === true;
+       if (unitOfMeasureId !== undefined) {
+         existingByName.unitOfMeasureId = await ensureValidQuantityForUnit(
+           existingByName.quantityValue,
+@@ -639,6 +652,7 @@
+ 
+     await requireItemById(itemId);
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     var normalizedUnitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     var joinRecord = {
+       id: window.KaPIds.NewId(),
+@@ -647,8 +661,10 @@
+       name: safeName,
+       quantity: normalizedQuantity,
+       quantityValue: normalizedQuantity,
++      quantityText: normalizedQuantityText,
+       unitOfMeasureId: normalizedUnitOfMeasureId,
+-      description: window.KaPItemEntryRules.normalizeDescription(description)
++      description: window.KaPItemEntryRules.normalizeDescription(description),
++      isOptional: isOptional === true
+     };
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+@@ -656,7 +672,7 @@
+     return joinRecord;
+   }
+ 
+-  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, description, unitOfMeasureId) {
++  async function updateRecipeItem(recipeId, recipeItemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     await requireRecipeById(recipeId);
+     var existing = await findJoinRecordById(recipeId, recipeItemId);
+     if (!existing) {
+@@ -665,14 +681,17 @@
+ 
+     existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     existing.quantity = normalizedQuantity;
+     existing.quantityValue = normalizedQuantity;
++    existing.quantityText = normalizedQuantityText;
+     if (unitOfMeasureId !== undefined) {
+       existing.unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     } else {
+       await ensureValidQuantityForUnit(normalizedQuantity, existing.unitOfMeasureId);
+     }
+     existing.description = window.KaPItemEntryRules.normalizeDescription(description);
++    existing.isOptional = isOptional === true;
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+@@ -831,6 +850,7 @@
+         name: snapshotItem.name,
+         quantity: normalizedQuantityValue,
+         quantityValue: normalizedQuantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(snapshotItem.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description
+       };
+@@ -907,10 +927,12 @@
+         name: snapshotItem.name || 'Unknown Item',
+         quantity: quantityValue,
+         quantityValue: quantityValue,
++        quantityText: normalizeOptionalRecipeQuantityText(snapshotItem.quantityText),
+         unitOfMeasureId: normalizeOptionalUnitOfMeasureId(snapshotItem.unitOfMeasureId),
+         description: snapshotItem.description || '',
+         categoryId: snapshotItem.categoryId || '',
+         categoryName: snapshotItem.categoryName || '',
++        isOptional: snapshotItem.isOptional === true,
+         item: null
+       };
+     }));
+@@ -961,7 +983,7 @@
+     return buildInstructionItemsFromSnapshot(version.snapshotInstructions);
+   }
+ 
+-  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, description, unitOfMeasureId) {
++  async function addItemToVersion(recipeId, versionId, itemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+@@ -969,6 +991,7 @@
+ 
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     var normalizedDescription = window.KaPItemEntryRules.normalizeDescription(description);
+     var snapshotItems = cloneSnapshotItems(version.snapshotItems);
+     var existing = snapshotItems.find(function (entry) {
+@@ -980,6 +1003,8 @@
+       var incremented = window.KaPItemEntryRules.incrementQuantity(currentQuantity);
+       existing.quantity = incremented;
+       existing.quantityValue = incremented;
++      existing.quantityText = String(incremented);
++      existing.isOptional = existing.isOptional === true || isOptional === true;
+       if (unitOfMeasureId !== undefined) {
+         existing.unitOfMeasureId = await ensureValidQuantityForUnit(existing.quantityValue, unitOfMeasureId);
+       }
+@@ -992,8 +1017,10 @@
+         name: safeName,
+         quantity: normalizedQuantity,
+         quantityValue: normalizedQuantity,
++        quantityText: normalizedQuantityText,
+         unitOfMeasureId: normalizedUnitOfMeasureId,
+         description: normalizedDescription,
++        isOptional: isOptional === true,
+         categoryId: (sourceItem && sourceItem.categoryId) || '',
+         categoryName: (sourceItem && sourceItem.categoryName) || ''
+       });
+@@ -1003,7 +1030,7 @@
+     return getVersionItems(recipeId, versionId);
+   }
+ 
+-  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, description, unitOfMeasureId) {
++  async function updateVersionItem(recipeId, versionId, versionItemId, name, quantity, quantityText, description, unitOfMeasureId, isOptional) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+@@ -1018,15 +1045,18 @@
+     }
+ 
+     var normalizedQuantity = normalizeOptionalRecipeQuantity(quantity);
++    var normalizedQuantityText = normalizeOptionalRecipeQuantityText(quantityText);
+     snapshotItems[itemIndex].name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     snapshotItems[itemIndex].quantity = normalizedQuantity;
+     snapshotItems[itemIndex].quantityValue = normalizedQuantity;
++    snapshotItems[itemIndex].quantityText = normalizedQuantityText;
+     if (unitOfMeasureId !== undefined) {
+       snapshotItems[itemIndex].unitOfMeasureId = await ensureValidQuantityForUnit(normalizedQuantity, unitOfMeasureId);
+     } else {
+       await ensureValidQuantityForUnit(normalizedQuantity, snapshotItems[itemIndex].unitOfMeasureId);
+     }
+     snapshotItems[itemIndex].description = window.KaPItemEntryRules.normalizeDescription(description);
++    snapshotItems[itemIndex].isOptional = isOptional === true;
+ 
+     await updateVersionSnapshot(recipeId, versionId, snapshotItems, version.snapshotInstructions);
+     return getVersionItems(recipeId, versionId);
+diff --git a/src/features/templates/templates-page.js b/src/features/templates/templates-page.js
+index e2f1ece..29c898b 100644
+--- a/src/features/templates/templates-page.js
++++ b/src/features/templates/templates-page.js
+@@ -213,9 +213,16 @@
+     return String((templateRecord && templateRecord.id) || '') + '::' + String((detailItem && detailItem.id) || '');
+   }
+ 
++  async function getLatestTemplateDetailItem(templateId, detailItemId) {
++    var detailItems = await window.KaPTemplatesService.getTemplateItems(templateId);
++    return detailItems.find(function (item) {
++      return item.id === detailItemId;
++    }) || null;
++  }
++
+   async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
+     var targetKey = getTargetAddKey(templateRecord, detailItem);
+-    pendingTargetAddClicksByKey[targetKey] = (pendingTargetAddClicksByKey[targetKey] || 0) + 1;
++    pendingTargetAddClicksByKey[targetKey] = true;
+ 
+     if (processingTargetAddByKey[targetKey]) {
+       return;
+@@ -224,12 +231,13 @@
+     processingTargetAddByKey[targetKey] = true;
+ 
+     try {
+-      while ((pendingTargetAddClicksByKey[targetKey] || 0) > 0) {
+-        pendingTargetAddClicksByKey[targetKey] -= 1;
+-        var didApply = await addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks);
++      while (pendingTargetAddClicksByKey[targetKey] === true) {
++        pendingTargetAddClicksByKey[targetKey] = false;
++        var latestDetailItem = await getLatestTemplateDetailItem(templateRecord.id, detailItem.id);
++        var didApply = await addTemplateItemToTargetListImpl(templateRecord, latestDetailItem || detailItem, container, hooks);
+         if (didApply === false) {
+           // If target list selection is canceled, clear queued clicks for this item.
+-          pendingTargetAddClicksByKey[targetKey] = 0;
++          pendingTargetAddClicksByKey[targetKey] = false;
+           break;
+         }
+       }
+diff --git a/src/shared/item-discovery.js b/src/shared/item-discovery.js
+index a8db2de..adae6b4 100644
+--- a/src/shared/item-discovery.js
++++ b/src/shared/item-discovery.js
+@@ -12,6 +12,35 @@
+     return { ok: true, value: Number(trimmed) };
+   }
+ 
++  function validateOptionalDecimal(rawQuantity) {
++    var trimmed = String(rawQuantity == null ? '' : rawQuantity).trim();
++    if (!trimmed) {
++      return { ok: true, value: null };
++    }
++
++    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(trimmed)) {
++      return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++    }
++
++    if (trimmed.indexOf('/') >= 0) {
++      var parts = trimmed.split('/');
++      var numerator = Number(parts[0]);
++      var denominator = Number(parts[1]);
++      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
++        return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++      }
++
++      return { ok: true, value: numerator / denominator };
++    }
++
++    var parsed = Number(trimmed);
++    if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
++      return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++    }
++
++    return { ok: true, value: parsed };
++  }
++
+   async function resolveExactItem(name) {
+     var suggestions = await window.KaPItemsService.searchItems(name);
+     return suggestions.find(function (item) {
+@@ -24,16 +53,22 @@
+     var currentContextItemIds = detailItems.map(function (detailItem) {
+       return detailItem.itemId;
+     });
++    var validateQuantity = typeof config.validateQuantity === 'function'
++      ? config.validateQuantity
++      : validateOptionalInteger;
+ 
+     return {
+       title: config.title,
+       confirmLabel: 'Add Item',
+       itemNamePlaceholder: 'Search or type item name',
+-      quantityPlaceholder: 'e.g. 2',
+-      initialQuantity: 1,
++      quantityPlaceholder: config.quantityPlaceholder || 'e.g. 2',
++      initialQuantity: config.initialQuantity != null ? config.initialQuantity : 1,
+       descriptionPlaceholder: 'Item notes',
+       currentContextItemIds: currentContextItemIds,
+       currentContextLabel: config.currentContextLabel,
++      showOptionalField: config.showOptionalField === true,
++      initialIsOptional: config.initialIsOptional === true,
++      optionalLabel: config.optionalLabel,
+       getAllItems: function () {
+         return window.KaPItemsService.getAllItems();
+       },
+@@ -62,12 +97,13 @@
+       deleteCategory: function (category) {
+         return window.KaPCategoriesService.deleteCategory(category.id);
+       },
+-      validateQuantity: validateOptionalInteger
++      validateQuantity: validateQuantity
+     };
+   }
+ 
+   window.KaPItemDiscovery = {
+     validateOptionalInteger: validateOptionalInteger,
++    validateOptionalDecimal: validateOptionalDecimal,
+     resolveExactItem: resolveExactItem,
+     buildAddItemModalOptions: buildAddItemModalOptions
+   };
+diff --git a/src/shared/item-entry-rules.js b/src/shared/item-entry-rules.js
+index a6b62d9..f80af87 100644
+--- a/src/shared/item-entry-rules.js
++++ b/src/shared/item-entry-rules.js
+@@ -31,13 +31,24 @@
+       return null;
+     }
+ 
+-    if (!/^-?(?:\d+|\d*\.\d+)$/.test(raw)) {
+-      throw new Error('Quantity must be a decimal number.');
++    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(raw)) {
++      throw new Error('Quantity must be a decimal number or fraction.');
++    }
++
++    if (raw.indexOf('/') >= 0) {
++      var parts = raw.split('/');
++      var numerator = Number(parts[0]);
++      var denominator = Number(parts[1]);
++      if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
++        throw new Error('Quantity must be a decimal number or fraction.');
++      }
++
++      return numerator / denominator;
+     }
+ 
+     var parsed = Number(raw);
+     if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
+-      throw new Error('Quantity must be a decimal number.');
++      throw new Error('Quantity must be a decimal number or fraction.');
+     }
+ 
+     return parsed;
+@@ -50,7 +61,7 @@
+ 
+     var numeric = Number(quantityValue);
+     if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
+-      throw new Error('Quantity must be a decimal number.');
++      throw new Error('Quantity must be a decimal number or fraction.');
+     }
+ 
+     return true;
+diff --git a/src/styles.css b/src/styles.css
+index 0ff72c3..428e634 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -395,6 +395,11 @@ body {
+   font-weight: 500;
+ }
+ 
++.detail-item-optional-label {
++  color: var(--color-muted);
++  font-weight: 400;
++}
++
+ .detail-item-meta {
+   margin-top: 0.25rem;
+   color: var(--color-muted);
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index 6c1f666..5b165a7 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -287,11 +287,18 @@
+     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+     var descriptionText = detailItem.description || '';
+     var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
++    var currentQuantityText = detailItem.quantityText == null ? null : String(detailItem.quantityText);
+     var uomAbbreviation = detailItem.uomAbbreviation || null;
+     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
+ 
+     nameNode.textContent = itemName;
++    if (detailItem.isOptional === true) {
++      var optionalLabel = document.createElement('span');
++      optionalLabel.className = 'detail-item-optional-label';
++      optionalLabel.textContent = ' (optional)';
++      nameNode.appendChild(optionalLabel);
++    }
+ 
+     if (detailItem.isCrossedOff) {
+       node.classList.add('detail-item-row--crossed');
+@@ -304,7 +311,7 @@
+       });
+     }
+ 
+-    function updateQtyPill(qty, abbr) {
++    function updateQtyPill(qty, abbr, displayQtyText) {
+       if (!qtyPillNode) {
+         return;
+       }
+@@ -314,7 +321,12 @@
+       var showPill = (qty != null && !Number.isNaN(numericQty) && numericQty !== 0 && (numericQty !== 1 || hasUom)) || hasUom;
+ 
+       if (showPill) {
+-        var pillText = qty != null && !Number.isNaN(numericQty) && numericQty !== 0 ? String(qty) : '';
++        var pillText = '';
++        if (displayQtyText != null && String(displayQtyText).trim()) {
++          pillText = String(displayQtyText).trim();
++        } else if (qty != null && !Number.isNaN(numericQty) && numericQty !== 0) {
++          pillText = String(qty);
++        }
+         if (abbr) {
+           pillText = pillText ? pillText + '\u00a0' + abbr : abbr;
+         }
+@@ -330,7 +342,7 @@
+       }
+     }
+ 
+-    updateQtyPill(currentQuantity, uomAbbreviation);
++    updateQtyPill(currentQuantity, uomAbbreviation, currentQuantityText);
+ 
+     if (descriptionText) {
+       metaNode.textContent = descriptionText;
+@@ -822,6 +834,7 @@
+       var uomSelect = null;
+       var uomUnits = [];
+       var selectedUomId = options.initialUnitOfMeasureId || null;
++      var optionalInput = null;
+ 
+       if (showQuantityField) {
+         var quantityLabel = document.createElement('label');
+@@ -920,6 +933,24 @@
+         form.appendChild(quantityRow);
+       }
+ 
++      if (options.showOptionalField === true) {
++        var optionalRow = document.createElement('label');
++        optionalRow.className = 'modal-checklist-row modal-optional-row';
++
++        optionalInput = document.createElement('input');
++        optionalInput.type = 'checkbox';
++        optionalInput.className = 'modal-checklist-checkbox';
++        optionalInput.checked = options.initialIsOptional === true;
++        optionalRow.appendChild(optionalInput);
++
++        var optionalText = document.createElement('span');
++        optionalText.className = 'modal-checklist-name';
++        optionalText.textContent = options.optionalLabel || 'Mark ingredient as optional';
++        optionalRow.appendChild(optionalText);
++
++        form.appendChild(optionalRow);
++      }
++
+       var categoryInput = null;
+       var categoryInputWrapper = null;
+       var categorySuggestionsList = null;
+@@ -1298,6 +1329,7 @@
+           showError('');
+ 
+           var rawName = String(nameInput.value || '').trim();
++          var rawQuantityText = quantityInput ? String(quantityInput.value || '').trim() : '';
+           if (!rawName) {
+             showError('Item name is required.');
+             nameInput.focus();
+@@ -1342,8 +1374,10 @@
+             close({
+               name: rawName,
+               quantity: quantityResult.value,
++              quantityText: rawQuantityText || null,
+               unitOfMeasureId: selectedUomId || null,
+               description: String(descriptionInput.value || '').trim(),
++              isOptional: optionalInput ? optionalInput.checked === true : false,
+               categoryId: category ? category.id || '' : '',
+               categoryName: category ? category.name || '' : ''
+             });
+@@ -1364,8 +1398,10 @@
+             item: item,
+             name: rawName,
+             quantity: quantityResult.value,
++            quantityText: rawQuantityText || null,
+             unitOfMeasureId: selectedUomId || null,
+             description: String(descriptionInput.value || '').trim(),
++            isOptional: optionalInput ? optionalInput.checked === true : false,
+             categoryId: category ? category.id || '' : '',
+             categoryName: category ? category.name || '' : ''
+           });
