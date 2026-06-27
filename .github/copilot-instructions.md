@@ -14,6 +14,8 @@ Use these rules for work in this repository.
 - Make minimal, focused changes.
 - Preserve existing structure and wording unless a change is requested.
 - When summarizing work, distinguish confirmed facts from open questions.
+- During development, treat `src/` as the source of truth.
+- Do not read from, edit, or mirror changes into `docs/` unless the user explicitly asks for deployment or release artifact sync.
 
 ## Documentation Expectations
 

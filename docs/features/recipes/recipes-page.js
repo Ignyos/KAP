@@ -1616,12 +1616,19 @@
               return;
             }
 
+            var activeVersionId = activeVersion ? activeVersion.id : '';
+            var existingRecipeList = await window.KaPListsService.findActiveRecipeDerivedList(record.id, activeVersionId);
+
             var result = await window.KaPUI.ShowAddToListModal({
               recipeName: record.name,
               ingredients: ingredients,
-              getAllLists: function () {
-                return window.KaPListsService.getAllLists();
-              }
+              initialBatchSize: existingRecipeList && existingRecipeList.batchSize != null
+                ? existingRecipeList.batchSize
+                : 1,
+              allowBatchEdit: !existingRecipeList,
+              batchHint: existingRecipeList
+                ? 'This recipe already has a grocery list. Change batch size from that list.'
+                : ''
             });
 
             if (!result) {
@@ -1629,21 +1636,18 @@
             }
 
             try {
-              var targetListId = result.targetListId;
-              if (result.isNewList) {
-                var newList = await window.KaPListsService.createList(result.newListName);
-                targetListId = newList.id;
+              var targetList = existingRecipeList;
+              if (!targetList) {
+                targetList = await window.KaPListsService.createRecipeDerivedList({
+                  recipeId: record.id,
+                  recipeVersionId: activeVersionId,
+                  recipeVersionName: activeVersion && activeVersion.versionName ? activeVersion.versionName : '',
+                  recipeName: record.name,
+                  batchSize: result.batchSize
+                });
               }
 
-              await Promise.all(result.selectedIngredients.map(function (ingredient) {
-                return window.KaPListsService.addItemToList(
-                  targetListId,
-                  ingredient.itemId,
-                  ingredient.name,
-                  ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity,
-                  ingredient.description
-                );
-              }));
+              await window.KaPListsService.upsertRecipeDerivedItems(targetList.id, result.selectedIngredients);
             } catch (error) {
               await showError(error.message || 'Unable to add ingredients to list.');
             }

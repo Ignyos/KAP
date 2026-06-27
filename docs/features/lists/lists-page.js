@@ -379,6 +379,8 @@
 
   async function renderDetailInto(container, record, hooks) {
     var detailItems = await window.KaPListsService.getListItems(record.id);
+    var isRecipeDerivedList = record.sourceKind === 'recipe';
+    var currentBatchSize = record.batchSize == null ? 1 : Number(record.batchSize);
     var showCategories = getCategoryViewState('lists', record.id);
     var activeItems = sortByNameAscending(detailItems.filter(function (detailItem) {
       return detailItem.isCrossedOff !== true;
@@ -400,6 +402,28 @@
         return buildListDetailItemRow(record, detailItem, container, hooks);
       },
       actions: [
+        isRecipeDerivedList ? {
+          label: 'Batch Size',
+          onClick: async function () {
+            var input = await window.KaPUI.ShowBatchSizeModal({
+              title: 'Set Batch Size',
+              initialBatchSize: currentBatchSize,
+              confirmLabel: 'Save'
+            });
+
+            if (input === null) {
+              return;
+            }
+
+            try {
+              var updatedList = await window.KaPListsService.setRecipeDerivedBatchSize(record.id, input);
+              await window.KaPListsService.recomputeRecipeDerivedItemsForBatch(record.id);
+              hooks.onAfterChange(updatedList);
+            } catch (error) {
+              await showError(error.message || 'Unable to update batch size.');
+            }
+          }
+        } : null,
         {
           label: showCategories ? 'Hide Categories' : 'Show Categories',
           onClick: async function () {
@@ -426,7 +450,7 @@
             }
           }
         }
-      ]
+      ].filter(function (action) { return !!action; })
     });
 
     if (showCategories && activeItems.length > 0) {

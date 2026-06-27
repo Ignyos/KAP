@@ -2249,8 +2249,147 @@
     });
   }
 
+  function normalizeBatchSizeValue(value) {
+    var numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 1;
+    }
+
+    var stepped = Math.round(numeric * 2) / 2;
+    return Math.max(0.5, stepped);
+  }
+
+  function formatBatchSizeFraction(value) {
+    var normalized = normalizeBatchSizeValue(value);
+    var whole = Math.floor(normalized);
+    var hasHalf = Math.abs(normalized - whole - 0.5) < 0.001;
+
+    if (hasHalf) {
+      if (whole <= 0) {
+        return '1/2';
+      }
+
+      return String(whole) + ' 1/2';
+    }
+
+    return String(whole);
+  }
+
+  function buildBatchSizeStepper(options) {
+    var canEdit = options.allowEdit !== false;
+    var value = normalizeBatchSizeValue(options.initialValue);
+
+    var stepper = document.createElement('div');
+    stepper.className = 'modal-batch-stepper' + (canEdit ? '' : ' modal-batch-stepper--locked');
+
+    var decreaseButton = document.createElement('button');
+    decreaseButton.type = 'button';
+    decreaseButton.className = 'modal-batch-stepper-button';
+    decreaseButton.textContent = '-';
+    decreaseButton.setAttribute('aria-label', 'Decrease batch size');
+
+    var valueNode = document.createElement('div');
+    valueNode.className = 'modal-batch-stepper-value';
+    valueNode.textContent = formatBatchSizeFraction(value);
+
+    var increaseButton = document.createElement('button');
+    increaseButton.type = 'button';
+    increaseButton.className = 'modal-batch-stepper-button';
+    increaseButton.textContent = '+';
+    increaseButton.setAttribute('aria-label', 'Increase batch size');
+
+    function refresh() {
+      valueNode.textContent = formatBatchSizeFraction(value);
+      decreaseButton.disabled = !canEdit || value <= 0.5;
+      increaseButton.disabled = !canEdit;
+      if (typeof options.onChange === 'function') {
+        options.onChange(value);
+      }
+    }
+
+    increaseButton.addEventListener('click', function () {
+      if (!canEdit) {
+        return;
+      }
+
+      value = normalizeBatchSizeValue(value + 0.5);
+      refresh();
+    });
+
+    decreaseButton.addEventListener('click', function () {
+      if (!canEdit) {
+        return;
+      }
+
+      value = normalizeBatchSizeValue(value - 0.5);
+      refresh();
+    });
+
+    stepper.appendChild(decreaseButton);
+    stepper.appendChild(valueNode);
+    stepper.appendChild(increaseButton);
+    refresh();
+
+    return {
+      node: stepper,
+      focus: function () {
+        if (canEdit) {
+          increaseButton.focus();
+        }
+      },
+      getValue: function () {
+        return value;
+      }
+    };
+  }
+
+  function ShowBatchSizeModal(config) {
+    return showModal(function (bodyNode, confirmButton, cancelButton) {
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var label = document.createElement('label');
+      label.className = 'modal-field-label';
+      label.textContent = config.label || 'Batch Size';
+      form.appendChild(label);
+
+      var stepper = buildBatchSizeStepper({
+        initialValue: config.initialBatchSize == null ? 1 : config.initialBatchSize,
+        allowEdit: config.allowBatchEdit !== false
+      });
+      form.appendChild(stepper.node);
+
+      if (config.message) {
+        var messageNode = document.createElement('p');
+        messageNode.className = 'modal-hint';
+        messageNode.textContent = config.message;
+        form.appendChild(messageNode);
+      }
+
+      bodyNode.appendChild(form);
+
+      requestAnimationFrame(function () {
+        if (config.allowBatchEdit === false) {
+          cancelButton.focus();
+          return;
+        }
+
+        stepper.focus();
+      });
+
+      return function () {
+        return stepper.getValue();
+      };
+    }, {
+      title: config.title || 'Set Batch Size',
+      confirmLabel: config.confirmLabel || 'Save',
+      cancelValue: null,
+      isDanger: false
+    });
+  }
+
   function ShowAddToListModal(config) {
-    // config: { recipeName, ingredients, getAllLists }
+    // config: { recipeName, ingredients, initialBatchSize, batchLabel, batchHintFormatter }
     return new Promise(function (resolve) {
       var node = newFromTemplate('modal-template');
       var overlay = node;
@@ -2269,6 +2408,31 @@
       var form = document.createElement('div');
       form.className = 'modal-item-form';
 
+      var batchHintNode = null;
+
+      var batchLabel = document.createElement('label');
+      batchLabel.className = 'modal-field-label';
+      batchLabel.textContent = config.batchLabel || 'Batch Size';
+      form.appendChild(batchLabel);
+
+      var batchStepper = buildBatchSizeStepper({
+        initialValue: config.initialBatchSize == null ? 1 : config.initialBatchSize,
+        allowEdit: true,
+        onChange: function (value) {
+          if (batchHintNode && typeof config.batchHintFormatter === 'function') {
+            batchHintNode.textContent = String(config.batchHintFormatter(value) || '');
+          }
+        }
+      });
+      form.appendChild(batchStepper.node);
+
+      if (typeof config.batchHintFormatter === 'function') {
+        batchHintNode = document.createElement('p');
+        batchHintNode.className = 'modal-hint';
+        batchHintNode.textContent = String(config.batchHintFormatter(batchStepper.getValue()) || '');
+        form.appendChild(batchHintNode);
+      }
+
       // ---- Ingredients ----
       var ingredientsLabel = document.createElement('span');
       ingredientsLabel.className = 'modal-field-label';
@@ -2285,7 +2449,10 @@
 
         var checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = true;
+        var ingredientKey = ingredient.id
+          ? String(ingredient.id)
+          : String((ingredient.name || '')).trim().toLowerCase();
+        checkbox.checked = config.preCheckedKeys ? config.preCheckedKeys.has(ingredientKey) : true;
         checkbox.className = 'modal-checklist-checkbox';
 
         var nameNode = document.createElement('span');
@@ -2314,61 +2481,6 @@
 
       form.appendChild(ingredientList);
 
-      // ---- List mode toggle ----
-      var listLabel = document.createElement('span');
-      listLabel.className = 'modal-field-label';
-      listLabel.textContent = 'Target List';
-      form.appendChild(listLabel);
-
-      var toggleGroup = document.createElement('div');
-      toggleGroup.className = 'modal-toggle-group';
-
-      var existingButton = document.createElement('button');
-      existingButton.type = 'button';
-      existingButton.className = 'modal-toggle-button is-active';
-      existingButton.textContent = 'Existing List';
-
-      var newButton = document.createElement('button');
-      newButton.type = 'button';
-      newButton.className = 'modal-toggle-button';
-      newButton.textContent = 'New List';
-
-      toggleGroup.appendChild(existingButton);
-      toggleGroup.appendChild(newButton);
-      form.appendChild(toggleGroup);
-
-      // ---- Existing list section ----
-      var existingSection = document.createElement('div');
-
-      var targetInputWrapper = document.createElement('div');
-      targetInputWrapper.className = 'modal-input-wrapper';
-
-      var targetInput = document.createElement('input');
-      targetInput.type = 'text';
-      targetInput.className = 'modal-input';
-      targetInput.placeholder = 'Search grocery lists';
-
-      var targetSuggestionsList = document.createElement('div');
-      targetSuggestionsList.className = 'modal-suggestions';
-      targetSuggestionsList.hidden = true;
-
-      targetInputWrapper.appendChild(targetInput);
-      targetInputWrapper.appendChild(targetSuggestionsList);
-      existingSection.appendChild(targetInputWrapper);
-      form.appendChild(existingSection);
-
-      // ---- New list section ----
-      var newSection = document.createElement('div');
-      newSection.hidden = true;
-
-      var newListInput = document.createElement('input');
-      newListInput.type = 'text';
-      newListInput.className = 'modal-input';
-      newListInput.value = config.recipeName || '';
-      newListInput.placeholder = 'New list name';
-      newSection.appendChild(newListInput);
-      form.appendChild(newSection);
-
       var errorNode = document.createElement('p');
       errorNode.className = 'modal-error';
       form.appendChild(errorNode);
@@ -2376,98 +2488,8 @@
       bodyNode.appendChild(form);
 
       // ---- State ----
-      var mode = 'existing';
-      var selectedList = null;
-      var currentSuggestions = [];
-
-      function setMode(nextMode) {
-        mode = nextMode;
-        existingButton.classList.toggle('is-active', mode === 'existing');
-        newButton.classList.toggle('is-active', mode === 'new');
-        existingSection.hidden = mode !== 'existing';
-        newSection.hidden = mode !== 'new';
-        errorNode.textContent = '';
-        if (mode === 'existing') {
-          targetInput.focus();
-        } else {
-          newListInput.focus();
-          newListInput.select();
-        }
-      }
-
-      existingButton.addEventListener('click', function () { setMode('existing'); });
-      newButton.addEventListener('click', function () { setMode('new'); });
-
-      // ---- Suggestions ----
-      function renderSuggestions() {
-        targetSuggestionsList.replaceChildren();
-        var query = String(targetInput.value || '').trim().toLowerCase();
-        var filtered = currentSuggestions.filter(function (list) {
-          return !query || String(list.name || '').toLowerCase().indexOf(query) !== -1;
-        });
-
-        if (filtered.length === 0) {
-          targetSuggestionsList.hidden = true;
-          return;
-        }
-
-        targetSuggestionsList.hidden = false;
-        filtered.slice(0, 8).forEach(function (list) {
-          var row = document.createElement('div');
-          row.className = 'modal-suggestion-row';
-
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'modal-suggestion-main';
-
-          var content = document.createElement('div');
-          content.className = 'modal-suggestion-content';
-
-          var nameNode = document.createElement('div');
-          nameNode.className = 'modal-suggestion-name';
-          nameNode.textContent = list.name;
-          content.appendChild(nameNode);
-          btn.appendChild(content);
-
-          btn.addEventListener('click', function () {
-            selectedList = { id: list.id, name: list.name };
-            targetInput.value = list.name;
-            currentSuggestions = [];
-            renderSuggestions();
-            errorNode.textContent = '';
-          });
-
-          row.appendChild(btn);
-          targetSuggestionsList.appendChild(row);
-        });
-      }
-
-      function loadSuggestions() {
-        return Promise.resolve(config.getAllLists ? config.getAllLists() : []).then(function (lists) {
-          currentSuggestions = (lists || []).slice().sort(function (a, b) {
-            return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
-          });
-          renderSuggestions();
-        });
-      }
-
-      function closeSuggestions() {
-        currentSuggestions = [];
-        renderSuggestions();
-      }
-
-      targetInput.addEventListener('focus', function () {
-        loadSuggestions().catch(function () {});
-      });
-      targetInput.addEventListener('input', function () {
-        selectedList = null;
-        loadSuggestions().catch(function () {});
-      });
-
-      // ---- Validate & close ----
       function close(result) {
         document.removeEventListener('keydown', onKeyDown);
-        document.removeEventListener('click', onDocumentClick);
         document.body.removeChild(node);
         resolve(result);
       }
@@ -2484,46 +2506,15 @@
           return;
         }
 
-        if (mode === 'new') {
-          var newName = String(newListInput.value || '').trim();
-          if (!newName) {
-            errorNode.textContent = 'List name is required.';
-            newListInput.focus();
-            return;
-          }
-          close({ selectedIngredients: selectedIngredients, isNewList: true, newListName: newName, targetListId: null });
-          return;
-        }
-
-        var typedName = String(targetInput.value || '').trim();
-        if (!typedName) {
-          errorNode.textContent = 'Select a grocery list.';
-          targetInput.focus();
-          return;
-        }
-
-        if (!selectedList || String(selectedList.name || '').trim().toLowerCase() !== typedName.toLowerCase()) {
-          errorNode.textContent = 'Select a list from the suggestions.';
-          targetInput.focus();
-          return;
-        }
-
-        close({ selectedIngredients: selectedIngredients, isNewList: false, newListName: null, targetListId: selectedList.id });
+        close({
+          selectedIngredients: selectedIngredients,
+          batchSize: batchStepper.getValue()
+        });
       }
 
       function onKeyDown(event) {
         if (event.key === 'Escape') {
-          if (!targetSuggestionsList.hidden) {
-            closeSuggestions();
-            return;
-          }
           close(null);
-        }
-      }
-
-      function onDocumentClick(event) {
-        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
-          closeSuggestions();
         }
       }
 
@@ -2534,12 +2525,10 @@
       confirmButton.addEventListener('click', function () { validateAndClose(); });
 
       document.addEventListener('keydown', onKeyDown);
-      document.addEventListener('click', onDocumentClick);
       document.body.appendChild(node);
 
       requestAnimationFrame(function () {
-        targetInput.focus();
-        loadSuggestions().catch(function () {});
+        batchStepper.focus();
       });
     });
   }
@@ -2968,6 +2957,8 @@
     ShowTemplateConfigModal: ShowTemplateConfigModal,
     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,
+    ShowBatchSizeModal: ShowBatchSizeModal,
+    FormatBatchSize: formatBatchSizeFraction,
     ShowAddToListModal: ShowAddToListModal,
     ShowNewVersionModal: ShowNewVersionModal,
     ShowRecipeCloneModal: ShowRecipeCloneModal,

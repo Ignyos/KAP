@@ -379,6 +379,8 @@
 
   async function renderDetailInto(container, record, hooks) {
     var detailItems = await window.KaPListsService.getListItems(record.id);
+    var isRecipeDerivedList = record.sourceKind === 'recipe';
+    var currentBatchSize = record.batchSize == null ? 1 : Number(record.batchSize);
     var showCategories = getCategoryViewState('lists', record.id);
     var activeItems = sortByNameAscending(detailItems.filter(function (detailItem) {
       return detailItem.isCrossedOff !== true;
@@ -426,7 +428,7 @@
             }
           }
         }
-      ]
+      ].filter(function (action) { return !!action; })
     });
 
     if (showCategories && activeItems.length > 0) {
