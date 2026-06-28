@@ -1,3 +1,43 @@
+# Release v2026-06-28-19-13
+
+## Overview
+This release updates the recipe detail experience with a consolidated tabbed-accordion layout and adds editable recipe Information fields. It also adds a direct recipe rename action in the recipe detail menu.
+
+## New Features
+- **Recipe Information Section**: Recipe details now include an Information section with Prep Time, Cook Time, Additional Time, Total Time, Servings, and Yield.
+- **Recipe Rename Action**: Recipe detail overflow menu now includes `Edit Recipe Name` for quickly renaming a recipe.
+
+## Improvements
+- **Recipe Detail Layout**: Versions, Description, and Tags now render in a unified tabbed-accordion block with one active section at a time.
+- **Detail Section Navigation**: Section selection and collapsed state are now remembered globally across recipe views.
+- **Duration Input Controls**: Time fields now use split hours/minutes inputs with integrated stepper controls for faster edits.
+- **Version Controls Placement**: Version selector and add-version actions now appear inside the Versions section body.
+- **Expander Affordance**: Recipe detail block collapse/expand control now uses a chevron-style button.
+
+## Bug Fixes
+- **No User-Reported Bug Fixes**: This release focuses on recipe detail UX and metadata capabilities.
+
+## Technical Changes
+- Added recipe-level Information persistence fields (`prep`, `cook`, `additional`, `servings`, `yield`) and normalization in recipe service paths.
+- Added recipe Information update API and record retrieval helper for refreshed detail rendering.
+- Updated recipe export/import flows to include recipe-level Information fields in payloads and text export output.
+- Updated clone behavior to carry recipe-level Information to cloned recipes.
+
+## Installation
+1. Clone or pull the latest code from the repository.
+2. Open `src/index.html` or `docs/index.html` in a web browser.
+
+## Requirements
+- Modern web browser with ES5 JavaScript support.
+- LocalStorage and IndexedDB support for data persistence.
+
+## Documentation
+- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+- For feature documentation and usage guides, see `application-structure.md`.
+- For recipe feature planning notes, see `recipe-feature-definition.md`.
+
+---
+
 # Release v2026-06-28-14-51
 
 ## Overview

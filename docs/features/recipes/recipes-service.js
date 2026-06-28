@@ -37,6 +37,57 @@
     return window.KaPItemEntryRules.normalizeDescription(description);
   }
 
+  function normalizeOptionalDurationMinutes(value) {
+    if (value == null || String(value).trim() === '') {
+      return null;
+    }
+
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error('Duration values must be zero or greater.');
+    }
+
+    return Math.floor(parsed);
+  }
+
+  function normalizeStoredDurationMinutes(value) {
+    if (value == null || String(value).trim() === '') {
+      return null;
+    }
+
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return null;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  function normalizeOptionalRecipeInfoText(value) {
+    return String(value == null ? '' : value).trim();
+  }
+
+  function normalizeRecipeInformation(record) {
+    var normalized = {
+      prepMinutes: null,
+      cookMinutes: null,
+      additionalMinutes: null,
+      servings: '',
+      yield: ''
+    };
+
+    if (!record || typeof record !== 'object') {
+      return normalized;
+    }
+
+    normalized.prepMinutes = normalizeStoredDurationMinutes(record.infoPrepMinutes);
+    normalized.cookMinutes = normalizeStoredDurationMinutes(record.infoCookMinutes);
+    normalized.additionalMinutes = normalizeStoredDurationMinutes(record.infoAdditionalMinutes);
+    normalized.servings = normalizeOptionalRecipeInfoText(record.infoServings);
+    normalized.yield = normalizeOptionalRecipeInfoText(record.infoYield);
+    return normalized;
+  }
+
   function normalizeOptionalUnitOfMeasureId(unitOfMeasureId) {
     var raw = String(unitOfMeasureId == null ? '' : unitOfMeasureId).trim();
     return raw || null;
@@ -79,6 +130,7 @@
 
     var normalized = Object.assign({}, record);
     normalized.tags = normalizeRecipeTags(record.tags);
+    normalized.information = normalizeRecipeInformation(record);
     return normalized;
   }
 
@@ -302,6 +354,13 @@
     }));
 
     return normalizedRecipes;
+  }
+
+  async function getRecipeById(recipeId) {
+    var record = await requireRecipeById(recipeId);
+    var normalized = normalizeRecipeRecord(record);
+    normalized.tags = await getRecipeTags(recipeId);
+    return normalized;
   }
 
   async function getRecipeTags(recipeId) {
@@ -553,6 +612,11 @@
       name: safeName,
       description: '',
       tags: [],
+      infoPrepMinutes: null,
+      infoCookMinutes: null,
+      infoAdditionalMinutes: null,
+      infoServings: '',
+      infoYield: '',
       type: RECIPE_TYPE,
       createdDate: timestamp,
       updatedDate: timestamp
@@ -581,6 +645,35 @@
 
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
     return record;
+  }
+
+  async function updateRecipeInformation(id, nextInformation) {
+    var record = await requireRecipeById(id);
+    var source = (nextInformation && typeof nextInformation === 'object') ? nextInformation : {};
+
+    if (Object.prototype.hasOwnProperty.call(source, 'prepMinutes')) {
+      record.infoPrepMinutes = normalizeOptionalDurationMinutes(source.prepMinutes);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(source, 'cookMinutes')) {
+      record.infoCookMinutes = normalizeOptionalDurationMinutes(source.cookMinutes);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(source, 'additionalMinutes')) {
+      record.infoAdditionalMinutes = normalizeOptionalDurationMinutes(source.additionalMinutes);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(source, 'servings')) {
+      record.infoServings = normalizeOptionalRecipeInfoText(source.servings);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(source, 'yield')) {
+      record.infoYield = normalizeOptionalRecipeInfoText(source.yield);
+    }
+
+    record.updatedDate = nowIso();
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
+    return normalizeRecipeRecord(record);
   }
 
   async function deleteRecipe(id) {
@@ -1272,6 +1365,8 @@
     }
 
     var clonedRecipe = await createRecipe(cloneName || (sourceRecipe.name + ' - copy'));
+    await updateRecipeInformation(clonedRecipe.id, normalizeRecipeInformation(sourceRecipe));
+
     var sourceTags = await getRecipeTags(sourceRecipe.id);
     for (var i = 0; i < sourceTags.length; i++) {
       await addTagToRecipe(clonedRecipe.id, sourceTags[i]);
@@ -1446,6 +1541,7 @@
 
   window.KaPRecipesService = {
     getAllRecipes: getAllRecipes,
+    getRecipeById: getRecipeById,
     getRecipeTags: getRecipeTags,
     getAllRecipeTags: getAllRecipeTags,
     getAllUnitOfMeasures: getAllUnitOfMeasures,
@@ -1458,6 +1554,7 @@
     createRecipe: createRecipe,
     renameRecipe: renameRecipe,
     updateRecipeDescription: updateRecipeDescription,
+    updateRecipeInformation: updateRecipeInformation,
     deleteRecipe: deleteRecipe,
     getRecipeItemCount: getRecipeItemCount,
     getRecipeInstructionCount: getRecipeInstructionCount,

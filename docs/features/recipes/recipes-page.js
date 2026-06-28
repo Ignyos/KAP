@@ -7,6 +7,12 @@
   var TAGS_SECTION_VISIBLE_KEY = 'kap.recipeTagsSectionVisible';
   var BATCH_SIZE_STATE_KEY = 'kap.recipeBatchSizeState';
   var LAST_VIEWED_VERSION_KEY = 'kap.recipeLastViewedVersion';
+  var DETAILS_ACTIVE_SECTION_KEY = 'kap.recipeDetailsActiveSection';
+  var DETAILS_COLLAPSED_KEY = 'kap.recipeDetailsCollapsed';
+  var DETAILS_SECTION_INFORMATION = 'information';
+  var DETAILS_SECTION_DESCRIPTION = 'description';
+  var DETAILS_SECTION_VERSIONS = 'versions';
+  var DETAILS_SECTION_TAGS = 'tags';
   var versionNoteFocusTargets = {};
 
   async function showError(message) {
@@ -149,6 +155,17 @@
       .replace(/'/g, '&#39;');
   }
 
+  function buildRecipeInformationForExport(recipeRecord) {
+    var info = getRecipeInformation(recipeRecord || {});
+    return {
+      prepMinutes: info.prepMinutes,
+      cookMinutes: info.cookMinutes,
+      additionalMinutes: info.additionalMinutes,
+      servings: info.servings,
+      yield: info.yield
+    };
+  }
+
   function buildRecipeExportPayload(recipeRecord, activeVersion, detailItems, instructions, tags) {
     var exportedAt = new Date().toISOString();
     var versionId = activeVersion && activeVersion.id != null ? String(activeVersion.id) : '';
@@ -161,7 +178,8 @@
       recipe: {
         id: recipeRecord && recipeRecord.id != null ? String(recipeRecord.id) : '',
         name: recipeRecord && recipeRecord.name ? String(recipeRecord.name) : '',
-        tags: Array.isArray(tags) ? tags.slice() : []
+        tags: Array.isArray(tags) ? tags.slice() : [],
+        information: buildRecipeInformationForExport(recipeRecord)
       },
       version: {
         id: versionId,
@@ -204,6 +222,28 @@
 
     if (payload && Array.isArray(payload.recipe.tags) && payload.recipe.tags.length > 0) {
       lines.push('Tags: ' + payload.recipe.tags.join(', '));
+    }
+
+    var info = payload && payload.recipe ? payload.recipe.information : null;
+    if (info) {
+      var hasInfo = info.prepMinutes != null
+        || info.cookMinutes != null
+        || info.additionalMinutes != null
+        || String(info.servings || '').trim() !== ''
+        || String(info.yield || '').trim() !== '';
+
+      if (hasInfo) {
+        var hasDuration = info.prepMinutes != null || info.cookMinutes != null || info.additionalMinutes != null;
+        var totalMinutes = hasDuration ? ((info.prepMinutes || 0) + (info.cookMinutes || 0) + (info.additionalMinutes || 0)) : null;
+        lines.push('');
+        lines.push('Information');
+        lines.push('- Prep Time: ' + (formatDurationFromMinutes(info.prepMinutes) || 'Not set'));
+        lines.push('- Cook Time: ' + (formatDurationFromMinutes(info.cookMinutes) || 'Not set'));
+        lines.push('- Additional Time: ' + (formatDurationFromMinutes(info.additionalMinutes) || 'Not set'));
+        lines.push('- Total Time: ' + (formatDurationFromMinutes(totalMinutes) || 'Not set'));
+        lines.push('- Servings: ' + (String(info.servings || '').trim() || 'Not set'));
+        lines.push('- Yield: ' + (String(info.yield || '').trim() || 'Not set'));
+      }
     }
 
     lines.push('');
@@ -440,6 +480,17 @@
     });
   }
 
+  function normalizeImportedRecipeInformation(rawInformation) {
+    var source = rawInformation && typeof rawInformation === 'object' ? rawInformation : {};
+    return {
+      prepMinutes: normalizeMinutesValue(source.prepMinutes),
+      cookMinutes: normalizeMinutesValue(source.cookMinutes),
+      additionalMinutes: normalizeMinutesValue(source.additionalMinutes),
+      servings: asOptionalString(source.servings),
+      yield: asOptionalString(source.yield)
+    };
+  }
+
   function validateKapRecipePayload(payload) {
     if (!payload || typeof payload !== 'object') {
       throw new Error('Invalid .kap file.');
@@ -474,7 +525,8 @@
       recipe: {
         id: recipeId,
         name: recipeName,
-        tags: normalizeTagListForImport(payload.recipe.tags)
+        tags: normalizeTagListForImport(payload.recipe.tags),
+        information: normalizeImportedRecipeInformation(payload.recipe.information)
       },
       version: {
         id: versionId,
@@ -987,6 +1039,7 @@
     recipeRecord.name = importDraft.recipe.name;
     recipeRecord.description = asOptionalString(recipeRecord.description);
     recipeRecord.tags = normalizeTagListForImport(importDraft.recipe.tags);
+    setRecipeInformationOnRecord(recipeRecord, importDraft.recipe.information || {});
     recipeRecord.updatedDate = nowIso;
     if (!recipeRecord.createdDate) {
       recipeRecord.createdDate = nowIso;
@@ -1303,6 +1356,145 @@
 
   function clearVersionNoteFocus(recipeId) {
     delete versionNoteFocusTargets[recipeId];
+  }
+
+  function readLocalJsonState(storageKey) {
+    try {
+      var raw = localStorage.getItem(storageKey);
+      if (!raw) {
+        return {};
+      }
+
+      var parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function writeLocalJsonState(storageKey, state) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state || {}));
+    } catch (error) {
+      // Ignore persistence failures.
+    }
+  }
+
+  function getActiveDetailsSection() {
+    var state = readLocalJsonState(DETAILS_ACTIVE_SECTION_KEY);
+    var value = String(state.active || '').toLowerCase();
+    if (
+      value !== DETAILS_SECTION_INFORMATION
+      && value !== DETAILS_SECTION_DESCRIPTION
+      && value !== DETAILS_SECTION_VERSIONS
+      && value !== DETAILS_SECTION_TAGS
+    ) {
+      return DETAILS_SECTION_INFORMATION;
+    }
+
+    return value;
+  }
+
+  function setActiveDetailsSection(sectionName) {
+    writeLocalJsonState(DETAILS_ACTIVE_SECTION_KEY, {
+      active: String(sectionName || '').toLowerCase() || DETAILS_SECTION_INFORMATION
+    });
+  }
+
+  function isDetailsBlockCollapsed() {
+    var state = readLocalJsonState(DETAILS_COLLAPSED_KEY);
+    return state.collapsed === true;
+  }
+
+  function setDetailsBlockCollapsed(isCollapsed) {
+    writeLocalJsonState(DETAILS_COLLAPSED_KEY, {
+      collapsed: isCollapsed === true
+    });
+  }
+
+  function normalizeMinutesValue(value) {
+    if (value == null || String(value).trim() === '') {
+      return null;
+    }
+
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return null;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  function splitMinutesToParts(totalMinutes) {
+    var normalized = normalizeMinutesValue(totalMinutes);
+    if (normalized == null) {
+      return {
+        hours: '',
+        minutes: ''
+      };
+    }
+
+    return {
+      hours: String(Math.floor(normalized / 60)),
+      minutes: String(normalized % 60)
+    };
+  }
+
+  function combineDurationParts(hoursValue, minutesValue) {
+    var hasHours = String(hoursValue == null ? '' : hoursValue).trim() !== '';
+    var hasMinutes = String(minutesValue == null ? '' : minutesValue).trim() !== '';
+    if (!hasHours && !hasMinutes) {
+      return null;
+    }
+
+    var hours = Number(hasHours ? hoursValue : 0);
+    var minutes = Number(hasMinutes ? minutesValue : 0);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 0 || minutes < 0) {
+      throw new Error('Time values must be zero or greater.');
+    }
+
+    return Math.floor(hours) * 60 + Math.floor(minutes);
+  }
+
+  function formatDurationFromMinutes(totalMinutes) {
+    var normalized = normalizeMinutesValue(totalMinutes);
+    if (normalized == null) {
+      return '';
+    }
+
+    var hours = Math.floor(normalized / 60);
+    var minutes = normalized % 60;
+    return String(hours) + 'h ' + String(minutes) + 'm';
+  }
+
+  function getRecipeInformation(record) {
+    var information = record && record.information && typeof record.information === 'object'
+      ? record.information
+      : {};
+
+    return {
+      prepMinutes: normalizeMinutesValue(information.prepMinutes != null ? information.prepMinutes : record.infoPrepMinutes),
+      cookMinutes: normalizeMinutesValue(information.cookMinutes != null ? information.cookMinutes : record.infoCookMinutes),
+      additionalMinutes: normalizeMinutesValue(information.additionalMinutes != null ? information.additionalMinutes : record.infoAdditionalMinutes),
+      servings: String((information.servings != null ? information.servings : record.infoServings) || '').trim(),
+      yield: String((information.yield != null ? information.yield : record.infoYield) || '').trim()
+    };
+  }
+
+  function setRecipeInformationOnRecord(record, info) {
+    var next = Object.assign({}, getRecipeInformation(record), info || {});
+    record.infoPrepMinutes = normalizeMinutesValue(next.prepMinutes);
+    record.infoCookMinutes = normalizeMinutesValue(next.cookMinutes);
+    record.infoAdditionalMinutes = normalizeMinutesValue(next.additionalMinutes);
+    record.infoServings = String(next.servings == null ? '' : next.servings).trim();
+    record.infoYield = String(next.yield == null ? '' : next.yield).trim();
+    record.information = {
+      prepMinutes: record.infoPrepMinutes,
+      cookMinutes: record.infoCookMinutes,
+      additionalMinutes: record.infoAdditionalMinutes,
+      servings: record.infoServings,
+      yield: record.infoYield
+    };
   }
 
   async function createRecipe() {
@@ -1825,6 +2017,661 @@
       confirmLabel: 'Clone',
       infoText: 'Cloning a version creates a new recipe with that version\'s ingredients and instructions, without carrying over any version history.'
     });
+  }
+
+  function appendInformationTabContent(content, record) {
+    var info = getRecipeInformation(record);
+
+    var grid = document.createElement('div');
+    grid.className = 'recipe-info-grid';
+
+    function appendDurationField(labelText, fieldKey) {
+      var row = document.createElement('div');
+      row.className = 'recipe-info-row';
+
+      var label = document.createElement('label');
+      label.className = 'recipe-info-label';
+      label.textContent = labelText;
+      row.appendChild(label);
+
+      var currentParts = splitMinutesToParts(info[fieldKey]);
+      var inputWrap = document.createElement('div');
+      inputWrap.className = 'recipe-info-duration-wrap';
+
+      var hoursInput = document.createElement('input');
+      hoursInput.type = 'number';
+      hoursInput.min = '0';
+      hoursInput.step = '1';
+      hoursInput.className = 'recipe-info-input recipe-info-duration-input';
+      hoursInput.placeholder = 'h';
+      hoursInput.value = currentParts.hours;
+
+      var minutesInput = document.createElement('input');
+      minutesInput.type = 'number';
+      minutesInput.min = '0';
+      minutesInput.step = '1';
+      minutesInput.className = 'recipe-info-input recipe-info-duration-input';
+      minutesInput.placeholder = 'm';
+      minutesInput.value = currentParts.minutes;
+
+      var hoursSuffix = document.createElement('span');
+      hoursSuffix.className = 'recipe-info-duration-suffix';
+      hoursSuffix.textContent = 'h';
+
+      var minutesSuffix = document.createElement('span');
+      minutesSuffix.className = 'recipe-info-duration-suffix';
+      minutesSuffix.textContent = 'm';
+
+      function createDurationPartWrap(inputNode, suffixNode, labelPrefix) {
+        var partWrap = document.createElement('div');
+        partWrap.className = 'recipe-info-duration-part';
+
+        var inputShell = document.createElement('div');
+        inputShell.className = 'recipe-info-duration-shell';
+
+        var stepper = document.createElement('div');
+        stepper.className = 'recipe-info-stepper';
+
+        var incrementButton = document.createElement('button');
+        incrementButton.type = 'button';
+        incrementButton.className = 'recipe-info-stepper-button';
+        incrementButton.textContent = '+';
+        incrementButton.setAttribute('aria-label', 'Increase ' + labelText + ' ' + labelPrefix);
+
+        var decrementButton = document.createElement('button');
+        decrementButton.type = 'button';
+        decrementButton.className = 'recipe-info-stepper-button';
+        decrementButton.textContent = '-';
+        decrementButton.setAttribute('aria-label', 'Decrease ' + labelText + ' ' + labelPrefix);
+
+        stepper.appendChild(incrementButton);
+        stepper.appendChild(decrementButton);
+
+        inputShell.appendChild(inputNode);
+        inputShell.appendChild(stepper);
+
+        partWrap.appendChild(inputShell);
+        partWrap.appendChild(suffixNode);
+
+        return {
+          wrap: partWrap,
+          incrementButton: incrementButton,
+          decrementButton: decrementButton
+        };
+      }
+
+      var hoursPart = createDurationPartWrap(hoursInput, hoursSuffix, 'hours');
+      var minutesPart = createDurationPartWrap(minutesInput, minutesSuffix, 'minutes');
+
+      inputWrap.appendChild(hoursPart.wrap);
+      inputWrap.appendChild(minutesPart.wrap);
+
+      async function saveDuration() {
+        try {
+          var nextMinutes = combineDurationParts(hoursInput.value, minutesInput.value);
+          var currentMinutes = normalizeMinutesValue(info[fieldKey]);
+          if (nextMinutes === currentMinutes) {
+            var unchangedParts = splitMinutesToParts(nextMinutes);
+            hoursInput.value = unchangedParts.hours;
+            minutesInput.value = unchangedParts.minutes;
+            return;
+          }
+
+          var patch = {};
+          patch[fieldKey] = nextMinutes;
+          var updated = await window.KaPRecipesService.updateRecipeInformation(record.id, patch);
+          setRecipeInformationOnRecord(record, updated && updated.information ? updated.information : patch);
+          info = getRecipeInformation(record);
+
+          var normalizedParts = splitMinutesToParts(info[fieldKey]);
+          hoursInput.value = normalizedParts.hours;
+          minutesInput.value = normalizedParts.minutes;
+          totalValue.textContent = formatDurationFromMinutes(
+            (info.prepMinutes || 0) + (info.cookMinutes || 0) + (info.additionalMinutes || 0)
+          ) || 'Not set';
+        } catch (error) {
+          await showError(error.message || 'Unable to update recipe information.');
+          var fallbackParts = splitMinutesToParts(info[fieldKey]);
+          hoursInput.value = fallbackParts.hours;
+          minutesInput.value = fallbackParts.minutes;
+        }
+      }
+
+      function adjustDurationPart(inputNode, delta) {
+        var raw = String(inputNode.value || '').trim();
+        var current = raw === '' ? 0 : Number(raw);
+        if (!Number.isFinite(current) || current < 0) {
+          current = 0;
+        }
+
+        var next = Math.max(0, Math.floor(current) + delta);
+        inputNode.value = String(next);
+      }
+
+      function bindStepper(buttonNode, inputNode, delta) {
+        buttonNode.addEventListener('mousedown', function (event) {
+          event.preventDefault();
+        });
+        buttonNode.addEventListener('click', async function (event) {
+          event.preventDefault();
+          adjustDurationPart(inputNode, delta);
+          await saveDuration();
+        });
+      }
+
+      hoursInput.addEventListener('blur', saveDuration);
+      minutesInput.addEventListener('blur', saveDuration);
+      bindStepper(hoursPart.incrementButton, hoursInput, 1);
+      bindStepper(hoursPart.decrementButton, hoursInput, -1);
+      bindStepper(minutesPart.incrementButton, minutesInput, 1);
+      bindStepper(minutesPart.decrementButton, minutesInput, -1);
+
+      row.appendChild(inputWrap);
+      grid.appendChild(row);
+    }
+
+    function appendTextField(labelText, fieldKey, placeholder) {
+      var row = document.createElement('div');
+      row.className = 'recipe-info-row';
+
+      var label = document.createElement('label');
+      label.className = 'recipe-info-label';
+      label.textContent = labelText;
+      row.appendChild(label);
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'recipe-info-input';
+      input.placeholder = placeholder;
+      input.value = info[fieldKey] || '';
+
+      input.addEventListener('blur', async function () {
+        var nextValue = String(input.value || '').trim();
+        if (nextValue === String(info[fieldKey] || '').trim()) {
+          input.value = nextValue;
+          return;
+        }
+
+        try {
+          var patch = {};
+          patch[fieldKey] = nextValue;
+          var updated = await window.KaPRecipesService.updateRecipeInformation(record.id, patch);
+          setRecipeInformationOnRecord(record, updated && updated.information ? updated.information : patch);
+          info = getRecipeInformation(record);
+          input.value = info[fieldKey] || '';
+        } catch (error) {
+          await showError(error.message || 'Unable to update recipe information.');
+          input.value = info[fieldKey] || '';
+        }
+      });
+
+      row.appendChild(input);
+      grid.appendChild(row);
+    }
+
+    appendDurationField('Prep Time', 'prepMinutes');
+    appendDurationField('Cook Time', 'cookMinutes');
+    appendDurationField('Additional Time', 'additionalMinutes');
+
+    var totalRow = document.createElement('div');
+    totalRow.className = 'recipe-info-row';
+    var totalLabel = document.createElement('label');
+    totalLabel.className = 'recipe-info-label';
+    totalLabel.textContent = 'Total Time';
+    var totalValue = document.createElement('div');
+    totalValue.className = 'recipe-info-readonly';
+    var totalMinutes = (info.prepMinutes || 0) + (info.cookMinutes || 0) + (info.additionalMinutes || 0);
+    totalValue.textContent = formatDurationFromMinutes(totalMinutes) || 'Not set';
+    if (info.prepMinutes == null && info.cookMinutes == null && info.additionalMinutes == null) {
+      totalValue.textContent = 'Not set';
+    }
+    totalRow.appendChild(totalLabel);
+    totalRow.appendChild(totalValue);
+    grid.appendChild(totalRow);
+
+    appendTextField('Servings', 'servings', 'e.g. 4');
+    appendTextField('Yield', 'yield', 'e.g. 2 loaves');
+
+    content.appendChild(grid);
+  }
+
+  function appendDescriptionTabContent(content, record) {
+    var originalDescription = record.description || '';
+    var descriptionInput = document.createElement('textarea');
+    descriptionInput.className = 'recipe-version-note-input';
+    descriptionInput.rows = 4;
+    descriptionInput.placeholder = 'Optional recipe description';
+    descriptionInput.value = originalDescription;
+
+    var saveStatus = document.createElement('span');
+    saveStatus.className = 'recipe-version-save-status';
+    saveStatus.setAttribute('aria-live', 'polite');
+
+    var saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'recipe-version-save-button';
+    saveButton.textContent = 'Save';
+    saveButton.disabled = true;
+
+    function updateDescriptionSaveState() {
+      var isDirty = descriptionInput.value !== originalDescription;
+      saveButton.disabled = !isDirty;
+      saveStatus.textContent = isDirty ? 'Unsaved changes' : 'Saved';
+      saveStatus.classList.toggle('is-dirty', isDirty);
+    }
+
+    descriptionInput.addEventListener('input', updateDescriptionSaveState);
+
+    saveButton.addEventListener('click', async function () {
+      try {
+        await window.KaPRecipesService.updateRecipeDescription(record.id, descriptionInput.value);
+        originalDescription = descriptionInput.value;
+        record.description = originalDescription;
+        updateDescriptionSaveState();
+      } catch (error) {
+        await showError(error.message || 'Unable to update recipe description.');
+      }
+    });
+
+    updateDescriptionSaveState();
+    content.appendChild(descriptionInput);
+
+    var saveRow = document.createElement('div');
+    saveRow.className = 'recipe-version-clone-row';
+    var saveActions = document.createElement('div');
+    saveActions.className = 'recipe-version-save-actions';
+    saveActions.appendChild(saveStatus);
+    saveActions.appendChild(saveButton);
+    saveRow.appendChild(saveActions);
+    content.appendChild(saveRow);
+  }
+
+  async function appendVersionsTabContent(content, container, record, hooks, availableVersions, activeVersion, latestVersion) {
+    if (!activeVersion) {
+      var noVersion = document.createElement('p');
+      noVersion.className = 'recipe-description-readonly';
+      noVersion.textContent = 'No versions available.';
+      content.appendChild(noVersion);
+      return;
+    }
+
+    var toolbar = document.createElement('div');
+    toolbar.className = 'recipe-version-toolbar';
+
+    var versionSelect = document.createElement('select');
+    versionSelect.className = 'recipe-version-select';
+    versionSelect.setAttribute('aria-label', 'Select recipe version');
+    availableVersions.slice().reverse().forEach(function (version) {
+      var option = document.createElement('option');
+      option.value = String(version.id);
+      option.textContent = version.versionName;
+      option.selected = version.id === activeVersion.id;
+      versionSelect.appendChild(option);
+    });
+    versionSelect.addEventListener('change', async function () {
+      await renderDetailInto(container, record, hooks, versionSelect.value);
+    });
+    toolbar.appendChild(versionSelect);
+
+    var newVersionButton = document.createElement('button');
+    newVersionButton.type = 'button';
+    newVersionButton.className = 'accordion-new-button';
+    newVersionButton.textContent = '+ Version';
+    newVersionButton.addEventListener('click', async function () {
+      var choice = await window.KaPUI.ShowNewVersionModal({
+        availableVersions: availableVersions,
+        defaultBaseVersionId: activeVersion ? activeVersion.id : (latestVersion ? latestVersion.id : null),
+        defaultVersionName: window.KaPRecipesService.getDefaultVersionName ? window.KaPRecipesService.getDefaultVersionName() : new Date().toLocaleString()
+      });
+      if (!choice) {
+        return;
+      }
+
+      var baseVersion = availableVersions.find(function (v) {
+        return v.id === (choice.baseVersionId || activeVersion.id);
+      }) || activeVersion;
+      var createdVersion = await createNextVersion(record, baseVersion, choice.versionName, choice.versionNote);
+      if (!createdVersion) {
+        return;
+      }
+
+      markVersionNameForFocus(record.id, createdVersion.id);
+      setActiveDetailsSection(DETAILS_SECTION_VERSIONS);
+      await renderDetailInto(container, record, hooks, createdVersion.id);
+    });
+    toolbar.appendChild(newVersionButton);
+    content.appendChild(toolbar);
+
+    var nameSection = document.createElement('div');
+    nameSection.className = 'recipe-version-name-section';
+    var originalVersionName = activeVersion.versionName || '';
+
+    var versionNameInput = document.createElement('input');
+    versionNameInput.className = 'recipe-version-name-input';
+    versionNameInput.type = 'text';
+    versionNameInput.placeholder = 'Version name (e.g., 2026-05-03 14:30)';
+    versionNameInput.value = originalVersionName;
+    nameSection.appendChild(versionNameInput);
+
+    versionNameInput.addEventListener('change', async function () {
+      var newName = versionNameInput.value.trim();
+      if (!newName) {
+        versionNameInput.value = originalVersionName;
+        return;
+      }
+
+      try {
+        await window.KaPRecipesService.updateVersionName(record.id, activeVersion.id, newName);
+        originalVersionName = newName;
+      } catch (error) {
+        await showError(error.message || 'Unable to update version name.');
+        versionNameInput.value = originalVersionName;
+      }
+    });
+    content.appendChild(nameSection);
+
+    var noteSection = document.createElement('div');
+    noteSection.className = 'recipe-version-note-section';
+    var originalVersionNote = activeVersion.versionNote || '';
+
+    var noteInput = document.createElement('textarea');
+    noteInput.className = 'recipe-version-note-input';
+    noteInput.rows = 4;
+    noteInput.placeholder = 'Optional version note';
+    noteInput.value = originalVersionNote;
+    noteSection.appendChild(noteInput);
+
+    noteInput.addEventListener('change', async function () {
+      var newNote = noteInput.value.trim();
+      try {
+        await window.KaPRecipesService.updateVersionNote(record.id, activeVersion.id, newNote);
+        originalVersionNote = newNote;
+      } catch (error) {
+        await showError(error.message || 'Unable to update version note.');
+        noteInput.value = originalVersionNote;
+      }
+    });
+    content.appendChild(noteSection);
+
+    var cloneRow = document.createElement('div');
+    cloneRow.className = 'recipe-version-clone-row';
+
+    var cloneButton = document.createElement('button');
+    cloneButton.type = 'button';
+    cloneButton.className = 'recipe-version-secondary-button';
+    cloneButton.textContent = 'Clone Version';
+    cloneButton.addEventListener('click', async function () {
+      var cloneConfig = await promptCloneVersionName(record);
+      if (!cloneConfig) {
+        return;
+      }
+
+      var clonedRecord = await cloneRecipeFromActiveVersion(record, activeVersion, cloneConfig.name);
+      if (!clonedRecord) {
+        return;
+      }
+
+      hooks.onOpen(clonedRecord);
+    });
+    cloneRow.appendChild(cloneButton);
+
+    var deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'recipe-version-secondary-button recipe-version-delete-button';
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', async function () {
+      var deleted = await deleteSelectedVersion(record, activeVersion);
+      if (!deleted) {
+        return;
+      }
+
+      var remainingVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
+      var nextVersion = remainingVersions.length > 0 ? remainingVersions[remainingVersions.length - 1] : null;
+      await renderDetailInto(container, record, hooks, nextVersion ? nextVersion.id : null);
+    });
+    cloneRow.appendChild(deleteButton);
+    content.appendChild(cloneRow);
+
+    if (shouldFocusVersionName(record.id, activeVersion.id)) {
+      requestAnimationFrame(function () {
+        versionNameInput.focus();
+        versionNameInput.setSelectionRange(versionNameInput.value.length, versionNameInput.value.length);
+      });
+      clearVersionNoteFocus(record.id);
+    }
+  }
+
+  function appendTagsTabContent(content, container, record, hooks, selectedVersionId, allRecipeTags) {
+    var currentTags = normalizeTags(record.tags);
+    var allKnownTags = normalizeTags(allRecipeTags);
+    var dropdownOpen = false;
+
+    var lead = document.createElement('div');
+    lead.className = 'recipe-tags-lead';
+
+    var buttonWrap = document.createElement('div');
+    buttonWrap.className = 'recipe-tags-picker';
+
+    var pickerButton = document.createElement('button');
+    pickerButton.type = 'button';
+    pickerButton.className = 'recipe-tags-button';
+    pickerButton.textContent = '\ud83c\udff7';
+    pickerButton.setAttribute('aria-label', 'Add or select recipe tag');
+    pickerButton.setAttribute('aria-haspopup', 'menu');
+    pickerButton.setAttribute('aria-expanded', 'false');
+    pickerButton.addEventListener('click', function (event) {
+      event.stopPropagation();
+      setDropdownOpen(!dropdownOpen);
+    });
+
+    var dropdown = document.createElement('div');
+    dropdown.className = 'recipe-tags-dropdown';
+    dropdown.hidden = true;
+
+    var tagInput = document.createElement('input');
+    tagInput.type = 'text';
+    tagInput.className = 'recipe-tags-input';
+    tagInput.placeholder = 'Select or add tag';
+    tagInput.setAttribute('aria-label', 'Select or add tag');
+
+    var optionsWrap = document.createElement('div');
+    optionsWrap.className = 'recipe-tags-options';
+
+    function renderOptions() {
+      var query = String(tagInput.value || '').trim().toLowerCase();
+      var available = allKnownTags.filter(function (tag) {
+        if (currentTags.indexOf(tag) >= 0) {
+          return false;
+        }
+
+        if (!query) {
+          return true;
+        }
+
+        return tag.indexOf(query) >= 0;
+      });
+
+      optionsWrap.replaceChildren();
+
+      available.slice(0, 12).forEach(function (tag) {
+        var optionButton = document.createElement('button');
+        optionButton.type = 'button';
+        optionButton.className = 'recipe-tags-option';
+        optionButton.textContent = tag;
+        optionButton.addEventListener('click', async function (event) {
+          event.stopPropagation();
+          await window.KaPRecipesService.addTagToRecipe(record.id, tag);
+          await renderDetailInto(container, record, hooks, selectedVersionId);
+        });
+        optionsWrap.appendChild(optionButton);
+      });
+
+      if (available.length === 0) {
+        var empty = document.createElement('span');
+        empty.className = 'recipe-tags-options-empty';
+        empty.textContent = 'No matching tags.';
+        optionsWrap.appendChild(empty);
+      }
+    }
+
+    function setDropdownOpen(isOpen) {
+      dropdownOpen = !!isOpen;
+      dropdown.hidden = !dropdownOpen;
+      pickerButton.setAttribute('aria-expanded', dropdownOpen ? 'true' : 'false');
+
+      if (dropdownOpen) {
+        window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, true);
+        renderOptions();
+        requestAnimationFrame(function () {
+          tagInput.focus();
+        });
+      } else {
+        window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, false);
+      }
+    }
+
+    tagInput.addEventListener('click', function (event) {
+      event.stopPropagation();
+    });
+    tagInput.addEventListener('input', renderOptions);
+    tagInput.addEventListener('keydown', async function (event) {
+      if (event.key !== 'Enter') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      var value = String(tagInput.value || '').trim();
+      if (!value) {
+        return;
+      }
+
+      await window.KaPRecipesService.addTagToRecipe(record.id, value);
+      await renderDetailInto(container, record, hooks, selectedVersionId);
+    });
+
+    dropdown.appendChild(tagInput);
+    dropdown.appendChild(optionsWrap);
+    buttonWrap.appendChild(pickerButton);
+    buttonWrap.appendChild(dropdown);
+    lead.appendChild(buttonWrap);
+
+    var tagsWrap = document.createElement('div');
+    tagsWrap.className = 'recipe-tags-list';
+
+    if (currentTags.length === 0) {
+      var emptyTag = document.createElement('span');
+      emptyTag.className = 'recipe-tag-empty';
+
+      var emptyTagArrow = document.createElement('span');
+      emptyTagArrow.className = 'recipe-tag-empty-arrow';
+      emptyTagArrow.textContent = '\u2190';
+      emptyTag.appendChild(emptyTagArrow);
+
+      var emptyTagText = document.createElement('span');
+      emptyTagText.className = 'recipe-tag-empty-text';
+      emptyTagText.textContent = 'Click to add tags';
+      emptyTag.appendChild(emptyTagText);
+
+      tagsWrap.appendChild(emptyTag);
+    } else {
+      currentTags.forEach(function (tag) {
+        var tagNode = document.createElement('span');
+        tagNode.className = 'recipe-tag-pill';
+
+        var tagLabel = document.createElement('span');
+        tagLabel.className = 'recipe-tag-label';
+        tagLabel.textContent = tag;
+        tagNode.appendChild(tagLabel);
+
+        var removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'recipe-tag-remove-button';
+        removeButton.setAttribute('aria-label', 'Remove tag ' + tag);
+        removeButton.textContent = 'x';
+        removeButton.addEventListener('click', async function (event) {
+          event.stopPropagation();
+          await window.KaPRecipesService.removeTagFromRecipe(record.id, tag);
+          await renderDetailInto(container, record, hooks, selectedVersionId);
+        });
+        tagNode.appendChild(removeButton);
+
+        tagsWrap.appendChild(tagNode);
+      });
+    }
+
+    lead.appendChild(tagsWrap);
+    content.appendChild(lead);
+  }
+
+  async function appendRecipeDetailsTabbedSection(container, record, hooks, availableVersions, activeVersion, latestVersion, allRecipeTags) {
+    var detailShell = container.querySelector('.detail-shell');
+    if (!detailShell) {
+      return;
+    }
+
+    var detailsCard = document.createElement('section');
+    detailsCard.className = 'recipe-detail-tabs-card';
+
+    var header = document.createElement('div');
+    header.className = 'recipe-detail-tabs-header';
+
+    var collapseButton = document.createElement('button');
+    collapseButton.type = 'button';
+    var detailsCollapsed = isDetailsBlockCollapsed();
+    collapseButton.className = 'recipe-detail-tabs-collapse' + (detailsCollapsed ? ' is-collapsed' : '');
+    collapseButton.setAttribute('aria-label', isDetailsBlockCollapsed() ? 'Expand recipe details block' : 'Collapse recipe details block');
+    collapseButton.addEventListener('click', function () {
+      setDetailsBlockCollapsed(!isDetailsBlockCollapsed());
+      renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
+    });
+    header.appendChild(collapseButton);
+
+    var tabs = document.createElement('div');
+    tabs.className = 'recipe-detail-tabs';
+    var activeSection = getActiveDetailsSection();
+    var definitions = [
+      { key: DETAILS_SECTION_INFORMATION, label: 'Information' },
+      { key: DETAILS_SECTION_DESCRIPTION, label: 'Description' },
+      { key: DETAILS_SECTION_VERSIONS, label: 'Versions' },
+      { key: DETAILS_SECTION_TAGS, label: 'Tags' }
+    ];
+
+    definitions.forEach(function (definition) {
+      var tabButton = document.createElement('button');
+      tabButton.type = 'button';
+      tabButton.className = 'recipe-detail-tab' + (activeSection === definition.key ? ' is-active' : '');
+      tabButton.textContent = definition.label;
+      tabButton.setAttribute('aria-pressed', activeSection === definition.key ? 'true' : 'false');
+      tabButton.addEventListener('click', function () {
+        setActiveDetailsSection(definition.key);
+        renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
+      });
+      tabs.appendChild(tabButton);
+    });
+
+    header.appendChild(tabs);
+    detailsCard.appendChild(header);
+
+    if (!isDetailsBlockCollapsed()) {
+      var body = document.createElement('div');
+      body.className = 'recipe-detail-tabs-body';
+
+      if (activeSection === DETAILS_SECTION_INFORMATION) {
+        appendInformationTabContent(body, record);
+      } else if (activeSection === DETAILS_SECTION_DESCRIPTION) {
+        appendDescriptionTabContent(body, record);
+      } else if (activeSection === DETAILS_SECTION_VERSIONS) {
+        await appendVersionsTabContent(body, container, record, hooks, availableVersions, activeVersion, latestVersion);
+      } else {
+        appendTagsTabContent(body, container, record, hooks, activeVersion ? activeVersion.id : null, allRecipeTags);
+      }
+
+      detailsCard.appendChild(body);
+    }
+
+    detailShell.appendChild(detailsCard);
   }
 
   function buildAccordionSection(title, isExpanded, onToggle, buildHeaderActions, buildHeaderLead) {
@@ -2769,6 +3616,15 @@
   }
 
   async function renderDetailInto(container, record, hooks, selectedVersionId) {
+    try {
+      var latestRecord = await window.KaPRecipesService.getRecipeById(record.id);
+      if (latestRecord) {
+        record = latestRecord;
+      }
+    } catch (_error) {
+      // Continue with the provided record if refresh fails.
+    }
+
     var availableVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
     var latestVersion = availableVersions.length > 0 ? availableVersions[availableVersions.length - 1] : null;
     var resolvedVersionId = selectedVersionId || getLastViewedVersionId(record.id);
@@ -2785,7 +3641,6 @@
     }
 
     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
-    var canEdit = true;
     var detailItems = isViewingLatestVersion
       ? await window.KaPRecipesService.getRecipeItems(record.id)
       : await window.KaPRecipesService.getVersionItems(record.id, activeVersion.id);
@@ -2809,13 +3664,11 @@
     var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
     var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
     record.tags = recipeTags;
+    setRecipeInformationOnRecord(record, getRecipeInformation(record));
     var recipeBatchSize = getRecipeBatchSize(record.id, activeVersion ? activeVersion.id : selectedVersionId);
 
     var sortedItems = sortByNameAscending(detailItems);
     var titleText = record.name;
-    var areVersionsVisible = isVersionSectionVisible(record.id);
-    var isDescriptionVisible = isDescriptionSectionVisible(record.id);
-    var areTagsVisible = isTagsSectionVisible(record.id);
 
     window.KaPUI.ReplaceDetailContent(container, {
       title: titleText,
@@ -2911,6 +3764,15 @@
           }
         },
         {
+          label: 'Edit Recipe Name',
+          onClick: async function () {
+            var renamed = await renameRecipe(record);
+            if (renamed) {
+              await renderDetailInto(container, renamed, hooks, activeVersion ? activeVersion.id : null);
+            }
+          }
+        },
+        {
           label: 'Export Recipe',
           onClick: async function () {
             try {
@@ -2920,28 +3782,6 @@
             }
           }
         },
-        {
-          label: areVersionsVisible ? 'Hide Versions' : 'Show Versions',
-          onClick: async function () {
-            setVersionSectionVisible(record.id, !areVersionsVisible);
-            await renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
-          }
-        },
-        {
-          label: isDescriptionVisible ? 'Hide Description' : 'Show Description',
-          onClick: async function () {
-            setDescriptionSectionVisible(record.id, !isDescriptionVisible);
-            await renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
-          }
-        },
-        {
-          label: areTagsVisible ? 'Hide Tags' : 'Show Tags',
-          onClick: async function () {
-            setTagsSectionVisible(record.id, !areTagsVisible);
-            await renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
-          }
-        },
-
         {
           label: 'Delete',
           isDanger: true,
@@ -2955,30 +3795,16 @@
       ].filter(function (a) { return a !== null; })
     });
 
-    if (isVersionSectionVisible(record.id)) {
-      appendVersionsAccordionSection(container, record, hooks, availableVersions, activeVersion, latestVersion, isViewingLatestVersion);
-    }
-    var descriptionSection = null;
-    if (isDescriptionSectionVisible(record.id)) {
-      descriptionSection = appendDescriptionAccordionSection(
-        container,
-        record,
-        hooks,
-        activeVersion ? activeVersion.id : null,
-        canEdit
-      );
-    }
-    if (isTagsSectionVisible(record.id)) {
-      appendTagsAccordionSection(
-        container,
-        record,
-        hooks,
-        activeVersion ? activeVersion.id : null,
-        canEdit,
-        descriptionSection,
-        allRecipeTags
-      );
-    }
+    await appendRecipeDetailsTabbedSection(
+      container,
+      record,
+      hooks,
+      availableVersions,
+      activeVersion,
+      latestVersion,
+      allRecipeTags
+    );
+
     appendBatchSizeSection(
       container,
       record,

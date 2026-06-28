@@ -1,0 +1,1611 @@
+Release timestamp: 2026-06-28-19-13
+Diff source: 2026-06-28-14-51..HEAD
+Generated at: 2026-06-28 15:13:57Z
+diff --git a/requirements/recipe-detail-information-layout-implementation-checklist.md b/requirements/recipe-detail-information-layout-implementation-checklist.md
+new file mode 100644
+index 0000000..68fc7db
+--- /dev/null
++++ b/requirements/recipe-detail-information-layout-implementation-checklist.md
+@@ -0,0 +1,170 @@
++# Recipe Detail Information Layout - Implementation Checklist
++
++## Scope
++Rework the recipe detail view so Versions, Description, and Tags use a new consolidated layout, and add an Information section to the recipe detail experience. The attached reference image is layout guidance only; final styling should use the existing app color scheme.
++
++## Confirmed Inputs
++- [x] Versions, Description, and Tags display changes are in scope.
++- [x] Add an Information section to the recipe detail view.
++- [x] Use the attached `Recipe_Details_Tabbed-Accordion.png` as the layout reference.
++- [x] Keep the existing application color scheme rather than copying the mockup colors.
++- [x] The layout reference shows these top-level selectors: Information, Description, Versions, and Tags.
++- [x] The layout reference shows these Information fields: Prep Time, Cook Time, Additional Time, Total Time, Servings, and Yield.
++- [x] Existing content and interactivity for Versions, Description, and Tags should remain the same while moving into the new layout.
++- [x] Information values are edited individually with inline inputs and save on blur.
++- [x] Versions section controls currently shown in the header row (version select and add version) should move into the expanded Versions body.
++
++## Current Implementation Anchor
++- [x] Recipe detail UI is currently controlled in `src/features/recipes/recipes-page.js`.
++- [x] Versions, Description, and Tags currently use separate accordion visibility/state keys.
++- [x] No existing recipe Information fields were found in `src/**/*.js` for Prep Time, Cook Time, Additional Time, Total Time, Servings, or Yield.
++
++## Phased Execution Order
++
++### Phase 1 - UX Contract
++Goal: Define the exact interaction model for the new recipe detail header/body layout before changing persistence or rendering logic.
++- [x] Confirm whether the selector row behaves as tabs, accordions, or a hybrid tabbed-accordion control.
++- [x] Confirm whether only one section body is open at a time.
++- [x] Confirm whether the left-most affordance in the mockup is a collapse/expand control for the whole block.
++- [x] Confirm desktop and mobile behavior for the selector row when space is constrained.
++- [x] Confirm whether the default open section should be Information, Description, Versions, or the last viewed section.
++
++Confirmed UX decisions:
++- The selector row behaves as a hybrid tabbed-accordion control.
++- Only one section body is open at a time.
++- The expanded area shows the content for the currently selected section.
++- Default open section is Information.
++- The left-most affordance is a collapse/expand control for the whole block.
++- Section-state memory scope is global.
++
++Constrained-width selector row options:
++- Option A: Allow the selector row to wrap to a second line on narrow widths while keeping the selected body below.
++- Option B: Keep one line and make the selector row horizontally scrollable.
++- Option C: Keep one visible selected tab and collapse the remaining sections into an overflow trigger such as `More`.
++- Chosen behavior: Option A (wrap to multiple lines on constrained widths).
++
++Exit criteria:
++- [x] One interaction model is chosen and documented.
++- [x] Default/open-state behavior is defined for both desktop and mobile.
++
++### Phase 2 - Information Data Contract
++Goal: Define what Information means in the data model and whether each field is recipe-level or version-level.
++- [x] Confirm storage scope for Information: recipe-level, version-level, or mixed by field.
++- [x] Confirm whether all six reference fields are required: Prep Time, Cook Time, Additional Time, Total Time, Servings, Yield.
++- [x] Confirm whether Total Time is user-entered, derived from the other time fields, or both.
++- [x] Confirm allowed value formats for time fields.
++- [x] Confirm allowed value formats for Servings and Yield.
++- [ ] Confirm whether empty Information fields are hidden or shown as blank placeholders.
++
++Exit criteria:
++- [ ] Each Information field has an owner, format, and empty-state rule.
++- [ ] Persistence requirements are explicit enough for service/storage work.
++
++Confirmed data decisions:
++- Information is recipe-level.
++- Total Time is derived from Prep Time, Cook Time, and Additional Time.
++
++Time input UX suggestions (hours/minutes):
++- Option 1: Two compact numeric inputs per duration field (`h` and `m`) with minute normalization on blur (for example, `90m` becomes `1h 30m`).
++- Option 2: Single freeform duration input per field (examples: `1h 30m`, `90m`, `2h`) parsed on blur into canonical display.
++- Option 3: Minute-stepper control with quick chips (`+15m`, `+30m`, `+1h`) for touch-friendly updates.
++- Chosen implementation: Option 1 (`h` + `m` split inputs with minute normalization on blur).
++
++### Phase 3 - UI Rendering and Editing
++Goal: Replace the current detail layout with the new selector/body structure and add Information rendering/editing.
++- [x] Replace the current separate Versions/Description/Tags presentation with one consolidated selector row and content body.
++- [x] Add an Information panel that matches the reference layout using the existing app visual language.
++- [x] Keep current recipe name, ingredient list, instructions, and batch-size behavior intact unless separately approved.
++- [x] Define where edit actions for Information live in the recipe flow.
++- [x] Define Information editing interaction model.
++- [x] Implement inline per-field Information inputs that save on blur.
++- [x] Preserve existing Description interactivity inside the new layout.
++- [x] Preserve existing Versions editing inside the new layout without losing current version-management capabilities.
++- [x] Move Versions controls (version select and add version) from header row into the expanded Versions body.
++- [x] Preserve existing Tags editing inside the new layout without losing current tag-management capabilities.
++- [x] Define empty-state copy for Description, Tags, Versions, and Information.
++
++Exit criteria:
++- [x] All four sections render through one consistent layout pattern.
++- [x] Existing edit capabilities remain available or have an approved replacement.
++
++### Phase 4 - Persistence and Migration
++Goal: Add any new stored fields safely and keep existing recipes working.
++- [x] Add Information fields to recipe records and update read/write paths.
++- [x] Keep existing recipes backward compatible when Information data is missing.
++- [x] Confirm import/export impact for recipe-level Information fields.
++- [x] Confirm clone/new-version behavior for Information fields based on the chosen ownership model.
++
++Exit criteria:
++- [x] Existing recipe data loads without migration regressions.
++- [x] Information persists correctly across refresh, navigation, and version operations.
++
++### Phase 5 - Validation and Ship Readiness
++Goal: Verify the new detail layout works end-to-end and does not regress current recipe behavior.
++- [ ] Validate section switching/open-state behavior in the recipe detail view.
++- [ ] Validate mobile layout and wrapping behavior for the selector row.
++- [ ] Validate create/edit/save flows for Information fields.
++- [ ] Validate version switching with section state and Information display.
++- [ ] Validate tags and description still render and edit correctly.
++- [x] Resolve diagnostics in touched files.
++- [ ] Update release notes for user-visible behavior changes (via CI/CD process).
++
++Exit criteria:
++- [ ] Definition of Done section is fully checked.
++
++## Product Rules (Confirmed)
++- [x] The attached image is a layout reference, not a color reference.
++- [x] Existing application colors should be preserved.
++- [x] The recipe detail experience must include Information, Description, Versions, and Tags as first-class sections.
++- [x] The selector row uses a hybrid tabbed-accordion model.
++- [x] Only one section body is open at a time.
++- [x] The default open section is Information.
++- [x] Existing content and interactivity for Versions, Description, and Tags should remain the same after the layout move.
++- [x] On constrained widths, selector row wraps to multiple lines.
++- [x] Information data is recipe-level.
++- [x] Total Time is derived.
++- [x] Information fields are individually editable with save-on-blur behavior.
++- [x] Duration fields use split `h` + `m` inputs with minute normalization on blur.
++- [x] Versions controls currently in the header row move into the expanded Versions body.
++- [x] The left-most affordance is a collapse/expand control for the whole block.
++- [x] Section-state memory scope is global.
++
++## Product Rules (Open)
++- [ ] Empty-state display policy for unset Information fields is finalized.
++
++## Implementation Surface Checklist
++- [x] `src/features/recipes/recipes-page.js`: replace current section state/rendering with the new layout contract.
++- [ ] `src/ui/ui.js`: add reusable UI helpers only if the new selector/body pattern should be shared.
++- [x] `src/styles.css`: add layout/styling for the selector row and Information grid using the current theme.
++- [x] Recipe data/service modules: add recipe-level Information persistence fields and update read/write paths.
++- [x] Import/export flow: include recipe-level Information fields where recipe metadata is exported/imported.
++
++## Validation Checklist
++- [ ] Opening a recipe shows the new selector row and content body without runtime errors.
++- [ ] Information fields render correctly when populated.
++- [ ] Information fields have a defined and acceptable empty state.
++- [ ] Each Information field can be edited inline and saves on blur.
++- [ ] Blur-save does not interfere with keyboard navigation across Information fields.
++- [ ] Description remains readable and editable.
++- [ ] Versions remain selectable/editable and do not lose current behavior.
++- [ ] Versions section shows version select and add-version controls inside expanded body instead of header row.
++- [ ] Tags remain visible/editable and do not lose current behavior.
++- [ ] Existing recipes with no Information data still load cleanly.
++- [ ] No startup or navigation regressions are introduced in recipe flows.
++
++## Definition of Done
++- [ ] The interaction model is confirmed and documented.
++- [ ] Information ownership and field formats are confirmed.
++- [ ] Recipe detail layout is updated to the approved structure.
++- [ ] Existing recipe behaviors outside this layout remain unchanged unless explicitly approved.
++- [ ] No unresolved errors remain in touched files.
++- [ ] Release notes are updated for user-facing changes (via CI/CD process).
++
++## Explicitly Out of Scope (For This Scoping Doc)
++- Broader visual redesign outside the recipe detail layout.
++- Changing the global application color scheme.
++- Ingredient list or instruction workflow changes unrelated to the new detail sections.
++- Any unconfirmed Information fields beyond the six shown in the reference image.
++
++## Open Questions
++- Should unset Information fields display as blank inputs, `Not set`, or be hidden in read-only/export contexts?
+\ No newline at end of file
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index 2888f19..a70dbab 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -7,6 +7,12 @@
+   var TAGS_SECTION_VISIBLE_KEY = 'kap.recipeTagsSectionVisible';
+   var BATCH_SIZE_STATE_KEY = 'kap.recipeBatchSizeState';
+   var LAST_VIEWED_VERSION_KEY = 'kap.recipeLastViewedVersion';
++  var DETAILS_ACTIVE_SECTION_KEY = 'kap.recipeDetailsActiveSection';
++  var DETAILS_COLLAPSED_KEY = 'kap.recipeDetailsCollapsed';
++  var DETAILS_SECTION_INFORMATION = 'information';
++  var DETAILS_SECTION_DESCRIPTION = 'description';
++  var DETAILS_SECTION_VERSIONS = 'versions';
++  var DETAILS_SECTION_TAGS = 'tags';
+   var versionNoteFocusTargets = {};
+ 
+   async function showError(message) {
+@@ -149,6 +155,17 @@
+       .replace(/'/g, '&#39;');
+   }
+ 
++  function buildRecipeInformationForExport(recipeRecord) {
++    var info = getRecipeInformation(recipeRecord || {});
++    return {
++      prepMinutes: info.prepMinutes,
++      cookMinutes: info.cookMinutes,
++      additionalMinutes: info.additionalMinutes,
++      servings: info.servings,
++      yield: info.yield
++    };
++  }
++
+   function buildRecipeExportPayload(recipeRecord, activeVersion, detailItems, instructions, tags) {
+     var exportedAt = new Date().toISOString();
+     var versionId = activeVersion && activeVersion.id != null ? String(activeVersion.id) : '';
+@@ -161,7 +178,8 @@
+       recipe: {
+         id: recipeRecord && recipeRecord.id != null ? String(recipeRecord.id) : '',
+         name: recipeRecord && recipeRecord.name ? String(recipeRecord.name) : '',
+-        tags: Array.isArray(tags) ? tags.slice() : []
++        tags: Array.isArray(tags) ? tags.slice() : [],
++        information: buildRecipeInformationForExport(recipeRecord)
+       },
+       version: {
+         id: versionId,
+@@ -206,6 +224,28 @@
+       lines.push('Tags: ' + payload.recipe.tags.join(', '));
+     }
+ 
++    var info = payload && payload.recipe ? payload.recipe.information : null;
++    if (info) {
++      var hasInfo = info.prepMinutes != null
++        || info.cookMinutes != null
++        || info.additionalMinutes != null
++        || String(info.servings || '').trim() !== ''
++        || String(info.yield || '').trim() !== '';
++
++      if (hasInfo) {
++        var hasDuration = info.prepMinutes != null || info.cookMinutes != null || info.additionalMinutes != null;
++        var totalMinutes = hasDuration ? ((info.prepMinutes || 0) + (info.cookMinutes || 0) + (info.additionalMinutes || 0)) : null;
++        lines.push('');
++        lines.push('Information');
++        lines.push('- Prep Time: ' + (formatDurationFromMinutes(info.prepMinutes) || 'Not set'));
++        lines.push('- Cook Time: ' + (formatDurationFromMinutes(info.cookMinutes) || 'Not set'));
++        lines.push('- Additional Time: ' + (formatDurationFromMinutes(info.additionalMinutes) || 'Not set'));
++        lines.push('- Total Time: ' + (formatDurationFromMinutes(totalMinutes) || 'Not set'));
++        lines.push('- Servings: ' + (String(info.servings || '').trim() || 'Not set'));
++        lines.push('- Yield: ' + (String(info.yield || '').trim() || 'Not set'));
++      }
++    }
++
+     lines.push('');
+     lines.push('Ingredients');
+ 
+@@ -440,6 +480,17 @@
+     });
+   }
+ 
++  function normalizeImportedRecipeInformation(rawInformation) {
++    var source = rawInformation && typeof rawInformation === 'object' ? rawInformation : {};
++    return {
++      prepMinutes: normalizeMinutesValue(source.prepMinutes),
++      cookMinutes: normalizeMinutesValue(source.cookMinutes),
++      additionalMinutes: normalizeMinutesValue(source.additionalMinutes),
++      servings: asOptionalString(source.servings),
++      yield: asOptionalString(source.yield)
++    };
++  }
++
+   function validateKapRecipePayload(payload) {
+     if (!payload || typeof payload !== 'object') {
+       throw new Error('Invalid .kap file.');
+@@ -474,7 +525,8 @@
+       recipe: {
+         id: recipeId,
+         name: recipeName,
+-        tags: normalizeTagListForImport(payload.recipe.tags)
++        tags: normalizeTagListForImport(payload.recipe.tags),
++        information: normalizeImportedRecipeInformation(payload.recipe.information)
+       },
+       version: {
+         id: versionId,
+@@ -987,6 +1039,7 @@
+     recipeRecord.name = importDraft.recipe.name;
+     recipeRecord.description = asOptionalString(recipeRecord.description);
+     recipeRecord.tags = normalizeTagListForImport(importDraft.recipe.tags);
++    setRecipeInformationOnRecord(recipeRecord, importDraft.recipe.information || {});
+     recipeRecord.updatedDate = nowIso;
+     if (!recipeRecord.createdDate) {
+       recipeRecord.createdDate = nowIso;
+@@ -1305,6 +1358,145 @@
+     delete versionNoteFocusTargets[recipeId];
+   }
+ 
++  function readLocalJsonState(storageKey) {
++    try {
++      var raw = localStorage.getItem(storageKey);
++      if (!raw) {
++        return {};
++      }
++
++      var parsed = JSON.parse(raw);
++      return parsed && typeof parsed === 'object' ? parsed : {};
++    } catch (error) {
++      return {};
++    }
++  }
++
++  function writeLocalJsonState(storageKey, state) {
++    try {
++      localStorage.setItem(storageKey, JSON.stringify(state || {}));
++    } catch (error) {
++      // Ignore persistence failures.
++    }
++  }
++
++  function getActiveDetailsSection() {
++    var state = readLocalJsonState(DETAILS_ACTIVE_SECTION_KEY);
++    var value = String(state.active || '').toLowerCase();
++    if (
++      value !== DETAILS_SECTION_INFORMATION
++      && value !== DETAILS_SECTION_DESCRIPTION
++      && value !== DETAILS_SECTION_VERSIONS
++      && value !== DETAILS_SECTION_TAGS
++    ) {
++      return DETAILS_SECTION_INFORMATION;
++    }
++
++    return value;
++  }
++
++  function setActiveDetailsSection(sectionName) {
++    writeLocalJsonState(DETAILS_ACTIVE_SECTION_KEY, {
++      active: String(sectionName || '').toLowerCase() || DETAILS_SECTION_INFORMATION
++    });
++  }
++
++  function isDetailsBlockCollapsed() {
++    var state = readLocalJsonState(DETAILS_COLLAPSED_KEY);
++    return state.collapsed === true;
++  }
++
++  function setDetailsBlockCollapsed(isCollapsed) {
++    writeLocalJsonState(DETAILS_COLLAPSED_KEY, {
++      collapsed: isCollapsed === true
++    });
++  }
++
++  function normalizeMinutesValue(value) {
++    if (value == null || String(value).trim() === '') {
++      return null;
++    }
++
++    var parsed = Number(value);
++    if (!Number.isFinite(parsed) || parsed < 0) {
++      return null;
++    }
++
++    return Math.floor(parsed);
++  }
++
++  function splitMinutesToParts(totalMinutes) {
++    var normalized = normalizeMinutesValue(totalMinutes);
++    if (normalized == null) {
++      return {
++        hours: '',
++        minutes: ''
++      };
++    }
++
++    return {
++      hours: String(Math.floor(normalized / 60)),
++      minutes: String(normalized % 60)
++    };
++  }
++
++  function combineDurationParts(hoursValue, minutesValue) {
++    var hasHours = String(hoursValue == null ? '' : hoursValue).trim() !== '';
++    var hasMinutes = String(minutesValue == null ? '' : minutesValue).trim() !== '';
++    if (!hasHours && !hasMinutes) {
++      return null;
++    }
++
++    var hours = Number(hasHours ? hoursValue : 0);
++    var minutes = Number(hasMinutes ? minutesValue : 0);
++    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 0 || minutes < 0) {
++      throw new Error('Time values must be zero or greater.');
++    }
++
++    return Math.floor(hours) * 60 + Math.floor(minutes);
++  }
++
++  function formatDurationFromMinutes(totalMinutes) {
++    var normalized = normalizeMinutesValue(totalMinutes);
++    if (normalized == null) {
++      return '';
++    }
++
++    var hours = Math.floor(normalized / 60);
++    var minutes = normalized % 60;
++    return String(hours) + 'h ' + String(minutes) + 'm';
++  }
++
++  function getRecipeInformation(record) {
++    var information = record && record.information && typeof record.information === 'object'
++      ? record.information
++      : {};
++
++    return {
++      prepMinutes: normalizeMinutesValue(information.prepMinutes != null ? information.prepMinutes : record.infoPrepMinutes),
++      cookMinutes: normalizeMinutesValue(information.cookMinutes != null ? information.cookMinutes : record.infoCookMinutes),
++      additionalMinutes: normalizeMinutesValue(information.additionalMinutes != null ? information.additionalMinutes : record.infoAdditionalMinutes),
++      servings: String((information.servings != null ? information.servings : record.infoServings) || '').trim(),
++      yield: String((information.yield != null ? information.yield : record.infoYield) || '').trim()
++    };
++  }
++
++  function setRecipeInformationOnRecord(record, info) {
++    var next = Object.assign({}, getRecipeInformation(record), info || {});
++    record.infoPrepMinutes = normalizeMinutesValue(next.prepMinutes);
++    record.infoCookMinutes = normalizeMinutesValue(next.cookMinutes);
++    record.infoAdditionalMinutes = normalizeMinutesValue(next.additionalMinutes);
++    record.infoServings = String(next.servings == null ? '' : next.servings).trim();
++    record.infoYield = String(next.yield == null ? '' : next.yield).trim();
++    record.information = {
++      prepMinutes: record.infoPrepMinutes,
++      cookMinutes: record.infoCookMinutes,
++      additionalMinutes: record.infoAdditionalMinutes,
++      servings: record.infoServings,
++      yield: record.infoYield
++    };
++  }
++
+   async function createRecipe() {
+     var name = await window.KaPUI.ShowPrompt({
+       title: 'New Recipe',
+@@ -1827,6 +2019,661 @@
+     });
+   }
+ 
++  function appendInformationTabContent(content, record) {
++    var info = getRecipeInformation(record);
++
++    var grid = document.createElement('div');
++    grid.className = 'recipe-info-grid';
++
++    function appendDurationField(labelText, fieldKey) {
++      var row = document.createElement('div');
++      row.className = 'recipe-info-row';
++
++      var label = document.createElement('label');
++      label.className = 'recipe-info-label';
++      label.textContent = labelText;
++      row.appendChild(label);
++
++      var currentParts = splitMinutesToParts(info[fieldKey]);
++      var inputWrap = document.createElement('div');
++      inputWrap.className = 'recipe-info-duration-wrap';
++
++      var hoursInput = document.createElement('input');
++      hoursInput.type = 'number';
++      hoursInput.min = '0';
++      hoursInput.step = '1';
++      hoursInput.className = 'recipe-info-input recipe-info-duration-input';
++      hoursInput.placeholder = 'h';
++      hoursInput.value = currentParts.hours;
++
++      var minutesInput = document.createElement('input');
++      minutesInput.type = 'number';
++      minutesInput.min = '0';
++      minutesInput.step = '1';
++      minutesInput.className = 'recipe-info-input recipe-info-duration-input';
++      minutesInput.placeholder = 'm';
++      minutesInput.value = currentParts.minutes;
++
++      var hoursSuffix = document.createElement('span');
++      hoursSuffix.className = 'recipe-info-duration-suffix';
++      hoursSuffix.textContent = 'h';
++
++      var minutesSuffix = document.createElement('span');
++      minutesSuffix.className = 'recipe-info-duration-suffix';
++      minutesSuffix.textContent = 'm';
++
++      function createDurationPartWrap(inputNode, suffixNode, labelPrefix) {
++        var partWrap = document.createElement('div');
++        partWrap.className = 'recipe-info-duration-part';
++
++        var inputShell = document.createElement('div');
++        inputShell.className = 'recipe-info-duration-shell';
++
++        var stepper = document.createElement('div');
++        stepper.className = 'recipe-info-stepper';
++
++        var incrementButton = document.createElement('button');
++        incrementButton.type = 'button';
++        incrementButton.className = 'recipe-info-stepper-button';
++        incrementButton.textContent = '+';
++        incrementButton.setAttribute('aria-label', 'Increase ' + labelText + ' ' + labelPrefix);
++
++        var decrementButton = document.createElement('button');
++        decrementButton.type = 'button';
++        decrementButton.className = 'recipe-info-stepper-button';
++        decrementButton.textContent = '-';
++        decrementButton.setAttribute('aria-label', 'Decrease ' + labelText + ' ' + labelPrefix);
++
++        stepper.appendChild(incrementButton);
++        stepper.appendChild(decrementButton);
++
++        inputShell.appendChild(inputNode);
++        inputShell.appendChild(stepper);
++
++        partWrap.appendChild(inputShell);
++        partWrap.appendChild(suffixNode);
++
++        return {
++          wrap: partWrap,
++          incrementButton: incrementButton,
++          decrementButton: decrementButton
++        };
++      }
++
++      var hoursPart = createDurationPartWrap(hoursInput, hoursSuffix, 'hours');
++      var minutesPart = createDurationPartWrap(minutesInput, minutesSuffix, 'minutes');
++
++      inputWrap.appendChild(hoursPart.wrap);
++      inputWrap.appendChild(minutesPart.wrap);
++
++      async function saveDuration() {
++        try {
++          var nextMinutes = combineDurationParts(hoursInput.value, minutesInput.value);
++          var currentMinutes = normalizeMinutesValue(info[fieldKey]);
++          if (nextMinutes === currentMinutes) {
++            var unchangedParts = splitMinutesToParts(nextMinutes);
++            hoursInput.value = unchangedParts.hours;
++            minutesInput.value = unchangedParts.minutes;
++            return;
++          }
++
++          var patch = {};
++          patch[fieldKey] = nextMinutes;
++          var updated = await window.KaPRecipesService.updateRecipeInformation(record.id, patch);
++          setRecipeInformationOnRecord(record, updated && updated.information ? updated.information : patch);
++          info = getRecipeInformation(record);
++
++          var normalizedParts = splitMinutesToParts(info[fieldKey]);
++          hoursInput.value = normalizedParts.hours;
++          minutesInput.value = normalizedParts.minutes;
++          totalValue.textContent = formatDurationFromMinutes(
++            (info.prepMinutes || 0) + (info.cookMinutes || 0) + (info.additionalMinutes || 0)
++          ) || 'Not set';
++        } catch (error) {
++          await showError(error.message || 'Unable to update recipe information.');
++          var fallbackParts = splitMinutesToParts(info[fieldKey]);
++          hoursInput.value = fallbackParts.hours;
++          minutesInput.value = fallbackParts.minutes;
++        }
++      }
++
++      function adjustDurationPart(inputNode, delta) {
++        var raw = String(inputNode.value || '').trim();
++        var current = raw === '' ? 0 : Number(raw);
++        if (!Number.isFinite(current) || current < 0) {
++          current = 0;
++        }
++
++        var next = Math.max(0, Math.floor(current) + delta);
++        inputNode.value = String(next);
++      }
++
++      function bindStepper(buttonNode, inputNode, delta) {
++        buttonNode.addEventListener('mousedown', function (event) {
++          event.preventDefault();
++        });
++        buttonNode.addEventListener('click', async function (event) {
++          event.preventDefault();
++          adjustDurationPart(inputNode, delta);
++          await saveDuration();
++        });
++      }
++
++      hoursInput.addEventListener('blur', saveDuration);
++      minutesInput.addEventListener('blur', saveDuration);
++      bindStepper(hoursPart.incrementButton, hoursInput, 1);
++      bindStepper(hoursPart.decrementButton, hoursInput, -1);
++      bindStepper(minutesPart.incrementButton, minutesInput, 1);
++      bindStepper(minutesPart.decrementButton, minutesInput, -1);
++
++      row.appendChild(inputWrap);
++      grid.appendChild(row);
++    }
++
++    function appendTextField(labelText, fieldKey, placeholder) {
++      var row = document.createElement('div');
++      row.className = 'recipe-info-row';
++
++      var label = document.createElement('label');
++      label.className = 'recipe-info-label';
++      label.textContent = labelText;
++      row.appendChild(label);
++
++      var input = document.createElement('input');
++      input.type = 'text';
++      input.className = 'recipe-info-input';
++      input.placeholder = placeholder;
++      input.value = info[fieldKey] || '';
++
++      input.addEventListener('blur', async function () {
++        var nextValue = String(input.value || '').trim();
++        if (nextValue === String(info[fieldKey] || '').trim()) {
++          input.value = nextValue;
++          return;
++        }
++
++        try {
++          var patch = {};
++          patch[fieldKey] = nextValue;
++          var updated = await window.KaPRecipesService.updateRecipeInformation(record.id, patch);
++          setRecipeInformationOnRecord(record, updated && updated.information ? updated.information : patch);
++          info = getRecipeInformation(record);
++          input.value = info[fieldKey] || '';
++        } catch (error) {
++          await showError(error.message || 'Unable to update recipe information.');
++          input.value = info[fieldKey] || '';
++        }
++      });
++
++      row.appendChild(input);
++      grid.appendChild(row);
++    }
++
++    appendDurationField('Prep Time', 'prepMinutes');
++    appendDurationField('Cook Time', 'cookMinutes');
++    appendDurationField('Additional Time', 'additionalMinutes');
++
++    var totalRow = document.createElement('div');
++    totalRow.className = 'recipe-info-row';
++    var totalLabel = document.createElement('label');
++    totalLabel.className = 'recipe-info-label';
++    totalLabel.textContent = 'Total Time';
++    var totalValue = document.createElement('div');
++    totalValue.className = 'recipe-info-readonly';
++    var totalMinutes = (info.prepMinutes || 0) + (info.cookMinutes || 0) + (info.additionalMinutes || 0);
++    totalValue.textContent = formatDurationFromMinutes(totalMinutes) || 'Not set';
++    if (info.prepMinutes == null && info.cookMinutes == null && info.additionalMinutes == null) {
++      totalValue.textContent = 'Not set';
++    }
++    totalRow.appendChild(totalLabel);
++    totalRow.appendChild(totalValue);
++    grid.appendChild(totalRow);
++
++    appendTextField('Servings', 'servings', 'e.g. 4');
++    appendTextField('Yield', 'yield', 'e.g. 2 loaves');
++
++    content.appendChild(grid);
++  }
++
++  function appendDescriptionTabContent(content, record) {
++    var originalDescription = record.description || '';
++    var descriptionInput = document.createElement('textarea');
++    descriptionInput.className = 'recipe-version-note-input';
++    descriptionInput.rows = 4;
++    descriptionInput.placeholder = 'Optional recipe description';
++    descriptionInput.value = originalDescription;
++
++    var saveStatus = document.createElement('span');
++    saveStatus.className = 'recipe-version-save-status';
++    saveStatus.setAttribute('aria-live', 'polite');
++
++    var saveButton = document.createElement('button');
++    saveButton.type = 'button';
++    saveButton.className = 'recipe-version-save-button';
++    saveButton.textContent = 'Save';
++    saveButton.disabled = true;
++
++    function updateDescriptionSaveState() {
++      var isDirty = descriptionInput.value !== originalDescription;
++      saveButton.disabled = !isDirty;
++      saveStatus.textContent = isDirty ? 'Unsaved changes' : 'Saved';
++      saveStatus.classList.toggle('is-dirty', isDirty);
++    }
++
++    descriptionInput.addEventListener('input', updateDescriptionSaveState);
++
++    saveButton.addEventListener('click', async function () {
++      try {
++        await window.KaPRecipesService.updateRecipeDescription(record.id, descriptionInput.value);
++        originalDescription = descriptionInput.value;
++        record.description = originalDescription;
++        updateDescriptionSaveState();
++      } catch (error) {
++        await showError(error.message || 'Unable to update recipe description.');
++      }
++    });
++
++    updateDescriptionSaveState();
++    content.appendChild(descriptionInput);
++
++    var saveRow = document.createElement('div');
++    saveRow.className = 'recipe-version-clone-row';
++    var saveActions = document.createElement('div');
++    saveActions.className = 'recipe-version-save-actions';
++    saveActions.appendChild(saveStatus);
++    saveActions.appendChild(saveButton);
++    saveRow.appendChild(saveActions);
++    content.appendChild(saveRow);
++  }
++
++  async function appendVersionsTabContent(content, container, record, hooks, availableVersions, activeVersion, latestVersion) {
++    if (!activeVersion) {
++      var noVersion = document.createElement('p');
++      noVersion.className = 'recipe-description-readonly';
++      noVersion.textContent = 'No versions available.';
++      content.appendChild(noVersion);
++      return;
++    }
++
++    var toolbar = document.createElement('div');
++    toolbar.className = 'recipe-version-toolbar';
++
++    var versionSelect = document.createElement('select');
++    versionSelect.className = 'recipe-version-select';
++    versionSelect.setAttribute('aria-label', 'Select recipe version');
++    availableVersions.slice().reverse().forEach(function (version) {
++      var option = document.createElement('option');
++      option.value = String(version.id);
++      option.textContent = version.versionName;
++      option.selected = version.id === activeVersion.id;
++      versionSelect.appendChild(option);
++    });
++    versionSelect.addEventListener('change', async function () {
++      await renderDetailInto(container, record, hooks, versionSelect.value);
++    });
++    toolbar.appendChild(versionSelect);
++
++    var newVersionButton = document.createElement('button');
++    newVersionButton.type = 'button';
++    newVersionButton.className = 'accordion-new-button';
++    newVersionButton.textContent = '+ Version';
++    newVersionButton.addEventListener('click', async function () {
++      var choice = await window.KaPUI.ShowNewVersionModal({
++        availableVersions: availableVersions,
++        defaultBaseVersionId: activeVersion ? activeVersion.id : (latestVersion ? latestVersion.id : null),
++        defaultVersionName: window.KaPRecipesService.getDefaultVersionName ? window.KaPRecipesService.getDefaultVersionName() : new Date().toLocaleString()
++      });
++      if (!choice) {
++        return;
++      }
++
++      var baseVersion = availableVersions.find(function (v) {
++        return v.id === (choice.baseVersionId || activeVersion.id);
++      }) || activeVersion;
++      var createdVersion = await createNextVersion(record, baseVersion, choice.versionName, choice.versionNote);
++      if (!createdVersion) {
++        return;
++      }
++
++      markVersionNameForFocus(record.id, createdVersion.id);
++      setActiveDetailsSection(DETAILS_SECTION_VERSIONS);
++      await renderDetailInto(container, record, hooks, createdVersion.id);
++    });
++    toolbar.appendChild(newVersionButton);
++    content.appendChild(toolbar);
++
++    var nameSection = document.createElement('div');
++    nameSection.className = 'recipe-version-name-section';
++    var originalVersionName = activeVersion.versionName || '';
++
++    var versionNameInput = document.createElement('input');
++    versionNameInput.className = 'recipe-version-name-input';
++    versionNameInput.type = 'text';
++    versionNameInput.placeholder = 'Version name (e.g., 2026-05-03 14:30)';
++    versionNameInput.value = originalVersionName;
++    nameSection.appendChild(versionNameInput);
++
++    versionNameInput.addEventListener('change', async function () {
++      var newName = versionNameInput.value.trim();
++      if (!newName) {
++        versionNameInput.value = originalVersionName;
++        return;
++      }
++
++      try {
++        await window.KaPRecipesService.updateVersionName(record.id, activeVersion.id, newName);
++        originalVersionName = newName;
++      } catch (error) {
++        await showError(error.message || 'Unable to update version name.');
++        versionNameInput.value = originalVersionName;
++      }
++    });
++    content.appendChild(nameSection);
++
++    var noteSection = document.createElement('div');
++    noteSection.className = 'recipe-version-note-section';
++    var originalVersionNote = activeVersion.versionNote || '';
++
++    var noteInput = document.createElement('textarea');
++    noteInput.className = 'recipe-version-note-input';
++    noteInput.rows = 4;
++    noteInput.placeholder = 'Optional version note';
++    noteInput.value = originalVersionNote;
++    noteSection.appendChild(noteInput);
++
++    noteInput.addEventListener('change', async function () {
++      var newNote = noteInput.value.trim();
++      try {
++        await window.KaPRecipesService.updateVersionNote(record.id, activeVersion.id, newNote);
++        originalVersionNote = newNote;
++      } catch (error) {
++        await showError(error.message || 'Unable to update version note.');
++        noteInput.value = originalVersionNote;
++      }
++    });
++    content.appendChild(noteSection);
++
++    var cloneRow = document.createElement('div');
++    cloneRow.className = 'recipe-version-clone-row';
++
++    var cloneButton = document.createElement('button');
++    cloneButton.type = 'button';
++    cloneButton.className = 'recipe-version-secondary-button';
++    cloneButton.textContent = 'Clone Version';
++    cloneButton.addEventListener('click', async function () {
++      var cloneConfig = await promptCloneVersionName(record);
++      if (!cloneConfig) {
++        return;
++      }
++
++      var clonedRecord = await cloneRecipeFromActiveVersion(record, activeVersion, cloneConfig.name);
++      if (!clonedRecord) {
++        return;
++      }
++
++      hooks.onOpen(clonedRecord);
++    });
++    cloneRow.appendChild(cloneButton);
++
++    var deleteButton = document.createElement('button');
++    deleteButton.type = 'button';
++    deleteButton.className = 'recipe-version-secondary-button recipe-version-delete-button';
++    deleteButton.textContent = 'Delete';
++    deleteButton.addEventListener('click', async function () {
++      var deleted = await deleteSelectedVersion(record, activeVersion);
++      if (!deleted) {
++        return;
++      }
++
++      var remainingVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
++      var nextVersion = remainingVersions.length > 0 ? remainingVersions[remainingVersions.length - 1] : null;
++      await renderDetailInto(container, record, hooks, nextVersion ? nextVersion.id : null);
++    });
++    cloneRow.appendChild(deleteButton);
++    content.appendChild(cloneRow);
++
++    if (shouldFocusVersionName(record.id, activeVersion.id)) {
++      requestAnimationFrame(function () {
++        versionNameInput.focus();
++        versionNameInput.setSelectionRange(versionNameInput.value.length, versionNameInput.value.length);
++      });
++      clearVersionNoteFocus(record.id);
++    }
++  }
++
++  function appendTagsTabContent(content, container, record, hooks, selectedVersionId, allRecipeTags) {
++    var currentTags = normalizeTags(record.tags);
++    var allKnownTags = normalizeTags(allRecipeTags);
++    var dropdownOpen = false;
++
++    var lead = document.createElement('div');
++    lead.className = 'recipe-tags-lead';
++
++    var buttonWrap = document.createElement('div');
++    buttonWrap.className = 'recipe-tags-picker';
++
++    var pickerButton = document.createElement('button');
++    pickerButton.type = 'button';
++    pickerButton.className = 'recipe-tags-button';
++    pickerButton.textContent = '\ud83c\udff7';
++    pickerButton.setAttribute('aria-label', 'Add or select recipe tag');
++    pickerButton.setAttribute('aria-haspopup', 'menu');
++    pickerButton.setAttribute('aria-expanded', 'false');
++    pickerButton.addEventListener('click', function (event) {
++      event.stopPropagation();
++      setDropdownOpen(!dropdownOpen);
++    });
++
++    var dropdown = document.createElement('div');
++    dropdown.className = 'recipe-tags-dropdown';
++    dropdown.hidden = true;
++
++    var tagInput = document.createElement('input');
++    tagInput.type = 'text';
++    tagInput.className = 'recipe-tags-input';
++    tagInput.placeholder = 'Select or add tag';
++    tagInput.setAttribute('aria-label', 'Select or add tag');
++
++    var optionsWrap = document.createElement('div');
++    optionsWrap.className = 'recipe-tags-options';
++
++    function renderOptions() {
++      var query = String(tagInput.value || '').trim().toLowerCase();
++      var available = allKnownTags.filter(function (tag) {
++        if (currentTags.indexOf(tag) >= 0) {
++          return false;
++        }
++
++        if (!query) {
++          return true;
++        }
++
++        return tag.indexOf(query) >= 0;
++      });
++
++      optionsWrap.replaceChildren();
++
++      available.slice(0, 12).forEach(function (tag) {
++        var optionButton = document.createElement('button');
++        optionButton.type = 'button';
++        optionButton.className = 'recipe-tags-option';
++        optionButton.textContent = tag;
++        optionButton.addEventListener('click', async function (event) {
++          event.stopPropagation();
++          await window.KaPRecipesService.addTagToRecipe(record.id, tag);
++          await renderDetailInto(container, record, hooks, selectedVersionId);
++        });
++        optionsWrap.appendChild(optionButton);
++      });
++
++      if (available.length === 0) {
++        var empty = document.createElement('span');
++        empty.className = 'recipe-tags-options-empty';
++        empty.textContent = 'No matching tags.';
++        optionsWrap.appendChild(empty);
++      }
++    }
++
++    function setDropdownOpen(isOpen) {
++      dropdownOpen = !!isOpen;
++      dropdown.hidden = !dropdownOpen;
++      pickerButton.setAttribute('aria-expanded', dropdownOpen ? 'true' : 'false');
++
++      if (dropdownOpen) {
++        window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, true);
++        renderOptions();
++        requestAnimationFrame(function () {
++          tagInput.focus();
++        });
++      } else {
++        window.KaPUI.SetActiveOverflowMenu(buttonWrap, setDropdownOpen, false);
++      }
++    }
++
++    tagInput.addEventListener('click', function (event) {
++      event.stopPropagation();
++    });
++    tagInput.addEventListener('input', renderOptions);
++    tagInput.addEventListener('keydown', async function (event) {
++      if (event.key !== 'Enter') {
++        return;
++      }
++
++      event.preventDefault();
++      event.stopPropagation();
++
++      var value = String(tagInput.value || '').trim();
++      if (!value) {
++        return;
++      }
++
++      await window.KaPRecipesService.addTagToRecipe(record.id, value);
++      await renderDetailInto(container, record, hooks, selectedVersionId);
++    });
++
++    dropdown.appendChild(tagInput);
++    dropdown.appendChild(optionsWrap);
++    buttonWrap.appendChild(pickerButton);
++    buttonWrap.appendChild(dropdown);
++    lead.appendChild(buttonWrap);
++
++    var tagsWrap = document.createElement('div');
++    tagsWrap.className = 'recipe-tags-list';
++
++    if (currentTags.length === 0) {
++      var emptyTag = document.createElement('span');
++      emptyTag.className = 'recipe-tag-empty';
++
++      var emptyTagArrow = document.createElement('span');
++      emptyTagArrow.className = 'recipe-tag-empty-arrow';
++      emptyTagArrow.textContent = '\u2190';
++      emptyTag.appendChild(emptyTagArrow);
++
++      var emptyTagText = document.createElement('span');
++      emptyTagText.className = 'recipe-tag-empty-text';
++      emptyTagText.textContent = 'Click to add tags';
++      emptyTag.appendChild(emptyTagText);
++
++      tagsWrap.appendChild(emptyTag);
++    } else {
++      currentTags.forEach(function (tag) {
++        var tagNode = document.createElement('span');
++        tagNode.className = 'recipe-tag-pill';
++
++        var tagLabel = document.createElement('span');
++        tagLabel.className = 'recipe-tag-label';
++        tagLabel.textContent = tag;
++        tagNode.appendChild(tagLabel);
++
++        var removeButton = document.createElement('button');
++        removeButton.type = 'button';
++        removeButton.className = 'recipe-tag-remove-button';
++        removeButton.setAttribute('aria-label', 'Remove tag ' + tag);
++        removeButton.textContent = 'x';
++        removeButton.addEventListener('click', async function (event) {
++          event.stopPropagation();
++          await window.KaPRecipesService.removeTagFromRecipe(record.id, tag);
++          await renderDetailInto(container, record, hooks, selectedVersionId);
++        });
++        tagNode.appendChild(removeButton);
++
++        tagsWrap.appendChild(tagNode);
++      });
++    }
++
++    lead.appendChild(tagsWrap);
++    content.appendChild(lead);
++  }
++
++  async function appendRecipeDetailsTabbedSection(container, record, hooks, availableVersions, activeVersion, latestVersion, allRecipeTags) {
++    var detailShell = container.querySelector('.detail-shell');
++    if (!detailShell) {
++      return;
++    }
++
++    var detailsCard = document.createElement('section');
++    detailsCard.className = 'recipe-detail-tabs-card';
++
++    var header = document.createElement('div');
++    header.className = 'recipe-detail-tabs-header';
++
++    var collapseButton = document.createElement('button');
++    collapseButton.type = 'button';
++    var detailsCollapsed = isDetailsBlockCollapsed();
++    collapseButton.className = 'recipe-detail-tabs-collapse' + (detailsCollapsed ? ' is-collapsed' : '');
++    collapseButton.setAttribute('aria-label', isDetailsBlockCollapsed() ? 'Expand recipe details block' : 'Collapse recipe details block');
++    collapseButton.addEventListener('click', function () {
++      setDetailsBlockCollapsed(!isDetailsBlockCollapsed());
++      renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
++    });
++    header.appendChild(collapseButton);
++
++    var tabs = document.createElement('div');
++    tabs.className = 'recipe-detail-tabs';
++    var activeSection = getActiveDetailsSection();
++    var definitions = [
++      { key: DETAILS_SECTION_INFORMATION, label: 'Information' },
++      { key: DETAILS_SECTION_DESCRIPTION, label: 'Description' },
++      { key: DETAILS_SECTION_VERSIONS, label: 'Versions' },
++      { key: DETAILS_SECTION_TAGS, label: 'Tags' }
++    ];
++
++    definitions.forEach(function (definition) {
++      var tabButton = document.createElement('button');
++      tabButton.type = 'button';
++      tabButton.className = 'recipe-detail-tab' + (activeSection === definition.key ? ' is-active' : '');
++      tabButton.textContent = definition.label;
++      tabButton.setAttribute('aria-pressed', activeSection === definition.key ? 'true' : 'false');
++      tabButton.addEventListener('click', function () {
++        setActiveDetailsSection(definition.key);
++        renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
++      });
++      tabs.appendChild(tabButton);
++    });
++
++    header.appendChild(tabs);
++    detailsCard.appendChild(header);
++
++    if (!isDetailsBlockCollapsed()) {
++      var body = document.createElement('div');
++      body.className = 'recipe-detail-tabs-body';
++
++      if (activeSection === DETAILS_SECTION_INFORMATION) {
++        appendInformationTabContent(body, record);
++      } else if (activeSection === DETAILS_SECTION_DESCRIPTION) {
++        appendDescriptionTabContent(body, record);
++      } else if (activeSection === DETAILS_SECTION_VERSIONS) {
++        await appendVersionsTabContent(body, container, record, hooks, availableVersions, activeVersion, latestVersion);
++      } else {
++        appendTagsTabContent(body, container, record, hooks, activeVersion ? activeVersion.id : null, allRecipeTags);
++      }
++
++      detailsCard.appendChild(body);
++    }
++
++    detailShell.appendChild(detailsCard);
++  }
++
+   function buildAccordionSection(title, isExpanded, onToggle, buildHeaderActions, buildHeaderLead) {
+     var section = document.createElement('section');
+     section.className = 'recipe-accordion-card';
+@@ -2769,6 +3616,15 @@
+   }
+ 
+   async function renderDetailInto(container, record, hooks, selectedVersionId) {
++    try {
++      var latestRecord = await window.KaPRecipesService.getRecipeById(record.id);
++      if (latestRecord) {
++        record = latestRecord;
++      }
++    } catch (_error) {
++      // Continue with the provided record if refresh fails.
++    }
++
+     var availableVersions = await window.KaPRecipesService.getRecipeVersions(record.id);
+     var latestVersion = availableVersions.length > 0 ? availableVersions[availableVersions.length - 1] : null;
+     var resolvedVersionId = selectedVersionId || getLastViewedVersionId(record.id);
+@@ -2785,7 +3641,6 @@
+     }
+ 
+     var isViewingLatestVersion = !!(latestVersion && activeVersion && latestVersion.id === activeVersion.id);
+-    var canEdit = true;
+     var detailItems = isViewingLatestVersion
+       ? await window.KaPRecipesService.getRecipeItems(record.id)
+       : await window.KaPRecipesService.getVersionItems(record.id, activeVersion.id);
+@@ -2809,13 +3664,11 @@
+     var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
+     var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
+     record.tags = recipeTags;
++    setRecipeInformationOnRecord(record, getRecipeInformation(record));
+     var recipeBatchSize = getRecipeBatchSize(record.id, activeVersion ? activeVersion.id : selectedVersionId);
+ 
+     var sortedItems = sortByNameAscending(detailItems);
+     var titleText = record.name;
+-    var areVersionsVisible = isVersionSectionVisible(record.id);
+-    var isDescriptionVisible = isDescriptionSectionVisible(record.id);
+-    var areTagsVisible = isTagsSectionVisible(record.id);
+ 
+     window.KaPUI.ReplaceDetailContent(container, {
+       title: titleText,
+@@ -2910,6 +3763,15 @@
+             }
+           }
+         },
++        {
++          label: 'Edit Recipe Name',
++          onClick: async function () {
++            var renamed = await renameRecipe(record);
++            if (renamed) {
++              await renderDetailInto(container, renamed, hooks, activeVersion ? activeVersion.id : null);
++            }
++          }
++        },
+         {
+           label: 'Export Recipe',
+           onClick: async function () {
+@@ -2920,28 +3782,6 @@
+             }
+           }
+         },
+-        {
+-          label: areVersionsVisible ? 'Hide Versions' : 'Show Versions',
+-          onClick: async function () {
+-            setVersionSectionVisible(record.id, !areVersionsVisible);
+-            await renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
+-          }
+-        },
+-        {
+-          label: isDescriptionVisible ? 'Hide Description' : 'Show Description',
+-          onClick: async function () {
+-            setDescriptionSectionVisible(record.id, !isDescriptionVisible);
+-            await renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
+-          }
+-        },
+-        {
+-          label: areTagsVisible ? 'Hide Tags' : 'Show Tags',
+-          onClick: async function () {
+-            setTagsSectionVisible(record.id, !areTagsVisible);
+-            await renderDetailInto(container, record, hooks, activeVersion ? activeVersion.id : null);
+-          }
+-        },
+-
+         {
+           label: 'Delete',
+           isDanger: true,
+@@ -2955,30 +3795,16 @@
+       ].filter(function (a) { return a !== null; })
+     });
+ 
+-    if (isVersionSectionVisible(record.id)) {
+-      appendVersionsAccordionSection(container, record, hooks, availableVersions, activeVersion, latestVersion, isViewingLatestVersion);
+-    }
+-    var descriptionSection = null;
+-    if (isDescriptionSectionVisible(record.id)) {
+-      descriptionSection = appendDescriptionAccordionSection(
+-        container,
+-        record,
+-        hooks,
+-        activeVersion ? activeVersion.id : null,
+-        canEdit
+-      );
+-    }
+-    if (isTagsSectionVisible(record.id)) {
+-      appendTagsAccordionSection(
+-        container,
+-        record,
+-        hooks,
+-        activeVersion ? activeVersion.id : null,
+-        canEdit,
+-        descriptionSection,
+-        allRecipeTags
+-      );
+-    }
++    await appendRecipeDetailsTabbedSection(
++      container,
++      record,
++      hooks,
++      availableVersions,
++      activeVersion,
++      latestVersion,
++      allRecipeTags
++    );
++
+     appendBatchSizeSection(
+       container,
+       record,
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index 9fc734c..6b24485 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -37,6 +37,57 @@
+     return window.KaPItemEntryRules.normalizeDescription(description);
+   }
+ 
++  function normalizeOptionalDurationMinutes(value) {
++    if (value == null || String(value).trim() === '') {
++      return null;
++    }
++
++    var parsed = Number(value);
++    if (!Number.isFinite(parsed) || parsed < 0) {
++      throw new Error('Duration values must be zero or greater.');
++    }
++
++    return Math.floor(parsed);
++  }
++
++  function normalizeStoredDurationMinutes(value) {
++    if (value == null || String(value).trim() === '') {
++      return null;
++    }
++
++    var parsed = Number(value);
++    if (!Number.isFinite(parsed) || parsed < 0) {
++      return null;
++    }
++
++    return Math.floor(parsed);
++  }
++
++  function normalizeOptionalRecipeInfoText(value) {
++    return String(value == null ? '' : value).trim();
++  }
++
++  function normalizeRecipeInformation(record) {
++    var normalized = {
++      prepMinutes: null,
++      cookMinutes: null,
++      additionalMinutes: null,
++      servings: '',
++      yield: ''
++    };
++
++    if (!record || typeof record !== 'object') {
++      return normalized;
++    }
++
++    normalized.prepMinutes = normalizeStoredDurationMinutes(record.infoPrepMinutes);
++    normalized.cookMinutes = normalizeStoredDurationMinutes(record.infoCookMinutes);
++    normalized.additionalMinutes = normalizeStoredDurationMinutes(record.infoAdditionalMinutes);
++    normalized.servings = normalizeOptionalRecipeInfoText(record.infoServings);
++    normalized.yield = normalizeOptionalRecipeInfoText(record.infoYield);
++    return normalized;
++  }
++
+   function normalizeOptionalUnitOfMeasureId(unitOfMeasureId) {
+     var raw = String(unitOfMeasureId == null ? '' : unitOfMeasureId).trim();
+     return raw || null;
+@@ -79,6 +130,7 @@
+ 
+     var normalized = Object.assign({}, record);
+     normalized.tags = normalizeRecipeTags(record.tags);
++    normalized.information = normalizeRecipeInformation(record);
+     return normalized;
+   }
+ 
+@@ -304,6 +356,13 @@
+     return normalizedRecipes;
+   }
+ 
++  async function getRecipeById(recipeId) {
++    var record = await requireRecipeById(recipeId);
++    var normalized = normalizeRecipeRecord(record);
++    normalized.tags = await getRecipeTags(recipeId);
++    return normalized;
++  }
++
+   async function getRecipeTags(recipeId) {
+     await requireRecipeById(recipeId);
+     var tagMaps = await readRecipeTagMapByRecipeId(recipeId);
+@@ -553,6 +612,11 @@
+       name: safeName,
+       description: '',
+       tags: [],
++      infoPrepMinutes: null,
++      infoCookMinutes: null,
++      infoAdditionalMinutes: null,
++      infoServings: '',
++      infoYield: '',
+       type: RECIPE_TYPE,
+       createdDate: timestamp,
+       updatedDate: timestamp
+@@ -583,6 +647,35 @@
+     return record;
+   }
+ 
++  async function updateRecipeInformation(id, nextInformation) {
++    var record = await requireRecipeById(id);
++    var source = (nextInformation && typeof nextInformation === 'object') ? nextInformation : {};
++
++    if (Object.prototype.hasOwnProperty.call(source, 'prepMinutes')) {
++      record.infoPrepMinutes = normalizeOptionalDurationMinutes(source.prepMinutes);
++    }
++
++    if (Object.prototype.hasOwnProperty.call(source, 'cookMinutes')) {
++      record.infoCookMinutes = normalizeOptionalDurationMinutes(source.cookMinutes);
++    }
++
++    if (Object.prototype.hasOwnProperty.call(source, 'additionalMinutes')) {
++      record.infoAdditionalMinutes = normalizeOptionalDurationMinutes(source.additionalMinutes);
++    }
++
++    if (Object.prototype.hasOwnProperty.call(source, 'servings')) {
++      record.infoServings = normalizeOptionalRecipeInfoText(source.servings);
++    }
++
++    if (Object.prototype.hasOwnProperty.call(source, 'yield')) {
++      record.infoYield = normalizeOptionalRecipeInfoText(source.yield);
++    }
++
++    record.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return normalizeRecipeRecord(record);
++  }
++
+   async function deleteRecipe(id) {
+     await requireRecipeById(id);
+ 
+@@ -1272,6 +1365,8 @@
+     }
+ 
+     var clonedRecipe = await createRecipe(cloneName || (sourceRecipe.name + ' - copy'));
++    await updateRecipeInformation(clonedRecipe.id, normalizeRecipeInformation(sourceRecipe));
++
+     var sourceTags = await getRecipeTags(sourceRecipe.id);
+     for (var i = 0; i < sourceTags.length; i++) {
+       await addTagToRecipe(clonedRecipe.id, sourceTags[i]);
+@@ -1446,6 +1541,7 @@
+ 
+   window.KaPRecipesService = {
+     getAllRecipes: getAllRecipes,
++    getRecipeById: getRecipeById,
+     getRecipeTags: getRecipeTags,
+     getAllRecipeTags: getAllRecipeTags,
+     getAllUnitOfMeasures: getAllUnitOfMeasures,
+@@ -1458,6 +1554,7 @@
+     createRecipe: createRecipe,
+     renameRecipe: renameRecipe,
+     updateRecipeDescription: updateRecipeDescription,
++    updateRecipeInformation: updateRecipeInformation,
+     deleteRecipe: deleteRecipe,
+     getRecipeItemCount: getRecipeItemCount,
+     getRecipeInstructionCount: getRecipeInstructionCount,
+diff --git a/src/styles.css b/src/styles.css
+index f892b96..3e58b31 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -960,6 +960,226 @@ body {
+   line-height: 1.4;
+ }
+ 
++.recipe-detail-tabs-card {
++  margin: 2px 0 1rem 0;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-surface);
++  overflow: hidden;
++}
++
++.recipe-detail-tabs-header {
++  display: flex;
++  align-items: center;
++  gap: 0.5rem;
++  padding: 0.625rem 0.75rem;
++  border-bottom: 1px solid var(--color-border);
++  background: var(--color-surface-light);
++}
++
++.recipe-detail-tabs-collapse {
++  border: none;
++  border-radius: 0.25rem;
++  background: var(--color-surface-light-hover);
++  color: var(--color-text);
++  width: 1.9rem;
++  height: 1.9rem;
++  cursor: pointer;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  padding: 0;
++}
++
++.recipe-detail-tabs-collapse::before {
++  content: '';
++  width: 0.55rem;
++  height: 0.55rem;
++  border-right: 2px solid currentColor;
++  border-bottom: 2px solid currentColor;
++  transform: rotate(45deg);
++  transition: transform 0.16s ease;
++}
++
++.recipe-detail-tabs-collapse.is-collapsed::before {
++  transform: rotate(-45deg);
++}
++
++.recipe-detail-tabs-collapse:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.recipe-detail-tabs-collapse:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 1px;
++}
++
++.recipe-detail-tabs {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.375rem;
++  min-width: 0;
++}
++
++.recipe-detail-tab {
++  border: 1px solid var(--color-border);
++  border-radius: 0.375rem;
++  background: var(--color-bg);
++  color: var(--color-text);
++  font-size: 0.85rem;
++  padding: 0.28rem 0.6rem;
++  cursor: pointer;
++}
++
++.recipe-detail-tab.is-active {
++  border-color: var(--color-brand);
++  color: var(--color-brand);
++}
++
++.recipe-detail-tabs-body {
++  display: grid;
++  gap: 0.875rem;
++  padding: 0.875rem 1rem;
++}
++
++.recipe-info-grid {
++  display: grid;
++  gap: 0.625rem;
++}
++
++.recipe-info-row {
++  display: grid;
++  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
++  align-items: center;
++  gap: 0.625rem;
++}
++
++.recipe-info-label {
++  color: var(--color-muted);
++  font-size: 0.86rem;
++}
++
++.recipe-info-input {
++  width: 100%;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.42rem 0.58rem;
++  background: var(--color-bg);
++  color: var(--color-text);
++  font: inherit;
++}
++
++.recipe-info-duration-wrap {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.5rem;
++  flex-wrap: wrap;
++}
++
++.recipe-info-duration-input {
++  width: 3rem;
++  min-width: 3rem;
++  text-align: right;
++  border: none;
++  background: transparent;
++  border-radius: 0;
++  padding: 0.42rem 0.5rem;
++}
++
++.recipe-info-duration-input::-webkit-outer-spin-button,
++.recipe-info-duration-input::-webkit-inner-spin-button {
++  -webkit-appearance: none;
++  margin: 0;
++}
++
++.recipe-info-duration-input[type='number'] {
++  -moz-appearance: textfield;
++  appearance: textfield;
++}
++
++.recipe-info-duration-part {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.35rem;
++}
++
++.recipe-info-duration-shell {
++  display: inline-flex;
++  align-items: stretch;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  background: var(--color-bg);
++  overflow: hidden;
++}
++
++.recipe-info-duration-shell:focus-within {
++  border-color: var(--color-brand);
++}
++
++.recipe-info-stepper {
++  display: grid;
++  grid-template-rows: 1fr 1fr;
++  border-left: 1px solid var(--color-border);
++  background: var(--color-surface);
++}
++
++.recipe-info-stepper-button {
++  border: none;
++  background: transparent;
++  color: var(--color-text);
++  width: 1.15rem;
++  min-height: 1.05rem;
++  line-height: 1;
++  font-size: 0.76rem;
++  font-weight: 600;
++  cursor: pointer;
++  padding: 0;
++}
++
++.recipe-info-stepper-button + .recipe-info-stepper-button {
++  border-top: 1px solid var(--color-border);
++}
++
++.recipe-info-stepper-button:hover {
++  background: var(--color-surface-light-hover);
++}
++
++.recipe-info-stepper-button:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: -1px;
++}
++
++.recipe-info-duration-suffix {
++  color: var(--color-muted);
++  font-size: 0.82rem;
++}
++
++.recipe-info-readonly {
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.42rem 0.58rem;
++  color: var(--color-text);
++  background: var(--color-surface-light);
++  min-height: 2rem;
++  display: flex;
++  align-items: center;
++}
++
++.recipe-version-toolbar {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.5rem;
++  flex-wrap: wrap;
++}
++
++@media (max-width: 640px) {
++  .recipe-info-row {
++    grid-template-columns: 1fr;
++    gap: 0.35rem;
++  }
++}
++
+ 
+ 
+ .modal-inline-info {
