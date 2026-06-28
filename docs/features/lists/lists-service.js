@@ -59,6 +59,19 @@
     return fixed.replace(/\.?0+$/, '');
   }
 
+  function formatNumericQuantityText(quantityValue) {
+    if (quantityValue == null) {
+      return null;
+    }
+
+    var numeric = Number(quantityValue);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+
+    return numeric.toFixed(3).replace(/\.?0+$/, '');
+  }
+
   function getRecipeIngredientSourceKey(ingredient) {
     if (ingredient && ingredient.id) {
       return String(ingredient.id);
@@ -196,13 +209,16 @@
     return record;
   }
 
-  async function upsertRecipeDerivedItems(listId, ingredients) {
+  async function upsertRecipeDerivedItems(listId, ingredients, batchSizeOverride, additiveToExisting) {
     var record = await requireListById(listId);
     if (!isRecipeDerivedList(record)) {
       throw new Error('Recipe-derived items can only be added to recipe-derived lists.');
     }
 
-    var batchSize = normalizeBatchSize(record.batchSize == null ? 1 : record.batchSize);
+    var batchSize = normalizeBatchSize(
+      batchSizeOverride != null ? batchSizeOverride : (record.batchSize == null ? 1 : record.batchSize)
+    );
+    var shouldAddToExisting = additiveToExisting === true;
     var selectedIngredients = Array.isArray(ingredients) ? ingredients : [];
     var joinRecords = await readJoinRecordsByListId(listId);
     var existingBySourceKey = {};
@@ -245,9 +261,26 @@
        nextRecord.sourceRecipeItemKey = sourceKey;
        nextRecord.recipeBaseQuantityValue = baseQuantityValue;
        nextRecord.recipeBaseQuantityText = ingredient.quantityText == null ? null : String(ingredient.quantityText).trim() || null;
-       nextRecord.quantityValue = baseQuantityValue == null ? null : baseQuantityValue * batchSize;
-       nextRecord.quantity = nextRecord.quantityValue;
-       nextRecord.quantityText = formatScaledQuantityText(nextRecord.recipeBaseQuantityText, baseQuantityValue, batchSize);
+
+       var scaledQuantityValue = baseQuantityValue == null ? null : baseQuantityValue * batchSize;
+       if (shouldAddToExisting && existingBySourceKey[sourceKey]) {
+         var existingQuantityValue = nextRecord.quantityValue != null
+           ? Number(nextRecord.quantityValue)
+           : (nextRecord.quantity == null ? null : Number(nextRecord.quantity));
+         if (existingQuantityValue != null && !Number.isFinite(existingQuantityValue)) {
+           existingQuantityValue = null;
+         }
+
+         nextRecord.quantityValue = scaledQuantityValue == null
+           ? existingQuantityValue
+           : ((existingQuantityValue == null ? 0 : existingQuantityValue) + scaledQuantityValue);
+         nextRecord.quantity = nextRecord.quantityValue;
+         nextRecord.quantityText = formatNumericQuantityText(nextRecord.quantityValue);
+       } else {
+         nextRecord.quantityValue = scaledQuantityValue;
+         nextRecord.quantity = nextRecord.quantityValue;
+         nextRecord.quantityText = formatScaledQuantityText(nextRecord.recipeBaseQuantityText, baseQuantityValue, batchSize);
+       }
        nextRecord.unitOfMeasureId = ingredient.unitOfMeasureId || null;
        nextRecord.isOptional = ingredient.isOptional === true;
 
@@ -342,6 +375,7 @@
           isCrossedOff: joinRecord.isCrossedOff === true,
           crossedOffAt: normalizeIsoTimestamp(joinRecord.crossedOffAt),
           sourceKind: joinRecord.sourceKind || '',
+          sourceRecipeItemKey: joinRecord.sourceRecipeItemKey || null,
           item: item || null
         };
       })
@@ -423,9 +457,14 @@
       throw new Error('List item not found.');
     }
 
-    var current = existing.quantity == null ? 1 : existing.quantity;
-    existing.quantity = current + 1;
+    var current = existing.quantity == null ? 1 : Number(existing.quantity);
+    if (!Number.isFinite(current)) {
+      current = 1;
+    }
+
+    existing.quantity = Math.round((current + 0.5) * 1000) / 1000;
     existing.quantityValue = existing.quantity;
+    existing.quantityText = formatNumericQuantityText(existing.quantity);
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
     return existing;
   }
@@ -465,9 +504,14 @@
       throw new Error('List item not found.');
     }
 
-    var current = existing.quantity == null ? 1 : existing.quantity;
-    existing.quantity = Math.max(1, current - 1);
+    var current = existing.quantity == null ? 1 : Number(existing.quantity);
+    if (!Number.isFinite(current)) {
+      current = 1;
+    }
+
+    existing.quantity = Math.max(0.5, Math.round((current - 0.5) * 1000) / 1000);
     existing.quantityValue = existing.quantity;
+    existing.quantityText = formatNumericQuantityText(existing.quantity);
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
     return existing;
   }

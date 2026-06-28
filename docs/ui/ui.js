@@ -1,5 +1,6 @@
 (function () {
   var activeOverflowMenu = null;
+  var activeTimedNotice = null;
 
   document.addEventListener('click', function (event) {
     if (!activeOverflowMenu) {
@@ -286,9 +287,13 @@
     var qtyPillNode = node.querySelector('.detail-item-qty-pill');
     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
     var descriptionText = detailItem.description || '';
-    var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
-    var currentQuantityText = detailItem.quantityText == null ? null : String(detailItem.quantityText);
-    var uomAbbreviation = detailItem.uomAbbreviation || null;
+    var currentQuantity = detailItem.displayQuantityValue != null
+      ? detailItem.displayQuantityValue
+      : (detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity);
+    var currentQuantityText = detailItem.displayQuantityText != null
+      ? String(detailItem.displayQuantityText)
+      : (detailItem.quantityText == null ? null : String(detailItem.quantityText));
+    var uomAbbreviation = detailItem.displayUomAbbreviation || detailItem.uomAbbreviation || null;
     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
 
@@ -2249,8 +2254,147 @@
     });
   }
 
+  function normalizeBatchSizeValue(value) {
+    var numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 1;
+    }
+
+    var stepped = Math.round(numeric * 2) / 2;
+    return Math.max(0.5, stepped);
+  }
+
+  function formatBatchSizeFraction(value) {
+    var normalized = normalizeBatchSizeValue(value);
+    var whole = Math.floor(normalized);
+    var hasHalf = Math.abs(normalized - whole - 0.5) < 0.001;
+
+    if (hasHalf) {
+      if (whole <= 0) {
+        return '1/2';
+      }
+
+      return String(whole) + ' 1/2';
+    }
+
+    return String(whole);
+  }
+
+  function buildBatchSizeStepper(options) {
+    var canEdit = options.allowEdit !== false;
+    var value = normalizeBatchSizeValue(options.initialValue);
+
+    var stepper = document.createElement('div');
+    stepper.className = 'modal-batch-stepper' + (canEdit ? '' : ' modal-batch-stepper--locked');
+
+    var decreaseButton = document.createElement('button');
+    decreaseButton.type = 'button';
+    decreaseButton.className = 'modal-batch-stepper-button';
+    decreaseButton.textContent = '-';
+    decreaseButton.setAttribute('aria-label', 'Decrease batch size');
+
+    var valueNode = document.createElement('div');
+    valueNode.className = 'modal-batch-stepper-value';
+    valueNode.textContent = formatBatchSizeFraction(value);
+
+    var increaseButton = document.createElement('button');
+    increaseButton.type = 'button';
+    increaseButton.className = 'modal-batch-stepper-button';
+    increaseButton.textContent = '+';
+    increaseButton.setAttribute('aria-label', 'Increase batch size');
+
+    function refresh() {
+      valueNode.textContent = formatBatchSizeFraction(value);
+      decreaseButton.disabled = !canEdit || value <= 0.5;
+      increaseButton.disabled = !canEdit;
+      if (typeof options.onChange === 'function') {
+        options.onChange(value);
+      }
+    }
+
+    increaseButton.addEventListener('click', function () {
+      if (!canEdit) {
+        return;
+      }
+
+      value = normalizeBatchSizeValue(value + 0.5);
+      refresh();
+    });
+
+    decreaseButton.addEventListener('click', function () {
+      if (!canEdit) {
+        return;
+      }
+
+      value = normalizeBatchSizeValue(value - 0.5);
+      refresh();
+    });
+
+    stepper.appendChild(decreaseButton);
+    stepper.appendChild(valueNode);
+    stepper.appendChild(increaseButton);
+    refresh();
+
+    return {
+      node: stepper,
+      focus: function () {
+        if (canEdit) {
+          increaseButton.focus();
+        }
+      },
+      getValue: function () {
+        return value;
+      }
+    };
+  }
+
+  function ShowBatchSizeModal(config) {
+    return showModal(function (bodyNode, confirmButton, cancelButton) {
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var label = document.createElement('label');
+      label.className = 'modal-field-label';
+      label.textContent = config.label || 'Batch Size';
+      form.appendChild(label);
+
+      var stepper = buildBatchSizeStepper({
+        initialValue: config.initialBatchSize == null ? 1 : config.initialBatchSize,
+        allowEdit: config.allowBatchEdit !== false
+      });
+      form.appendChild(stepper.node);
+
+      if (config.message) {
+        var messageNode = document.createElement('p');
+        messageNode.className = 'modal-hint';
+        messageNode.textContent = config.message;
+        form.appendChild(messageNode);
+      }
+
+      bodyNode.appendChild(form);
+
+      requestAnimationFrame(function () {
+        if (config.allowBatchEdit === false) {
+          cancelButton.focus();
+          return;
+        }
+
+        stepper.focus();
+      });
+
+      return function () {
+        return stepper.getValue();
+      };
+    }, {
+      title: config.title || 'Set Batch Size',
+      confirmLabel: config.confirmLabel || 'Save',
+      cancelValue: null,
+      isDanger: false
+    });
+  }
+
   function ShowAddToListModal(config) {
-    // config: { recipeName, ingredients, getAllLists }
+    // config: { recipeName, ingredients, initialBatchSize, batchLabel, batchHintFormatter }
     return new Promise(function (resolve) {
       var node = newFromTemplate('modal-template');
       var overlay = node;
@@ -2269,6 +2413,31 @@
       var form = document.createElement('div');
       form.className = 'modal-item-form';
 
+      var batchHintNode = null;
+
+      var batchLabel = document.createElement('label');
+      batchLabel.className = 'modal-field-label';
+      batchLabel.textContent = config.batchLabel || 'Batch Size';
+      form.appendChild(batchLabel);
+
+      var batchStepper = buildBatchSizeStepper({
+        initialValue: config.initialBatchSize == null ? 1 : config.initialBatchSize,
+        allowEdit: true,
+        onChange: function (value) {
+          if (batchHintNode && typeof config.batchHintFormatter === 'function') {
+            batchHintNode.textContent = String(config.batchHintFormatter(value) || '');
+          }
+        }
+      });
+      form.appendChild(batchStepper.node);
+
+      if (typeof config.batchHintFormatter === 'function') {
+        batchHintNode = document.createElement('p');
+        batchHintNode.className = 'modal-hint';
+        batchHintNode.textContent = String(config.batchHintFormatter(batchStepper.getValue()) || '');
+        form.appendChild(batchHintNode);
+      }
+
       // ---- Ingredients ----
       var ingredientsLabel = document.createElement('span');
       ingredientsLabel.className = 'modal-field-label';
@@ -2285,7 +2454,10 @@
 
         var checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = true;
+        var ingredientKey = ingredient.id
+          ? String(ingredient.id)
+          : String((ingredient.name || '')).trim().toLowerCase();
+        checkbox.checked = config.preCheckedKeys ? config.preCheckedKeys.has(ingredientKey) : true;
         checkbox.className = 'modal-checklist-checkbox';
 
         var nameNode = document.createElement('span');
@@ -2314,61 +2486,6 @@
 
       form.appendChild(ingredientList);
 
-      // ---- List mode toggle ----
-      var listLabel = document.createElement('span');
-      listLabel.className = 'modal-field-label';
-      listLabel.textContent = 'Target List';
-      form.appendChild(listLabel);
-
-      var toggleGroup = document.createElement('div');
-      toggleGroup.className = 'modal-toggle-group';
-
-      var existingButton = document.createElement('button');
-      existingButton.type = 'button';
-      existingButton.className = 'modal-toggle-button is-active';
-      existingButton.textContent = 'Existing List';
-
-      var newButton = document.createElement('button');
-      newButton.type = 'button';
-      newButton.className = 'modal-toggle-button';
-      newButton.textContent = 'New List';
-
-      toggleGroup.appendChild(existingButton);
-      toggleGroup.appendChild(newButton);
-      form.appendChild(toggleGroup);
-
-      // ---- Existing list section ----
-      var existingSection = document.createElement('div');
-
-      var targetInputWrapper = document.createElement('div');
-      targetInputWrapper.className = 'modal-input-wrapper';
-
-      var targetInput = document.createElement('input');
-      targetInput.type = 'text';
-      targetInput.className = 'modal-input';
-      targetInput.placeholder = 'Search grocery lists';
-
-      var targetSuggestionsList = document.createElement('div');
-      targetSuggestionsList.className = 'modal-suggestions';
-      targetSuggestionsList.hidden = true;
-
-      targetInputWrapper.appendChild(targetInput);
-      targetInputWrapper.appendChild(targetSuggestionsList);
-      existingSection.appendChild(targetInputWrapper);
-      form.appendChild(existingSection);
-
-      // ---- New list section ----
-      var newSection = document.createElement('div');
-      newSection.hidden = true;
-
-      var newListInput = document.createElement('input');
-      newListInput.type = 'text';
-      newListInput.className = 'modal-input';
-      newListInput.value = config.recipeName || '';
-      newListInput.placeholder = 'New list name';
-      newSection.appendChild(newListInput);
-      form.appendChild(newSection);
-
       var errorNode = document.createElement('p');
       errorNode.className = 'modal-error';
       form.appendChild(errorNode);
@@ -2376,98 +2493,8 @@
       bodyNode.appendChild(form);
 
       // ---- State ----
-      var mode = 'existing';
-      var selectedList = null;
-      var currentSuggestions = [];
-
-      function setMode(nextMode) {
-        mode = nextMode;
-        existingButton.classList.toggle('is-active', mode === 'existing');
-        newButton.classList.toggle('is-active', mode === 'new');
-        existingSection.hidden = mode !== 'existing';
-        newSection.hidden = mode !== 'new';
-        errorNode.textContent = '';
-        if (mode === 'existing') {
-          targetInput.focus();
-        } else {
-          newListInput.focus();
-          newListInput.select();
-        }
-      }
-
-      existingButton.addEventListener('click', function () { setMode('existing'); });
-      newButton.addEventListener('click', function () { setMode('new'); });
-
-      // ---- Suggestions ----
-      function renderSuggestions() {
-        targetSuggestionsList.replaceChildren();
-        var query = String(targetInput.value || '').trim().toLowerCase();
-        var filtered = currentSuggestions.filter(function (list) {
-          return !query || String(list.name || '').toLowerCase().indexOf(query) !== -1;
-        });
-
-        if (filtered.length === 0) {
-          targetSuggestionsList.hidden = true;
-          return;
-        }
-
-        targetSuggestionsList.hidden = false;
-        filtered.slice(0, 8).forEach(function (list) {
-          var row = document.createElement('div');
-          row.className = 'modal-suggestion-row';
-
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'modal-suggestion-main';
-
-          var content = document.createElement('div');
-          content.className = 'modal-suggestion-content';
-
-          var nameNode = document.createElement('div');
-          nameNode.className = 'modal-suggestion-name';
-          nameNode.textContent = list.name;
-          content.appendChild(nameNode);
-          btn.appendChild(content);
-
-          btn.addEventListener('click', function () {
-            selectedList = { id: list.id, name: list.name };
-            targetInput.value = list.name;
-            currentSuggestions = [];
-            renderSuggestions();
-            errorNode.textContent = '';
-          });
-
-          row.appendChild(btn);
-          targetSuggestionsList.appendChild(row);
-        });
-      }
-
-      function loadSuggestions() {
-        return Promise.resolve(config.getAllLists ? config.getAllLists() : []).then(function (lists) {
-          currentSuggestions = (lists || []).slice().sort(function (a, b) {
-            return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
-          });
-          renderSuggestions();
-        });
-      }
-
-      function closeSuggestions() {
-        currentSuggestions = [];
-        renderSuggestions();
-      }
-
-      targetInput.addEventListener('focus', function () {
-        loadSuggestions().catch(function () {});
-      });
-      targetInput.addEventListener('input', function () {
-        selectedList = null;
-        loadSuggestions().catch(function () {});
-      });
-
-      // ---- Validate & close ----
       function close(result) {
         document.removeEventListener('keydown', onKeyDown);
-        document.removeEventListener('click', onDocumentClick);
         document.body.removeChild(node);
         resolve(result);
       }
@@ -2484,46 +2511,15 @@
           return;
         }
 
-        if (mode === 'new') {
-          var newName = String(newListInput.value || '').trim();
-          if (!newName) {
-            errorNode.textContent = 'List name is required.';
-            newListInput.focus();
-            return;
-          }
-          close({ selectedIngredients: selectedIngredients, isNewList: true, newListName: newName, targetListId: null });
-          return;
-        }
-
-        var typedName = String(targetInput.value || '').trim();
-        if (!typedName) {
-          errorNode.textContent = 'Select a grocery list.';
-          targetInput.focus();
-          return;
-        }
-
-        if (!selectedList || String(selectedList.name || '').trim().toLowerCase() !== typedName.toLowerCase()) {
-          errorNode.textContent = 'Select a list from the suggestions.';
-          targetInput.focus();
-          return;
-        }
-
-        close({ selectedIngredients: selectedIngredients, isNewList: false, newListName: null, targetListId: selectedList.id });
+        close({
+          selectedIngredients: selectedIngredients,
+          batchSize: batchStepper.getValue()
+        });
       }
 
       function onKeyDown(event) {
         if (event.key === 'Escape') {
-          if (!targetSuggestionsList.hidden) {
-            closeSuggestions();
-            return;
-          }
           close(null);
-        }
-      }
-
-      function onDocumentClick(event) {
-        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
-          closeSuggestions();
         }
       }
 
@@ -2534,12 +2530,10 @@
       confirmButton.addEventListener('click', function () { validateAndClose(); });
 
       document.addEventListener('keydown', onKeyDown);
-      document.addEventListener('click', onDocumentClick);
       document.body.appendChild(node);
 
       requestAnimationFrame(function () {
-        targetInput.focus();
-        loadSuggestions().catch(function () {});
+        batchStepper.focus();
       });
     });
   }
@@ -2850,6 +2844,423 @@
     });
   }
 
+  function ShowRecipeExportModal(config) {
+    return showModal(function (bodyNode, confirmButton) {
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var options = [
+        {
+          value: 'pdf',
+          title: 'PDF File',
+          description: String(config.pdfDescription || 'Download a printable PDF file.')
+        },
+        {
+          value: 'text',
+          title: 'Copy as Text',
+          description: String(config.textDescription || 'Copy a user-readable recipe to your clipboard.')
+        },
+        {
+          value: 'kap',
+          title: '.kap File',
+          description: String(config.kapDescription || 'Download recipe data in .kap format.')
+        }
+      ];
+
+      var selectedValue = String(config.defaultFormat || 'kap');
+      var foundDefault = false;
+
+      options.forEach(function (option) {
+        if (option.value === selectedValue) {
+          foundDefault = true;
+        }
+      });
+
+      if (!foundDefault) {
+        selectedValue = 'kap';
+      }
+
+      options.forEach(function (option) {
+        var label = document.createElement('label');
+        label.className = 'modal-choice-row';
+
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'kap-recipe-export-format';
+        radio.value = option.value;
+        radio.className = 'modal-choice-radio';
+        radio.checked = option.value === selectedValue;
+        radio.addEventListener('change', function () {
+          if (radio.checked) {
+            selectedValue = option.value;
+          }
+        });
+        label.appendChild(radio);
+
+        var content = document.createElement('div');
+        content.className = 'modal-choice-content';
+
+        var title = document.createElement('div');
+        title.className = 'modal-choice-title';
+        title.textContent = option.title;
+        content.appendChild(title);
+
+        var description = document.createElement('p');
+        description.className = 'modal-choice-description';
+        description.textContent = option.description;
+        content.appendChild(description);
+
+        label.appendChild(content);
+        form.appendChild(label);
+      });
+
+      bodyNode.appendChild(form);
+
+      requestAnimationFrame(function () {
+        var selectedRadio = form.querySelector('.modal-choice-radio:checked');
+        if (selectedRadio) {
+          selectedRadio.focus();
+        } else {
+          confirmButton.focus();
+        }
+      });
+
+      return function () {
+        return selectedValue;
+      };
+    }, {
+      title: config.title || 'Export Recipe',
+      confirmLabel: config.confirmLabel || 'Continue',
+      cancelValue: null,
+      isDanger: false,
+      compact: false
+    });
+  }
+
+  function ShowIngredientNameConflictPrompt(config) {
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = 'Ingredient Name Conflict';
+      card.setAttribute('aria-label', 'Ingredient Name Conflict');
+      cancelButton.style.display = 'none';
+      confirmButton.style.display = 'none';
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form modal-conflict-form';
+
+      var lineOne = document.createElement('p');
+      lineOne.className = 'modal-message';
+      lineOne.textContent = 'Imported ingredient uses the same Id as an existing ingredient, but the names are different.';
+      form.appendChild(lineOne);
+
+      var idLine = document.createElement('p');
+      idLine.className = 'modal-message';
+      idLine.textContent = 'Id: ' + String(config.ingredientId || '');
+      form.appendChild(idLine);
+
+      var existingLine = document.createElement('p');
+      existingLine.className = 'modal-message';
+      existingLine.textContent = 'Existing: ' + String(config.existingName || '');
+      form.appendChild(existingLine);
+
+      var incomingLine = document.createElement('p');
+      incomingLine.className = 'modal-message';
+      incomingLine.textContent = 'Incoming: ' + String(config.incomingName || '');
+      form.appendChild(incomingLine);
+
+      var applyWrap = document.createElement('label');
+      applyWrap.className = 'modal-conflict-apply-row';
+
+      var applyCheckbox = document.createElement('input');
+      applyCheckbox.type = 'checkbox';
+      applyCheckbox.className = 'modal-choice-radio';
+      applyWrap.appendChild(applyCheckbox);
+
+      var applyText = document.createElement('span');
+      applyText.textContent = 'Apply this decision to all remaining conflicts.';
+      applyWrap.appendChild(applyText);
+      form.appendChild(applyWrap);
+
+      var actions = document.createElement('div');
+      actions.className = 'modal-conflict-actions';
+
+      var useIncomingButton = document.createElement('button');
+      useIncomingButton.type = 'button';
+      useIncomingButton.className = 'modal-button modal-button--primary';
+      useIncomingButton.textContent = 'Use Incoming Name';
+
+      var keepExistingButton = document.createElement('button');
+      keepExistingButton.type = 'button';
+      keepExistingButton.className = 'modal-button modal-button--secondary';
+      keepExistingButton.textContent = 'Keep Existing Name';
+
+      var cancelImportButton = document.createElement('button');
+      cancelImportButton.type = 'button';
+      cancelImportButton.className = 'modal-button modal-button--secondary';
+      cancelImportButton.textContent = 'Cancel Import';
+
+      actions.appendChild(useIncomingButton);
+      actions.appendChild(keepExistingButton);
+      actions.appendChild(cancelImportButton);
+      form.appendChild(actions);
+
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function decisionResult(decision) {
+        return {
+          decision: decision,
+          applyToAll: applyCheckbox.checked === true
+        };
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          close(null);
+          return;
+        }
+
+        if (event.key === 'Enter') {
+          var focused = document.activeElement;
+          if (focused === useIncomingButton || focused === keepExistingButton || focused === cancelImportButton) {
+            event.preventDefault();
+            focused.click();
+          }
+        }
+      }
+
+      useIncomingButton.addEventListener('click', function () {
+        close(decisionResult('use_incoming'));
+      });
+
+      keepExistingButton.addEventListener('click', function () {
+        close(decisionResult('keep_existing'));
+      });
+
+      cancelImportButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        keepExistingButton.focus();
+      });
+    });
+  }
+
+  function ShowRecipeImportReviewModal(config) {
+    return new Promise(function (resolve) {
+      var preflight = config && config.preflight ? config.preflight : null;
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      overlay.classList.add('modal-overlay--compact');
+      card.classList.add('modal-card--compact');
+      card.classList.add('modal-card--import-review');
+      titleNode.textContent = 'Review Recipe Import';
+      card.setAttribute('aria-label', 'Review Recipe Import');
+      cancelButton.style.display = 'none';
+      confirmButton.style.display = 'none';
+
+      var wrap = document.createElement('div');
+      wrap.className = 'modal-import-review';
+
+      var intro = document.createElement('p');
+      intro.className = 'modal-message modal-import-review-intro';
+      intro.textContent = 'Review what will change before you apply this import.';
+      wrap.appendChild(intro);
+
+      var targetCard = document.createElement('div');
+      targetCard.className = 'modal-import-section';
+      var targetTitle = document.createElement('h3');
+      targetTitle.className = 'modal-import-section-title';
+      targetTitle.textContent = 'Import Target';
+      targetCard.appendChild(targetTitle);
+
+      var recipeLine = document.createElement('p');
+      recipeLine.className = 'modal-import-line';
+      recipeLine.textContent = 'Recipe: ' + String((preflight && preflight.target && preflight.target.recipeName) || 'Unknown');
+      targetCard.appendChild(recipeLine);
+
+      var versionLine = document.createElement('p');
+      versionLine.className = 'modal-import-line';
+      versionLine.textContent = 'Version: ' + String((preflight && preflight.target && preflight.target.versionName) || 'Unknown');
+      targetCard.appendChild(versionLine);
+
+      wrap.appendChild(targetCard);
+
+      var changesCard = document.createElement('div');
+      changesCard.className = 'modal-import-section';
+      var changesTitle = document.createElement('h3');
+      changesTitle.className = 'modal-import-section-title';
+      changesTitle.textContent = 'What Will Change';
+      changesCard.appendChild(changesTitle);
+
+      var metrics = document.createElement('div');
+      metrics.className = 'modal-import-metrics';
+
+      function addMetric(label, value) {
+        var row = document.createElement('div');
+        row.className = 'modal-import-metric';
+
+        var labelNode = document.createElement('span');
+        labelNode.className = 'modal-import-metric-label';
+        labelNode.textContent = label;
+
+        var valueNode = document.createElement('span');
+        valueNode.className = 'modal-import-metric-value';
+        valueNode.textContent = String(value);
+
+        row.appendChild(labelNode);
+        row.appendChild(valueNode);
+        metrics.appendChild(row);
+      }
+
+      addMetric('Ingredients to add', preflight && preflight.ingredientCounts ? preflight.ingredientCounts.newCount : 0);
+      addMetric('Ingredients to update', preflight && preflight.ingredientCounts ? preflight.ingredientCounts.overwriteCount : 0);
+      addMetric('Instructions to add', preflight && preflight.instructionCounts ? preflight.instructionCounts.newCount : 0);
+      addMetric('Instructions to update', preflight && preflight.instructionCounts ? preflight.instructionCounts.overwriteCount : 0);
+
+      if (preflight && preflight.ingredientConflictCount > 0) {
+        addMetric('Name decisions needed', preflight.ingredientConflictCount);
+      }
+
+      if (preflight && preflight.recipeDerivedListsPreservedCount > 0) {
+        addMetric('Existing grocery lists kept', preflight.recipeDerivedListsPreservedCount);
+      }
+
+      changesCard.appendChild(metrics);
+      wrap.appendChild(changesCard);
+
+      if (preflight && preflight.versionConflictDetail) {
+        var versionNote = document.createElement('p');
+        versionNote.className = 'modal-message modal-import-note';
+        versionNote.textContent = 'Version note: ' + preflight.versionConflictDetail;
+        wrap.appendChild(versionNote);
+      }
+
+      if (preflight && Array.isArray(preflight.warnings) && preflight.warnings.length > 0) {
+        var warningCard = document.createElement('div');
+        warningCard.className = 'modal-import-section modal-import-warning';
+
+        var warningTitle = document.createElement('h3');
+        warningTitle.className = 'modal-import-section-title';
+        warningTitle.textContent = 'Please Review';
+        warningCard.appendChild(warningTitle);
+
+        var warningList = document.createElement('ul');
+        warningList.className = 'modal-import-warning-list';
+        for (var i = 0; i < preflight.warnings.length; i++) {
+          var item = document.createElement('li');
+          item.textContent = String(preflight.warnings[i]);
+          warningList.appendChild(item);
+        }
+
+        warningCard.appendChild(warningList);
+        wrap.appendChild(warningCard);
+      }
+
+      var dangerNote = document.createElement('p');
+      dangerNote.className = 'modal-message modal-import-danger-note';
+      dangerNote.textContent = 'Applying import replaces matching data for this recipe version. There is no automatic undo.';
+      wrap.appendChild(dangerNote);
+
+      var decisionTitle = document.createElement('h3');
+      decisionTitle.className = 'modal-import-section-title';
+      decisionTitle.textContent = 'Choose What To Do';
+      wrap.appendChild(decisionTitle);
+
+      var decisions = document.createElement('div');
+      decisions.className = 'modal-import-decisions';
+
+      var applyButton = document.createElement('button');
+      applyButton.type = 'button';
+      applyButton.className = 'modal-import-decision modal-import-decision--danger';
+      applyButton.innerHTML = '<span class="modal-import-decision-title">Apply Import</span>'
+        + '<span class="modal-import-decision-description">Update this recipe version using the imported file.</span>';
+
+      var cancelImportButton = document.createElement('button');
+      cancelImportButton.type = 'button';
+      cancelImportButton.className = 'modal-import-decision modal-import-decision--safe';
+      cancelImportButton.innerHTML = '<span class="modal-import-decision-title">Cancel Import</span>'
+        + '<span class="modal-import-decision-description">Close this dialog and keep everything unchanged.</span>';
+
+      decisions.appendChild(applyButton);
+      decisions.appendChild(cancelImportButton);
+      wrap.appendChild(decisions);
+      bodyNode.appendChild(wrap);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          close({ action: 'cancel' });
+          return;
+        }
+
+        if (event.key === 'Enter') {
+          var focused = document.activeElement;
+          if (focused === applyButton || focused === cancelImportButton) {
+            event.preventDefault();
+            focused.click();
+          }
+        }
+      }
+
+      applyButton.addEventListener('click', function () {
+        close({ action: 'apply' });
+      });
+
+      cancelImportButton.addEventListener('click', function () {
+        close({ action: 'cancel' });
+      });
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close({ action: 'cancel' });
+        }
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        cancelImportButton.focus();
+      });
+    });
+  }
+
   function ShowConfirm(config) {
     return showModal(function (bodyNode, confirmButton, cancelButton) {
       if (config.message) {
@@ -2948,6 +3359,81 @@
     });
   }
 
+  function ShowTimedNotice(config) {
+    var durationMs = Number(config && config.durationMs);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      durationMs = 3000;
+    }
+
+    if (activeTimedNotice && typeof activeTimedNotice.close === 'function') {
+      activeTimedNotice.close();
+    }
+
+    var notice = document.createElement('div');
+    notice.className = 'timed-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+
+    var textWrap = document.createElement('div');
+    textWrap.className = 'timed-notice-text';
+
+    var titleNode = document.createElement('div');
+    titleNode.className = 'timed-notice-title';
+    titleNode.textContent = String((config && config.title) || 'Done');
+    textWrap.appendChild(titleNode);
+
+    if (config && config.message) {
+      var messageNode = document.createElement('p');
+      messageNode.className = 'timed-notice-message';
+      messageNode.textContent = String(config.message);
+      textWrap.appendChild(messageNode);
+    }
+
+    var closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'timed-notice-close';
+    closeButton.textContent = '\u00d7';
+    closeButton.setAttribute('aria-label', 'Dismiss notice');
+
+    var timeoutId = null;
+
+    function closeNotice() {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      if (notice.parentNode) {
+        notice.parentNode.removeChild(notice);
+      }
+
+      if (activeTimedNotice && activeTimedNotice.node === notice) {
+        activeTimedNotice = null;
+      }
+    }
+
+    closeButton.addEventListener('click', function () {
+      closeNotice();
+    });
+
+    notice.appendChild(textWrap);
+    notice.appendChild(closeButton);
+    document.body.appendChild(notice);
+
+    requestAnimationFrame(function () {
+      notice.classList.add('timed-notice--visible');
+    });
+
+    timeoutId = setTimeout(function () {
+      closeNotice();
+    }, durationMs);
+
+    activeTimedNotice = {
+      node: notice,
+      close: closeNotice
+    };
+  }
+
   window.KaPUI = {
     NewMainTab: NewMainTab,
     AddMainTab: AddMainTab,
@@ -2968,13 +3454,20 @@
     ShowTemplateConfigModal: ShowTemplateConfigModal,
     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,
+    ShowBatchSizeModal: ShowBatchSizeModal,
+    FormatBatchSize: formatBatchSizeFraction,
     ShowAddToListModal: ShowAddToListModal,
     ShowNewVersionModal: ShowNewVersionModal,
     ShowRecipeCloneModal: ShowRecipeCloneModal,
     ShowImportModeModal: ShowImportModeModal,
+    BuildBatchSizeStepper: buildBatchSizeStepper,
+    ShowRecipeExportModal: ShowRecipeExportModal,
+    ShowRecipeImportReviewModal: ShowRecipeImportReviewModal,
+    ShowIngredientNameConflictPrompt: ShowIngredientNameConflictPrompt,
     ShowConfirm: ShowConfirm,
     ShowAlert: ShowAlert,
     ShowAboutModal: ShowAboutModal,
+    ShowTimedNotice: ShowTimedNotice,
     SetActiveOverflowMenu: setActiveOverflowMenu,
     ShouldOpenOverflowUp: shouldOpenOverflowUp
   };

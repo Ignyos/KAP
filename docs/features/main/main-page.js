@@ -278,12 +278,23 @@
     newButton.type = 'button';
     newButton.className = 'accordion-new-button';
     newButton.textContent = '+ New';
+    headerActions.appendChild(newButton);
+
+    if (section.id === 'recipes') {
+      var importButton = document.createElement('button');
+      importButton.type = 'button';
+      importButton.className = 'accordion-new-button';
+      importButton.textContent = 'Import';
+      importButton.addEventListener('click', function (e) {
+        e.stopPropagation();
+        handleRecipeImportSection();
+      });
+      headerActions.appendChild(importButton);
+    }
     newButton.addEventListener('click', function (e) {
       e.stopPropagation();
       handleNewSection(section.id);
     });
-
-    headerActions.appendChild(newButton);
 
     header.appendChild(headerLabel);
     header.appendChild(headerActions);
@@ -470,6 +481,24 @@
       } catch (error) {
         console.error('Error creating new item:', error);
       }
+    }
+  }
+
+  async function handleRecipeImportSection() {
+    if (!window.KaPRecipesPage || typeof window.KaPRecipesPage.importRecipeFromKap !== 'function') {
+      return;
+    }
+
+    try {
+      var result = await window.KaPRecipesPage.importRecipeFromKap();
+      if (result && result.recipeId) {
+        await renderHome();
+      }
+    } catch (error) {
+      await window.KaPUI.ShowAlert({
+        title: 'Import Failed',
+        message: error && error.message ? error.message : 'Unable to import recipe .kap file.'
+      });
     }
   }
 

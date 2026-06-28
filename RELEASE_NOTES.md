@@ -1,3 +1,50 @@
+# Release v2026-06-28-13-58
+
+## Overview
+This release adds recipe import/export workflows and improves recipe-to-grocery-list batching. You can now export and import individual recipe versions, review import impact before applying, and manage batch sizing directly from the recipe view.
+
+## New Features
+- **Recipe Export**: Recipe details now include an Export action with three options: PDF, clipboard text, and `.kap` file download.
+- **Recipe Import**: Recipes now support `.kap` import from the Recipes section, including preflight validation before changes are applied.
+- **Import Review Dialog**: Import now shows a structured review modal with change counts, warnings, and clear Apply/Cancel decisions.
+- **Ingredient Conflict Resolution**: Import now prompts for ingredient name conflicts (same id, different name) with options to use incoming name, keep existing name, or cancel, including apply-to-all support.
+- **Recipe View Batch Control**: Recipe details now include an inline batch size control between tags and ingredients to preview scaled ingredient quantities.
+
+## Improvements
+- **Recipe Import Safety**: Import now detects duplicate payloads, flags older-version imports, and requires explicit confirmation before destructive apply.
+- **Import Feedback**: Import and export outcomes now use non-blocking timed notices with auto-dismiss and manual close.
+- **Recipe-to-List Reuse**: Adding a recipe to groceries now reuses one active recipe-derived list per recipe/version instead of creating duplicates.
+- **Add-to-List Batch Defaults**: Add to Grocery List now defaults batch size to the value selected for the current recipe version.
+- **Additive Recipe Updates**: Re-adding a recipe now supports additive batch behavior for selected items while leaving unselected existing recipe-derived items unchanged.
+
+## Bug Fixes
+- **List Item Quantity Consistency**: Quantity increment/decrement now keep numeric quantity and displayed quantity text synchronized.
+- **Manual Item Merge Safety**: Manual list item adds no longer merge against recipe-derived join records when matching by name.
+
+## Technical Changes
+- Added recipe import/export helpers in the recipe feature, including `.kap` parse/validate, scope resolution, preflight analysis, and upsert logic.
+- Added UI components for export selection, import review, ingredient conflict prompts, timed notices, and reusable batch-size steppers.
+- Extended list service APIs for recipe-derived list lookup/create/update and batch recomputation.
+- Added implementation checklists for recipe import/export and recipe batch-size behavior under `requirements/`.
+
+## Installation
+1. Clone or pull the latest code from the repository.
+2. Open `src/index.html` or `docs/index.html` in a web browser.
+
+## Requirements
+- Modern web browser with ES5 JavaScript support.
+- LocalStorage and IndexedDB support for data persistence.
+- File access permission for `.kap` import/export workflows.
+
+## Documentation
+- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+- For feature documentation and usage guides, see `application-structure.md`.
+- For recipe feature planning notes, see `recipe-feature-definition.md`.
+- Recipe import/export implementation checklist: `requirements/recipe-import-export-implementation-checklist.md`
+- Recipe batch size implementation checklist: `requirements/recipe-batch-size-implementation-checklist.md`
+
+---
+
 # Release v2026-06-23-00-56
 
 ## Overview

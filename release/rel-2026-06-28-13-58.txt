@@ -1,0 +1,4037 @@
+Release timestamp: 2026-06-28-13-58
+Diff source: 2026-06-23-00-56..HEAD
+Generated at: 2026-06-28 09:58:10Z
+diff --git a/.github/copilot-instructions.md b/.github/copilot-instructions.md
+index dc5c68a..ca75a38 100644
+--- a/.github/copilot-instructions.md
++++ b/.github/copilot-instructions.md
+@@ -14,6 +14,8 @@ Use these rules for work in this repository.
+ - Make minimal, focused changes.
+ - Preserve existing structure and wording unless a change is requested.
+ - When summarizing work, distinguish confirmed facts from open questions.
++- During development, treat `src/` as the source of truth.
++- Do not read from, edit, or mirror changes into `docs/` unless the user explicitly asks for deployment or release artifact sync.
+ 
+ ## Documentation Expectations
+ 
+diff --git a/docs/features/lists/lists-page.js b/docs/features/lists/lists-page.js
+index 137e583..6f91c44 100644
+--- a/docs/features/lists/lists-page.js
++++ b/docs/features/lists/lists-page.js
+@@ -379,6 +379,8 @@
+ 
+   async function renderDetailInto(container, record, hooks) {
+     var detailItems = await window.KaPListsService.getListItems(record.id);
++    var isRecipeDerivedList = record.sourceKind === 'recipe';
++    var currentBatchSize = record.batchSize == null ? 1 : Number(record.batchSize);
+     var showCategories = getCategoryViewState('lists', record.id);
+     var activeItems = sortByNameAscending(detailItems.filter(function (detailItem) {
+       return detailItem.isCrossedOff !== true;
+@@ -400,6 +402,28 @@
+         return buildListDetailItemRow(record, detailItem, container, hooks);
+       },
+       actions: [
++        isRecipeDerivedList ? {
++          label: 'Batch Size',
++          onClick: async function () {
++            var input = await window.KaPUI.ShowBatchSizeModal({
++              title: 'Set Batch Size',
++              initialBatchSize: currentBatchSize,
++              confirmLabel: 'Save'
++            });
++
++            if (input === null) {
++              return;
++            }
++
++            try {
++              var updatedList = await window.KaPListsService.setRecipeDerivedBatchSize(record.id, input);
++              await window.KaPListsService.recomputeRecipeDerivedItemsForBatch(record.id);
++              hooks.onAfterChange(updatedList);
++            } catch (error) {
++              await showError(error.message || 'Unable to update batch size.');
++            }
++          }
++        } : null,
+         {
+           label: showCategories ? 'Hide Categories' : 'Show Categories',
+           onClick: async function () {
+@@ -426,7 +450,7 @@
+             }
+           }
+         }
+-      ]
++      ].filter(function (action) { return !!action; })
+     });
+ 
+     if (showCategories && activeItems.length > 0) {
+diff --git a/docs/features/lists/lists-service.js b/docs/features/lists/lists-service.js
+index e26ed35..923aaae 100644
+--- a/docs/features/lists/lists-service.js
++++ b/docs/features/lists/lists-service.js
+@@ -1,5 +1,6 @@
+ (function () {
+   var LIST_TYPE = 'List';
++  var RECIPE_SOURCE_KIND = 'recipe';
+ 
+   function nowIso() {
+     return new Date().toISOString();
+@@ -14,6 +15,58 @@
+     return trimmed;
+   }
+ 
++  function normalizeIsoTimestamp(value) {
++    return value ? String(value) : '';
++  }
++
++  function normalizeRecipeSourceId(value) {
++    var raw = String(value == null ? '' : value).trim();
++    return raw || '';
++  }
++
++  function normalizeBatchSize(batchSize) {
++    var parsed = Number(batchSize);
++    if (!Number.isFinite(parsed) || parsed <= 0) {
++      throw new Error('Batch size must be greater than zero.');
++    }
++
++    return parsed;
++  }
++
++  function isRecipeDerivedList(record) {
++    return !!record && record.type === LIST_TYPE && record.sourceKind === RECIPE_SOURCE_KIND;
++  }
++
++  function isRecipeDerivedJoinRecord(record) {
++    return !!record && record.sourceKind === RECIPE_SOURCE_KIND;
++  }
++
++  function formatScaledQuantityText(baseQuantityText, baseQuantityValue, batchSize) {
++    if (baseQuantityValue == null) {
++      return null;
++    }
++
++    var scaled = Number(baseQuantityValue) * Number(batchSize);
++    if (!Number.isFinite(scaled)) {
++      return null;
++    }
++
++    if (batchSize === 1 && baseQuantityText) {
++      return String(baseQuantityText).trim() || null;
++    }
++
++    var fixed = scaled.toFixed(3);
++    return fixed.replace(/\.?0+$/, '');
++  }
++
++  function getRecipeIngredientSourceKey(ingredient) {
++    if (ingredient && ingredient.id) {
++      return String(ingredient.id);
++    }
++
++    return String((ingredient && ingredient.name) || '').trim().toLowerCase();
++  }
++
+   async function requireListById(listId) {
+     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, listId);
+     if (!record || record.type !== LIST_TYPE) {
+@@ -55,10 +108,6 @@
+     });
+   }
+ 
+-  function normalizeIsoTimestamp(value) {
+-    return value ? String(value) : '';
+-  }
+-
+   async function getAllLists() {
+     var records = await window.KaPDB.readAllFromIndex(
+       window.KaPStores.STORE_NAMES.LIST_RECORDS,
+@@ -86,6 +135,153 @@
+     return record;
+   }
+ 
++  async function findActiveRecipeDerivedList(recipeId, recipeVersionId) {
++    var safeRecipeId = normalizeRecipeSourceId(recipeId);
++    var safeRecipeVersionId = normalizeRecipeSourceId(recipeVersionId);
++    if (!safeRecipeId || !safeRecipeVersionId) {
++      return null;
++    }
++
++    var lists = await getAllLists();
++    return lists.find(function (record) {
++      return isRecipeDerivedList(record)
++        && normalizeRecipeSourceId(record.sourceRecipeId) === safeRecipeId
++        && normalizeRecipeSourceId(record.sourceRecipeVersionId) === safeRecipeVersionId;
++    }) || null;
++  }
++
++  async function createRecipeDerivedList(options) {
++    var recipeId = normalizeRecipeSourceId(options && options.recipeId);
++    var recipeVersionId = normalizeRecipeSourceId(options && options.recipeVersionId);
++    var recipeName = ensureValidListName(options && options.recipeName);
++    var batchSize = normalizeBatchSize(options && options.batchSize);
++
++    if (!recipeId || !recipeVersionId) {
++      throw new Error('Recipe and version are required.');
++    }
++
++    var existing = await findActiveRecipeDerivedList(recipeId, recipeVersionId);
++    if (existing) {
++      return existing;
++    }
++
++    var timestamp = nowIso();
++    var record = {
++      id: window.KaPIds.NewId(),
++      name: recipeName,
++      description: '',
++      type: LIST_TYPE,
++      sourceKind: RECIPE_SOURCE_KIND,
++      sourceRecipeId: recipeId,
++      sourceRecipeVersionId: recipeVersionId,
++      sourceRecipeVersionName: String((options && options.recipeVersionName) || ''),
++      batchSize: batchSize,
++      createdDate: timestamp,
++      updatedDate: timestamp
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return record;
++  }
++
++  async function setRecipeDerivedBatchSize(listId, batchSize) {
++    var record = await requireListById(listId);
++    if (!isRecipeDerivedList(record)) {
++      throw new Error('Batch size can only be changed for recipe-derived lists.');
++    }
++
++    record.batchSize = normalizeBatchSize(batchSize);
++    record.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return record;
++  }
++
++  async function upsertRecipeDerivedItems(listId, ingredients) {
++    var record = await requireListById(listId);
++    if (!isRecipeDerivedList(record)) {
++      throw new Error('Recipe-derived items can only be added to recipe-derived lists.');
++    }
++
++    var batchSize = normalizeBatchSize(record.batchSize == null ? 1 : record.batchSize);
++    var selectedIngredients = Array.isArray(ingredients) ? ingredients : [];
++    var joinRecords = await readJoinRecordsByListId(listId);
++    var existingBySourceKey = {};
++
++    joinRecords.forEach(function (joinRecord) {
++      if (!isRecipeDerivedJoinRecord(joinRecord)) {
++        return;
++      }
++
++      var key = String((joinRecord.sourceRecipeItemKey || '')).trim();
++      if (key) {
++        existingBySourceKey[key] = joinRecord;
++      }
++    });
++
++    for (var i = 0; i < selectedIngredients.length; i++) {
++      var ingredient = selectedIngredients[i];
++      var sourceKey = getRecipeIngredientSourceKey(ingredient);
++      var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(ingredient.name);
++       if (!sourceKey) {
++         continue;
++       }
++
++       var baseQuantityValue = ingredient.quantityValue != null ? Number(ingredient.quantityValue) : (ingredient.quantity == null ? null : Number(ingredient.quantity));
++       if (baseQuantityValue != null && !Number.isFinite(baseQuantityValue)) {
++         baseQuantityValue = null;
++       }
++
++       var nextRecord = existingBySourceKey[sourceKey] || {
++         id: window.KaPIds.NewId(),
++         listRecordId: listId
++       };
++
++      nextRecord.itemId = ingredient.itemId || '';
++      nextRecord.name = safeName;
++       nextRecord.description = window.KaPItemEntryRules.normalizeDescription(ingredient.description);
++       nextRecord.sourceKind = RECIPE_SOURCE_KIND;
++       nextRecord.sourceRecipeId = record.sourceRecipeId;
++       nextRecord.sourceRecipeVersionId = record.sourceRecipeVersionId;
++       nextRecord.sourceRecipeItemKey = sourceKey;
++       nextRecord.recipeBaseQuantityValue = baseQuantityValue;
++       nextRecord.recipeBaseQuantityText = ingredient.quantityText == null ? null : String(ingredient.quantityText).trim() || null;
++       nextRecord.quantityValue = baseQuantityValue == null ? null : baseQuantityValue * batchSize;
++       nextRecord.quantity = nextRecord.quantityValue;
++       nextRecord.quantityText = formatScaledQuantityText(nextRecord.recipeBaseQuantityText, baseQuantityValue, batchSize);
++       nextRecord.unitOfMeasureId = ingredient.unitOfMeasureId || null;
++       nextRecord.isOptional = ingredient.isOptional === true;
++
++       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, nextRecord);
++     }
++   }
++
++  async function recomputeRecipeDerivedItemsForBatch(listId) {
++    var record = await requireListById(listId);
++    if (!isRecipeDerivedList(record)) {
++      throw new Error('Batch size updates only apply to recipe-derived lists.');
++    }
++
++    var batchSize = normalizeBatchSize(record.batchSize == null ? 1 : record.batchSize);
++    var joinRecords = await readJoinRecordsByListId(listId);
++
++    for (var i = 0; i < joinRecords.length; i++) {
++      var joinRecord = joinRecords[i];
++      if (!isRecipeDerivedJoinRecord(joinRecord)) {
++        continue;
++      }
++
++      var baseQuantityValue = joinRecord.recipeBaseQuantityValue == null ? null : Number(joinRecord.recipeBaseQuantityValue);
++      if (baseQuantityValue != null && !Number.isFinite(baseQuantityValue)) {
++        baseQuantityValue = null;
++      }
++
++      joinRecord.quantityValue = baseQuantityValue == null ? null : baseQuantityValue * batchSize;
++      joinRecord.quantity = joinRecord.quantityValue;
++      joinRecord.quantityText = formatScaledQuantityText(joinRecord.recipeBaseQuantityText, baseQuantityValue, batchSize);
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
++    }
++  }
++
+   async function renameList(id, nextName) {
+     var safeName = ensureValidListName(nextName);
+     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+@@ -108,25 +304,44 @@
+   async function getListItems(listId) {
+     await requireListById(listId);
+     var joinRecords = await readJoinRecordsByListId(listId);
++    var uomRecords = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES);
++    var uomById = {};
++    (uomRecords || []).forEach(function (uom) {
++      uomById[uom.id] = uom;
++    });
++
+     var detailItems = await Promise.all(
+       joinRecords.map(async function (joinRecord) {
+-        var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId);
++        var item = joinRecord.itemId
++          ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId)
++          : null;
+         if (!joinRecord.name && item && item.name) {
+           joinRecord.name = item.name;
+           await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+         }
+ 
++        var quantityValue = joinRecord.quantityValue == null
++          ? (joinRecord.quantity == null ? null : Number(joinRecord.quantity))
++          : Number(joinRecord.quantityValue);
++        var uom = joinRecord.unitOfMeasureId ? uomById[joinRecord.unitOfMeasureId] : null;
++
+         return {
+           id: joinRecord.id,
+           listRecordId: joinRecord.listRecordId,
+           itemId: joinRecord.itemId,
+           name: joinRecord.name || (item && item.name) || 'Unknown Item',
+           quantity: joinRecord.quantity,
++          quantityValue: Number.isFinite(quantityValue) ? quantityValue : null,
++          quantityText: joinRecord.quantityText == null ? null : String(joinRecord.quantityText),
++          unitOfMeasureId: joinRecord.unitOfMeasureId || null,
++          uomAbbreviation: uom ? (uom.abbreviation || uom.name || null) : null,
++          isOptional: joinRecord.isOptional === true,
+           description: joinRecord.description,
+           categoryId: (item && item.categoryId) || '',
+           categoryName: (item && item.categoryName) || '',
+           isCrossedOff: joinRecord.isCrossedOff === true,
+           crossedOffAt: normalizeIsoTimestamp(joinRecord.crossedOffAt),
++          sourceKind: joinRecord.sourceKind || '',
+           item: item || null
+         };
+       })
+@@ -148,21 +363,26 @@
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+ 
+     var joinRecords = await readJoinRecordsByListId(listId);
+-    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
++    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords.filter(function (record) {
++      return !isRecipeDerivedJoinRecord(record);
++    }), safeName);
+ 
+     if (existingByName) {
+       existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
++      existingByName.quantityValue = existingByName.quantity;
+       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+       return existingByName;
+     }
+ 
+     await requireItemById(itemId);
++    var normalizedQuantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+     var joinRecord = {
+       id: window.KaPIds.NewId(),
+       listRecordId: listId,
+       itemId: itemId,
+       name: safeName,
+-      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
++      quantityValue: normalizedQuantity,
++      quantity: normalizedQuantity,
+       description: window.KaPItemEntryRules.normalizeDescription(description)
+     };
+ 
+@@ -179,6 +399,7 @@
+ 
+     existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    existing.quantityValue = existing.quantity;
+     existing.description = window.KaPItemEntryRules.normalizeDescription(description);
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+@@ -204,6 +425,7 @@
+ 
+     var current = existing.quantity == null ? 1 : existing.quantity;
+     existing.quantity = current + 1;
++    existing.quantityValue = existing.quantity;
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     return existing;
+   }
+@@ -245,6 +467,7 @@
+ 
+     var current = existing.quantity == null ? 1 : existing.quantity;
+     existing.quantity = Math.max(1, current - 1);
++    existing.quantityValue = existing.quantity;
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     return existing;
+   }
+@@ -262,6 +485,11 @@
+     incrementListItemQuantity: incrementListItemQuantity,
+     decrementListItemQuantity: decrementListItemQuantity,
+     setListItemCrossedOff: setListItemCrossedOff,
+-    deleteCrossedOffItems: deleteCrossedOffItems
++    deleteCrossedOffItems: deleteCrossedOffItems,
++    findActiveRecipeDerivedList: findActiveRecipeDerivedList,
++    createRecipeDerivedList: createRecipeDerivedList,
++    setRecipeDerivedBatchSize: setRecipeDerivedBatchSize,
++    upsertRecipeDerivedItems: upsertRecipeDerivedItems,
++    recomputeRecipeDerivedItemsForBatch: recomputeRecipeDerivedItemsForBatch
+   };
+ })();
+diff --git a/docs/features/recipes/recipes-page.js b/docs/features/recipes/recipes-page.js
+index b1c3fca..24ef808 100644
+--- a/docs/features/recipes/recipes-page.js
++++ b/docs/features/recipes/recipes-page.js
+@@ -1616,12 +1616,19 @@
+               return;
+             }
+ 
++            var activeVersionId = activeVersion ? activeVersion.id : '';
++            var existingRecipeList = await window.KaPListsService.findActiveRecipeDerivedList(record.id, activeVersionId);
++
+             var result = await window.KaPUI.ShowAddToListModal({
+               recipeName: record.name,
+               ingredients: ingredients,
+-              getAllLists: function () {
+-                return window.KaPListsService.getAllLists();
+-              }
++              initialBatchSize: existingRecipeList && existingRecipeList.batchSize != null
++                ? existingRecipeList.batchSize
++                : 1,
++              allowBatchEdit: !existingRecipeList,
++              batchHint: existingRecipeList
++                ? 'This recipe already has a grocery list. Change batch size from that list.'
++                : ''
+             });
+ 
+             if (!result) {
+@@ -1629,21 +1636,18 @@
+             }
+ 
+             try {
+-              var targetListId = result.targetListId;
+-              if (result.isNewList) {
+-                var newList = await window.KaPListsService.createList(result.newListName);
+-                targetListId = newList.id;
++              var targetList = existingRecipeList;
++              if (!targetList) {
++                targetList = await window.KaPListsService.createRecipeDerivedList({
++                  recipeId: record.id,
++                  recipeVersionId: activeVersionId,
++                  recipeVersionName: activeVersion && activeVersion.versionName ? activeVersion.versionName : '',
++                  recipeName: record.name,
++                  batchSize: result.batchSize
++                });
+               }
+ 
+-              await Promise.all(result.selectedIngredients.map(function (ingredient) {
+-                return window.KaPListsService.addItemToList(
+-                  targetListId,
+-                  ingredient.itemId,
+-                  ingredient.name,
+-                  ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity,
+-                  ingredient.description
+-                );
+-              }));
++              await window.KaPListsService.upsertRecipeDerivedItems(targetList.id, result.selectedIngredients);
+             } catch (error) {
+               await showError(error.message || 'Unable to add ingredients to list.');
+             }
+diff --git a/requirements/recipe-batch-size-implementation-checklist.md b/requirements/recipe-batch-size-implementation-checklist.md
+new file mode 100644
+index 0000000..ef0d8b8
+--- /dev/null
++++ b/requirements/recipe-batch-size-implementation-checklist.md
+@@ -0,0 +1,112 @@
++# Recipe Batch Size Controls - Implementation Checklist
++
++## Scope
++Implement recipe-derived grocery list behavior where batch size is list metadata, while preserving current standing-list behavior.
++
++## Phased Execution Order
++
++### Phase 1 - Data and Identity Foundation
++Goal: Introduce list metadata and identity rules without changing user workflows yet.
++- [x] Define recipe-derived list metadata fields (recipe id/version id and batch size).
++- [x] Ensure lookup can find one non-deleted recipe-derived list by recipe/version.
++- [x] Keep standing-list schema/records backward compatible.
++- [x] Confirm import/export support for new metadata fields.
++
++Exit criteria:
++- [x] Existing data loads without migration regressions.
++- [x] Metadata can be saved/read for recipe-derived lists.
++
++### Phase 2 - Recipe Flow Behavior
++Goal: Enforce single-list-per-recipe/version behavior and batch-aware creation/reuse logic.
++- [x] Update recipe add-to-list path to only target recipe-derived lists.
++- [x] Reuse existing non-deleted recipe-derived list for same recipe/version.
++- [x] Create a new recipe-derived list only when none exists.
++- [x] Remove generic existing-list selection from recipe flow.
++- [x] Prevent second non-deleted recipe-derived list for same recipe/version.
++
++Exit criteria:
++- [x] Repeated add-to-list from same recipe/version always resolves to one list.
++- [x] Deleting that list allows a new one to be created next time.
++
++### Phase 3 - Batch Size UX and Additive Item Updates
++Goal: Let users set batch size in recipe add flow and apply additive per-item updates while keeping recipe source data unchanged.
++- [x] Add initial batch size selection during recipe-derived list creation.
++- [x] On repeat add-to-list, allow selecting an additional batch amount.
++- [x] Remove batch size edit control inside recipe-derived list view.
++- [x] Apply additive updates only to selected items; selected existing items increment and selected new items are added.
++- [x] Leave unselected existing recipe-derived items unchanged.
++- [x] Keep manual/ad hoc list items unaffected unless explicitly recipe-derived.
++- [x] Make copy explicit that recipe source quantities are unchanged.
++
++Exit criteria:
++- [x] Repeat add applies additive per-item updates without changing unselected items.
++- [x] Recipe records/version snapshots remain unchanged.
++
++### Phase 4 - Validation and Ship Readiness
++Goal: Validate behavior end-to-end and prepare branch for merge.
++- [x] Run full validation checklist for create/reuse/delete/additional-batch flows.
++- [x] Verify standing-list behavior remains unchanged.
++- [x] Verify mixed list rendering remains clear and error free.
++- [x] Resolve diagnostics in touched files.
++- [x] Update release notes for user-visible behavior changes (via CI/CD process).
++
++Exit criteria:
++- [x] Definition of Done section is fully checked.
++
++## Product Rules (Confirmed)
++- [x] Two list modes remain: recipe-derived lists and standing lists.
++- [x] Both modes appear in the same grocery lists view.
++- [x] Recipe-to-list flow does not target standing lists.
++- [x] A recipe/version can have at most one non-deleted recipe-derived list.
++- [x] "Active" means list exists and is not deleted.
++- [x] Batch size is metadata on recipe-derived lists, not part of identity.
++- [x] Initial batch size is chosen only when creating a recipe-derived list.
++- [x] Additional batch is chosen in recipe add-to-list flow; list detail does not expose batch editing.
++- [x] Adding additional batch does not create a new list.
++- [x] Recipe records and version snapshots are never modified by list batch operations.
++
++## Data Model Checklist
++- [x] Add recipe-derived list metadata fields needed to identify recipe/version association.
++- [x] Add a batch size field to recipe-derived list metadata.
++- [x] Ensure identity lookup uses recipe/version and excludes deleted lists.
++- [x] Keep standing-list records backward compatible.
++- [x] Confirm import/export behavior includes new metadata safely.
++
++## Behavior Checklist
++- [x] From recipe flow: find existing non-deleted recipe-derived list for same recipe/version.
++- [x] If found: reuse that list.
++- [x] If not found: create new recipe-derived list and set initial batch size.
++- [x] Prevent creation of a second non-deleted recipe-derived list for same recipe/version.
++- [x] Support additional-batch updates through the recipe add-to-list flow.
++- [x] Pre-check only items already on the existing recipe-derived list while still showing all ingredients.
++- [x] Keep ad hoc/manual list items unaffected by recipe-derived additive updates unless explicitly flagged as recipe-derived.
++
++## UI Checklist
++- [x] Recipe add-to-list flow includes initial batch size selection.
++- [x] Recipe add-to-list flow no longer offers generic existing-list selection.
++- [x] Existing recipe-derived list view does not expose batch size editing control.
++- [x] Batch size control copy is clear that recipe source is unchanged.
++- [x] Standing-list UI behavior remains unchanged.
++
++## Validation Checklist
++- [x] Create recipe-derived list from recipe/version with selected batch size.
++- [x] Repeat add-to-list from same recipe/version reuses same non-deleted list.
++- [x] Delete recipe-derived list, then add from same recipe/version creates a new list.
++- [x] Re-add from recipe with additional batch and verify selected existing items increment while unselected items remain unchanged.
++- [x] Verify recipe source quantities remain unchanged after list creation and batch edits.
++- [x] Verify standing-list add/edit flows still work as before.
++- [x] Verify mixed view (standing + recipe-derived lists) renders correctly.
++- [x] Verify no runtime errors in startup, navigation, create/edit/delete flows.
++
++## Definition of Done
++- [x] All Product Rules (Confirmed) are satisfied.
++- [x] Core behavior and UI checklist items are implemented and manually validated.
++- [x] Existing standing-list behavior is unchanged for non-recipe workflows.
++- [x] No data-loss regressions observed in recipe/list operations.
++- [x] No unresolved errors in touched files.
++- [x] Release notes updated for user-facing changes (via CI/CD process).
++
++## Explicitly Out of Scope (This Branch)
++- Prompting users to delete recipe-derived lists when all items are removed.
++- Adding a separate active/closed lifecycle state for grocery lists.
++- Supporting multiple simultaneous non-deleted recipe-derived lists for the same recipe/version.
+diff --git a/requirements/recipe-import-export-implementation-checklist.md b/requirements/recipe-import-export-implementation-checklist.md
+new file mode 100644
+index 0000000..b064655
+--- /dev/null
++++ b/requirements/recipe-import-export-implementation-checklist.md
+@@ -0,0 +1,213 @@
++# Recipe Import/Export - Implementation Checklist
++
++## Scope
++Enable users to export a single recipe/version in three formats (PDF, user-readable text, .kap file) and import recipes from .kap files with validation and upsert behavior.
++
++## Phased Execution Order
++
++### Phase 1 - Export Functionality
++Goal: Add export options for recipe/version with three output formats.
++- [x] Add Export action to recipe detail view actions; open an Export Recipe modal.
++- [x] Implement PDF export (<recipe name>_<version>.pdf) with readable layout.
++- [x] Implement text export (user-readable format) copied to clipboard.
++- [x] Implement .kap export (JSON with .kap extension) as file download.
++- [x] Ensure all recipe metadata and ingredients included in exports.
++- [ ] Test export integrity for recipes with various ingredient types and quantities.
++
++Exit criteria:
++- [ ] All three export formats available and downloadable/copyable.
++- [ ] Export content is complete and human-readable.
++- [ ] PDF renders clearly with recipe name, version, and ingredients.
++
++### Phase 2 - Import Functionality
++Goal: Add import capability for .kap files with validation and upsert behavior.
++- [x] Add import button/action to recipes view.
++- [x] Implement .kap file picker and JSON parser.
++- [x] Resolve import scope to recipe/version from file payload before full validation.
++- [x] Validate .kap file structure (required fields: recipe id/version id, instructions, ingredients, etc.).
++- [x] Implement recipe/version upsert logic: if recipe/version id exists, update; else create.
++- [x] Implement instruction upsert by instruction id (incoming overwrites existing when ids match).
++- [x] Implement ingredient upsert by ingredient id (incoming overwrites existing when ids match).
++- [x] If target recipe/version does not exist, run background ingredient id/name compare before apply.
++- [x] Prompt user only when ingredient id exists and ingredient name differs.
++- [x] If no ingredient id/name conflicts are found, import proceeds without extra prompts.
++- [x] Handle version conflicts (duplicate versions, newer versions, older versions).
++- [x] Preserve existing recipe-derived lists when importing updated recipe.
++- [x] Present import options after background validation and before destructive apply.
++- [x] Display validation results to user (success/errors/conflicts).
++- [x] Reject invalid .kap files with clear error messages.
++
++Exit criteria:
++- [ ] Valid .kap files import and upsert recipes successfully.
++- [ ] Invalid .kap files rejected with helpful validation messages.
++- [ ] Duplicate imports handled gracefully (no data loss).
++- [ ] Existing recipe-derived grocery lists unaffected by recipe import.
++
++### Phase 3 - Edge Cases and Data Integrity
++Goal: Validate edge cases and ensure no data loss or corruption.
++- [ ] Test import of recipe that already exists (same version).
++- [ ] Test import of recipe with newer version number.
++- [ ] Test import of recipe with older version number.
++- [ ] Test import when recipe has no ingredients.
++- [ ] Verify recipe source quantities in recipe-derived lists remain correct after import.
++- [ ] Test export/import round-trip integrity (export a recipe, import it, verify data matches).
++- [ ] Verify import does not overwrite other recipes or lists.
++- [ ] Verify PDF/text exports are readable and include all necessary information.
++
++Exit criteria:
++- [ ] Export/import round-trip preserves all recipe data.
++- [ ] No unintended side effects on existing recipes or lists.
++- [ ] Version conflict handling is predictable and documented.
++
++### Phase 4 - Validation and Ship Readiness
++Goal: Validate behavior end-to-end and prepare branch for merge.
++- [ ] Run full validation checklist for export and import workflows.
++- [ ] Verify existing recipe edit/delete/view flows remain unchanged.
++- [ ] Verify no errors in touched files (compile/lint).
++- [ ] Test with various recipe data sizes and ingredient counts.
++- [ ] Update release notes for user-visible changes (via CI/CD process).
++
++Exit criteria:
++- [ ] All export/import workflows tested end-to-end.
++- [ ] Definition of Done section is fully checked.
++
++## Product Rules (To Be Confirmed)
++- [ ] Export action is available on recipe detail view and opens a modal with three format options.
++- [ ] Import button available on recipes view or settings.
++- [ ] .kap file format is JSON with .kap extension for user identification.
++- [ ] Only .kap files accepted for import (not PDF or text files).
++- [ ] Import resolves target recipe/version from payload before full validation and apply.
++- [ ] Import upserts recipe/version: updates if id exists, creates if new.
++- [ ] Import upserts instructions by id and overwrites existing rows on id match.
++- [ ] Import upserts ingredients by id and overwrites existing rows on id match.
++- [ ] For brand-new recipe/version imports, perform ingredient id/name compare and prompt only on id match with different name.
++- [ ] For brand-new recipe/version imports with no ingredient id/name conflicts, add ingredients and create recipe/version without extra prompts.
++- [ ] Version handling: imported version overwrites only that specific version.
++- [ ] Recipes with recipe-derived grocery lists can be imported without losing the lists.
++- [ ] Recipe source snapshots in existing recipe-derived lists are not modified by import.
++- [ ] Export includes recipe name, version name, all ingredients with quantities.
++
++## Data Model Checklist
++- [x] Confirm .kap file structure and required fields for export.
++- [ ] Confirm .kap file parsing expectations for import.
++- [ ] Define validation rules for .kap files (required fields, data types, etc.).
++- [x] Ensure recipe metadata (id, name, versions, ingredients) are exported completely.
++
++## Behavior Checklist
++- [ ] From recipe detail view: user can export to PDF, text, or .kap file.
++- [x] From recipes view: user can import a .kap file.
++- [x] On import: parse payload and resolve target recipe/version scope before full validation.
++- [x] On import: validate .kap file structure.
++- [x] On valid import: upsert recipe/version (update if exists, create if new).
++- [x] On valid import: upsert instructions by id (overwrite on id match).
++- [x] On valid import: upsert ingredients by id (overwrite on id match).
++- [x] On brand-new recipe/version import: run ingredient id/name compare in background.
++- [x] Show user prompt only when an ingredient id matches an existing record but names differ.
++- [x] Conflict prompt options are: Use Incoming Name, Keep Existing Name, Cancel Import.
++- [x] Conflict prompt includes Apply to all remaining conflicts option.
++- [x] Conflict prompt default focus is Keep Existing Name (safe default).
++- [x] Enter activates the currently focused conflict action.
++- [x] Esc maps to Cancel Import.
++- [x] If no ingredient id/name conflicts: add ingredients and build recipe/version automatically.
++- [x] On invalid import: display error message with reason.
++- [x] After import: recipe appears in recipe list immediately.
++- [x] Text export copied to clipboard with success notification.
++- [x] PDF export downloads with filename <recipe name>_<version>.pdf.
++- [x] .kap export downloads with filename <recipe name>_<version>.kap.
++- [x] Export success feedback is non-blocking, auto-dismisses after ~3 seconds, and has manual close (X).
++
++## UI Checklist
++- [ ] Recipe detail view includes export action with three format options.
++- [x] Recipes view includes import action/button.
++- [ ] Import success/error feedback is clear and actionable.
++- [x] Text export confirmation (copied to clipboard) is visible to user.
++- [x] File picker for import defaults to .kap files.
++- [x] Export button copy clearly indicates three export options.
++- [x] Export completion feedback does not block recipe editing flow.
++- [x] Ingredient conflict prompt follows Windows-style keyboard behavior (default focus, Enter, Esc).
++- [x] Apply to all option is visible, keyboard reachable, and announced clearly in prompt copy.
++
++## Validation Checklist
++- [ ] Export recipe to PDF and verify readability.
++- [ ] Export recipe to text clipboard and verify format.
++- [x] Export recipe to .kap and verify JSON structure.
++- [ ] Import valid .kap file and verify recipe is added/updated.
++- [ ] Import .kap for existing recipe and verify it updates correctly.
++- [ ] Import .kap for existing recipe/version and verify instructions are upserted by id.
++- [ ] Import .kap for existing recipe/version and verify ingredients are upserted by id.
++- [ ] Import .kap with brand-new recipe/version and no ingredient id/name conflicts; verify no additional prompt is shown.
++- [ ] Import .kap with brand-new recipe/version and ingredient id/name conflict; verify user prompt is shown.
++- [ ] For conflict prompt: choose Use Incoming Name and verify imported ingredient name overwrites existing name.
++- [ ] For conflict prompt: choose Keep Existing Name and verify existing ingredient name is preserved.
++- [ ] For conflict prompt: choose Cancel Import and verify no writes are applied.
++- [ ] For multiple conflicts: choose Apply to all and verify same decision is applied to remaining conflicts.
++- [ ] With default focus unchanged, press Enter and verify Keep Existing Name is applied.
++- [ ] Press Esc in conflict prompt and verify Cancel Import path with no writes.
++- [ ] Use keyboard-only navigation (Tab/Shift+Tab + Enter) to resolve conflicts successfully.
++- [ ] Import invalid .kap file and verify error message is displayed.
++- [ ] Export/import round-trip for recipe with various ingredient types.
++- [ ] Verify recipe-derived lists remain intact after recipe import.
++- [ ] Verify no errors in startup, recipe views, export/import flows.
++
++## Definition of Done
++- [ ] All Product Rules (Confirmed) are satisfied.
++- [ ] Export and import functionality implemented and manually validated.
++- [ ] Existing recipe workflows remain unchanged.
++- [ ] No data-loss or corruption observed in export/import operations.
++- [ ] No unresolved errors in touched files.
++- [ ] Release notes updated for user-facing changes (via CI/CD process).
++
++## Explicitly Out of Scope (This Branch)
++- Bulk recipe export/import.
++- Recipe sharing via cloud or external services.
++- Recipe versioning history UI (import always targets current active version).
++- Migrating standing lists to recipe-derived lists via import.
++
++## Import Workflow Options (Discussion)
++Proposed flow:
++1. User selects a .kap file.
++2. System parses file and resolves recipe/version scope.
++3. If recipe/version is new, system runs background ingredient id/name compare.
++4. System runs background validation and builds a preflight summary.
++5. System shows Import Review modal with options and impact summary.
++6. If ingredient id/name conflicts exist, user resolves or confirms conflict handling.
++7. User confirms destructive apply.
++8. System executes upsert and shows result summary.
++
++Potential options to present in Import Review modal (to confirm):
++- [ ] Apply import (destructive overwrite by id for recipe/version, instructions, ingredients).
++- [x] No dry-run option in UI; Import Review presents user-friendly apply/cancel decisions.
++- [ ] Cancel import.
++- [ ] Keep existing when id matches (non-destructive mode) instead of overwrite.
++- [ ] Backup current recipe/version to .kap before apply.
++
++Ingredient id/name conflict resolution prompt (Windows-style):
++- [ ] Use Incoming Name.
++- [ ] Keep Existing Name.
++- [ ] Cancel Import.
++- [ ] Apply to all remaining conflicts.
++
++Keyboard contract for conflict prompt (Windows-like):
++- [x] Initial focus lands on Keep Existing Name.
++- [x] Enter triggers the focused action.
++- [x] Esc triggers Cancel Import.
++- [x] Tab/Shift+Tab traverses all actionable controls, including Apply to all.
++
++Prompt copy contract (to implement as written unless updated):
++- [x] Prompt title: Ingredient Name Conflict.
++- [x] Prompt body line 1: Imported ingredient uses the same Id as an existing ingredient, but the names are different.
++- [x] Prompt body line 2 template: Id: {ingredientId}
++- [x] Prompt body line 3 template: Existing: {existingName}
++- [x] Prompt body line 4 template: Incoming: {incomingName}
++- [x] Primary action label: Use Incoming Name.
++- [x] Secondary action label: Keep Existing Name.
++- [x] Cancel action label: Cancel Import.
++- [x] Apply-to-all label: Apply this decision to all remaining conflicts.
++
++Preflight summary fields (to confirm):
++- [x] Target recipe id and name.
++- [x] Target version id and version name.
++- [x] Instruction counts: new, overwrite, unchanged.
++- [x] Ingredient counts: new, overwrite, unchanged.
++- [x] Ingredient id/name conflict count (same id, different name).
++- [x] Blocking validation errors and non-blocking warnings.
+diff --git a/src/features/lists/lists-page.js b/src/features/lists/lists-page.js
+index 137e583..5ef3dc6 100644
+--- a/src/features/lists/lists-page.js
++++ b/src/features/lists/lists-page.js
+@@ -379,6 +379,8 @@
+ 
+   async function renderDetailInto(container, record, hooks) {
+     var detailItems = await window.KaPListsService.getListItems(record.id);
++    var isRecipeDerivedList = record.sourceKind === 'recipe';
++    var currentBatchSize = record.batchSize == null ? 1 : Number(record.batchSize);
+     var showCategories = getCategoryViewState('lists', record.id);
+     var activeItems = sortByNameAscending(detailItems.filter(function (detailItem) {
+       return detailItem.isCrossedOff !== true;
+@@ -426,7 +428,7 @@
+             }
+           }
+         }
+-      ]
++      ].filter(function (action) { return !!action; })
+     });
+ 
+     if (showCategories && activeItems.length > 0) {
+diff --git a/src/features/lists/lists-service.js b/src/features/lists/lists-service.js
+index e26ed35..f9dfa51 100644
+--- a/src/features/lists/lists-service.js
++++ b/src/features/lists/lists-service.js
+@@ -1,5 +1,6 @@
+ (function () {
+   var LIST_TYPE = 'List';
++  var RECIPE_SOURCE_KIND = 'recipe';
+ 
+   function nowIso() {
+     return new Date().toISOString();
+@@ -14,6 +15,71 @@
+     return trimmed;
+   }
+ 
++  function normalizeIsoTimestamp(value) {
++    return value ? String(value) : '';
++  }
++
++  function normalizeRecipeSourceId(value) {
++    var raw = String(value == null ? '' : value).trim();
++    return raw || '';
++  }
++
++  function normalizeBatchSize(batchSize) {
++    var parsed = Number(batchSize);
++    if (!Number.isFinite(parsed) || parsed <= 0) {
++      throw new Error('Batch size must be greater than zero.');
++    }
++
++    return parsed;
++  }
++
++  function isRecipeDerivedList(record) {
++    return !!record && record.type === LIST_TYPE && record.sourceKind === RECIPE_SOURCE_KIND;
++  }
++
++  function isRecipeDerivedJoinRecord(record) {
++    return !!record && record.sourceKind === RECIPE_SOURCE_KIND;
++  }
++
++  function formatScaledQuantityText(baseQuantityText, baseQuantityValue, batchSize) {
++    if (baseQuantityValue == null) {
++      return null;
++    }
++
++    var scaled = Number(baseQuantityValue) * Number(batchSize);
++    if (!Number.isFinite(scaled)) {
++      return null;
++    }
++
++    if (batchSize === 1 && baseQuantityText) {
++      return String(baseQuantityText).trim() || null;
++    }
++
++    var fixed = scaled.toFixed(3);
++    return fixed.replace(/\.?0+$/, '');
++  }
++
++  function formatNumericQuantityText(quantityValue) {
++    if (quantityValue == null) {
++      return null;
++    }
++
++    var numeric = Number(quantityValue);
++    if (!Number.isFinite(numeric)) {
++      return null;
++    }
++
++    return numeric.toFixed(3).replace(/\.?0+$/, '');
++  }
++
++  function getRecipeIngredientSourceKey(ingredient) {
++    if (ingredient && ingredient.id) {
++      return String(ingredient.id);
++    }
++
++    return String((ingredient && ingredient.name) || '').trim().toLowerCase();
++  }
++
+   async function requireListById(listId) {
+     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, listId);
+     if (!record || record.type !== LIST_TYPE) {
+@@ -55,10 +121,6 @@
+     });
+   }
+ 
+-  function normalizeIsoTimestamp(value) {
+-    return value ? String(value) : '';
+-  }
+-
+   async function getAllLists() {
+     var records = await window.KaPDB.readAllFromIndex(
+       window.KaPStores.STORE_NAMES.LIST_RECORDS,
+@@ -86,6 +148,173 @@
+     return record;
+   }
+ 
++  async function findActiveRecipeDerivedList(recipeId, recipeVersionId) {
++    var safeRecipeId = normalizeRecipeSourceId(recipeId);
++    var safeRecipeVersionId = normalizeRecipeSourceId(recipeVersionId);
++    if (!safeRecipeId || !safeRecipeVersionId) {
++      return null;
++    }
++
++    var lists = await getAllLists();
++    return lists.find(function (record) {
++      return isRecipeDerivedList(record)
++        && normalizeRecipeSourceId(record.sourceRecipeId) === safeRecipeId
++        && normalizeRecipeSourceId(record.sourceRecipeVersionId) === safeRecipeVersionId;
++    }) || null;
++  }
++
++  async function createRecipeDerivedList(options) {
++    var recipeId = normalizeRecipeSourceId(options && options.recipeId);
++    var recipeVersionId = normalizeRecipeSourceId(options && options.recipeVersionId);
++    var recipeName = ensureValidListName(options && options.recipeName);
++    var batchSize = normalizeBatchSize(options && options.batchSize);
++
++    if (!recipeId || !recipeVersionId) {
++      throw new Error('Recipe and version are required.');
++    }
++
++    var existing = await findActiveRecipeDerivedList(recipeId, recipeVersionId);
++    if (existing) {
++      return existing;
++    }
++
++    var timestamp = nowIso();
++    var record = {
++      id: window.KaPIds.NewId(),
++      name: recipeName,
++      description: '',
++      type: LIST_TYPE,
++      sourceKind: RECIPE_SOURCE_KIND,
++      sourceRecipeId: recipeId,
++      sourceRecipeVersionId: recipeVersionId,
++      sourceRecipeVersionName: String((options && options.recipeVersionName) || ''),
++      batchSize: batchSize,
++      createdDate: timestamp,
++      updatedDate: timestamp
++    };
++
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return record;
++  }
++
++  async function setRecipeDerivedBatchSize(listId, batchSize) {
++    var record = await requireListById(listId);
++    if (!isRecipeDerivedList(record)) {
++      throw new Error('Batch size can only be changed for recipe-derived lists.');
++    }
++
++    record.batchSize = normalizeBatchSize(batchSize);
++    record.updatedDate = nowIso();
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, record);
++    return record;
++  }
++
++  async function upsertRecipeDerivedItems(listId, ingredients, batchSizeOverride, additiveToExisting) {
++    var record = await requireListById(listId);
++    if (!isRecipeDerivedList(record)) {
++      throw new Error('Recipe-derived items can only be added to recipe-derived lists.');
++    }
++
++    var batchSize = normalizeBatchSize(
++      batchSizeOverride != null ? batchSizeOverride : (record.batchSize == null ? 1 : record.batchSize)
++    );
++    var shouldAddToExisting = additiveToExisting === true;
++    var selectedIngredients = Array.isArray(ingredients) ? ingredients : [];
++    var joinRecords = await readJoinRecordsByListId(listId);
++    var existingBySourceKey = {};
++
++    joinRecords.forEach(function (joinRecord) {
++      if (!isRecipeDerivedJoinRecord(joinRecord)) {
++        return;
++      }
++
++      var key = String((joinRecord.sourceRecipeItemKey || '')).trim();
++      if (key) {
++        existingBySourceKey[key] = joinRecord;
++      }
++    });
++
++    for (var i = 0; i < selectedIngredients.length; i++) {
++      var ingredient = selectedIngredients[i];
++      var sourceKey = getRecipeIngredientSourceKey(ingredient);
++      var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(ingredient.name);
++       if (!sourceKey) {
++         continue;
++       }
++
++       var baseQuantityValue = ingredient.quantityValue != null ? Number(ingredient.quantityValue) : (ingredient.quantity == null ? null : Number(ingredient.quantity));
++       if (baseQuantityValue != null && !Number.isFinite(baseQuantityValue)) {
++         baseQuantityValue = null;
++       }
++
++       var nextRecord = existingBySourceKey[sourceKey] || {
++         id: window.KaPIds.NewId(),
++         listRecordId: listId
++       };
++
++      nextRecord.itemId = ingredient.itemId || '';
++      nextRecord.name = safeName;
++       nextRecord.description = window.KaPItemEntryRules.normalizeDescription(ingredient.description);
++       nextRecord.sourceKind = RECIPE_SOURCE_KIND;
++       nextRecord.sourceRecipeId = record.sourceRecipeId;
++       nextRecord.sourceRecipeVersionId = record.sourceRecipeVersionId;
++       nextRecord.sourceRecipeItemKey = sourceKey;
++       nextRecord.recipeBaseQuantityValue = baseQuantityValue;
++       nextRecord.recipeBaseQuantityText = ingredient.quantityText == null ? null : String(ingredient.quantityText).trim() || null;
++
++       var scaledQuantityValue = baseQuantityValue == null ? null : baseQuantityValue * batchSize;
++       if (shouldAddToExisting && existingBySourceKey[sourceKey]) {
++         var existingQuantityValue = nextRecord.quantityValue != null
++           ? Number(nextRecord.quantityValue)
++           : (nextRecord.quantity == null ? null : Number(nextRecord.quantity));
++         if (existingQuantityValue != null && !Number.isFinite(existingQuantityValue)) {
++           existingQuantityValue = null;
++         }
++
++         nextRecord.quantityValue = scaledQuantityValue == null
++           ? existingQuantityValue
++           : ((existingQuantityValue == null ? 0 : existingQuantityValue) + scaledQuantityValue);
++         nextRecord.quantity = nextRecord.quantityValue;
++         nextRecord.quantityText = formatNumericQuantityText(nextRecord.quantityValue);
++       } else {
++         nextRecord.quantityValue = scaledQuantityValue;
++         nextRecord.quantity = nextRecord.quantityValue;
++         nextRecord.quantityText = formatScaledQuantityText(nextRecord.recipeBaseQuantityText, baseQuantityValue, batchSize);
++       }
++       nextRecord.unitOfMeasureId = ingredient.unitOfMeasureId || null;
++       nextRecord.isOptional = ingredient.isOptional === true;
++
++       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, nextRecord);
++     }
++   }
++
++  async function recomputeRecipeDerivedItemsForBatch(listId) {
++    var record = await requireListById(listId);
++    if (!isRecipeDerivedList(record)) {
++      throw new Error('Batch size updates only apply to recipe-derived lists.');
++    }
++
++    var batchSize = normalizeBatchSize(record.batchSize == null ? 1 : record.batchSize);
++    var joinRecords = await readJoinRecordsByListId(listId);
++
++    for (var i = 0; i < joinRecords.length; i++) {
++      var joinRecord = joinRecords[i];
++      if (!isRecipeDerivedJoinRecord(joinRecord)) {
++        continue;
++      }
++
++      var baseQuantityValue = joinRecord.recipeBaseQuantityValue == null ? null : Number(joinRecord.recipeBaseQuantityValue);
++      if (baseQuantityValue != null && !Number.isFinite(baseQuantityValue)) {
++        baseQuantityValue = null;
++      }
++
++      joinRecord.quantityValue = baseQuantityValue == null ? null : baseQuantityValue * batchSize;
++      joinRecord.quantity = joinRecord.quantityValue;
++      joinRecord.quantityText = formatScaledQuantityText(joinRecord.recipeBaseQuantityText, baseQuantityValue, batchSize);
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
++    }
++  }
++
+   async function renameList(id, nextName) {
+     var safeName = ensureValidListName(nextName);
+     var record = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, id);
+@@ -108,25 +337,45 @@
+   async function getListItems(listId) {
+     await requireListById(listId);
+     var joinRecords = await readJoinRecordsByListId(listId);
++    var uomRecords = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.UNIT_OF_MEASURES);
++    var uomById = {};
++    (uomRecords || []).forEach(function (uom) {
++      uomById[uom.id] = uom;
++    });
++
+     var detailItems = await Promise.all(
+       joinRecords.map(async function (joinRecord) {
+-        var item = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId);
++        var item = joinRecord.itemId
++          ? await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, joinRecord.itemId)
++          : null;
+         if (!joinRecord.name && item && item.name) {
+           joinRecord.name = item.name;
+           await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, joinRecord);
+         }
+ 
++        var quantityValue = joinRecord.quantityValue == null
++          ? (joinRecord.quantity == null ? null : Number(joinRecord.quantity))
++          : Number(joinRecord.quantityValue);
++        var uom = joinRecord.unitOfMeasureId ? uomById[joinRecord.unitOfMeasureId] : null;
++
+         return {
+           id: joinRecord.id,
+           listRecordId: joinRecord.listRecordId,
+           itemId: joinRecord.itemId,
+           name: joinRecord.name || (item && item.name) || 'Unknown Item',
+           quantity: joinRecord.quantity,
++          quantityValue: Number.isFinite(quantityValue) ? quantityValue : null,
++          quantityText: joinRecord.quantityText == null ? null : String(joinRecord.quantityText),
++          unitOfMeasureId: joinRecord.unitOfMeasureId || null,
++          uomAbbreviation: uom ? (uom.abbreviation || uom.name || null) : null,
++          isOptional: joinRecord.isOptional === true,
+           description: joinRecord.description,
+           categoryId: (item && item.categoryId) || '',
+           categoryName: (item && item.categoryName) || '',
+           isCrossedOff: joinRecord.isCrossedOff === true,
+           crossedOffAt: normalizeIsoTimestamp(joinRecord.crossedOffAt),
++          sourceKind: joinRecord.sourceKind || '',
++          sourceRecipeItemKey: joinRecord.sourceRecipeItemKey || null,
+           item: item || null
+         };
+       })
+@@ -148,21 +397,26 @@
+     var safeName = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+ 
+     var joinRecords = await readJoinRecordsByListId(listId);
+-    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords, safeName);
++    var existingByName = window.KaPItemEntryRules.findJoinRecordByName(joinRecords.filter(function (record) {
++      return !isRecipeDerivedJoinRecord(record);
++    }), safeName);
+ 
+     if (existingByName) {
+       existingByName.quantity = window.KaPItemEntryRules.incrementQuantity(existingByName.quantity);
++      existingByName.quantityValue = existingByName.quantity;
+       await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingByName);
+       return existingByName;
+     }
+ 
+     await requireItemById(itemId);
++    var normalizedQuantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
+     var joinRecord = {
+       id: window.KaPIds.NewId(),
+       listRecordId: listId,
+       itemId: itemId,
+       name: safeName,
+-      quantity: window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity),
++      quantityValue: normalizedQuantity,
++      quantity: normalizedQuantity,
+       description: window.KaPItemEntryRules.normalizeDescription(description)
+     };
+ 
+@@ -179,6 +433,7 @@
+ 
+     existing.name = window.KaPItemEntryRules.ensureValidItemEntryName(name);
+     existing.quantity = window.KaPItemEntryRules.normalizeOptionalIntegerQuantity(quantity);
++    existing.quantityValue = existing.quantity;
+     existing.description = window.KaPItemEntryRules.normalizeDescription(description);
+ 
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+@@ -202,8 +457,14 @@
+       throw new Error('List item not found.');
+     }
+ 
+-    var current = existing.quantity == null ? 1 : existing.quantity;
+-    existing.quantity = current + 1;
++    var current = existing.quantity == null ? 1 : Number(existing.quantity);
++    if (!Number.isFinite(current)) {
++      current = 1;
++    }
++
++    existing.quantity = Math.round((current + 0.5) * 1000) / 1000;
++    existing.quantityValue = existing.quantity;
++    existing.quantityText = formatNumericQuantityText(existing.quantity);
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     return existing;
+   }
+@@ -243,8 +504,14 @@
+       throw new Error('List item not found.');
+     }
+ 
+-    var current = existing.quantity == null ? 1 : existing.quantity;
+-    existing.quantity = Math.max(1, current - 1);
++    var current = existing.quantity == null ? 1 : Number(existing.quantity);
++    if (!Number.isFinite(current)) {
++      current = 1;
++    }
++
++    existing.quantity = Math.max(0.5, Math.round((current - 0.5) * 1000) / 1000);
++    existing.quantityValue = existing.quantity;
++    existing.quantityText = formatNumericQuantityText(existing.quantity);
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existing);
+     return existing;
+   }
+@@ -262,6 +529,11 @@
+     incrementListItemQuantity: incrementListItemQuantity,
+     decrementListItemQuantity: decrementListItemQuantity,
+     setListItemCrossedOff: setListItemCrossedOff,
+-    deleteCrossedOffItems: deleteCrossedOffItems
++    deleteCrossedOffItems: deleteCrossedOffItems,
++    findActiveRecipeDerivedList: findActiveRecipeDerivedList,
++    createRecipeDerivedList: createRecipeDerivedList,
++    setRecipeDerivedBatchSize: setRecipeDerivedBatchSize,
++    upsertRecipeDerivedItems: upsertRecipeDerivedItems,
++    recomputeRecipeDerivedItemsForBatch: recomputeRecipeDerivedItemsForBatch
+   };
+ })();
+diff --git a/src/features/main/main-page.js b/src/features/main/main-page.js
+index 1c1834c..517fb0e 100644
+--- a/src/features/main/main-page.js
++++ b/src/features/main/main-page.js
+@@ -278,13 +278,24 @@
+     newButton.type = 'button';
+     newButton.className = 'accordion-new-button';
+     newButton.textContent = '+ New';
++    headerActions.appendChild(newButton);
++
++    if (section.id === 'recipes') {
++      var importButton = document.createElement('button');
++      importButton.type = 'button';
++      importButton.className = 'accordion-new-button';
++      importButton.textContent = 'Import';
++      importButton.addEventListener('click', function (e) {
++        e.stopPropagation();
++        handleRecipeImportSection();
++      });
++      headerActions.appendChild(importButton);
++    }
+     newButton.addEventListener('click', function (e) {
+       e.stopPropagation();
+       handleNewSection(section.id);
+     });
+ 
+-    headerActions.appendChild(newButton);
+-
+     header.appendChild(headerLabel);
+     header.appendChild(headerActions);
+ 
+@@ -473,6 +484,24 @@
+     }
+   }
+ 
++  async function handleRecipeImportSection() {
++    if (!window.KaPRecipesPage || typeof window.KaPRecipesPage.importRecipeFromKap !== 'function') {
++      return;
++    }
++
++    try {
++      var result = await window.KaPRecipesPage.importRecipeFromKap();
++      if (result && result.recipeId) {
++        await renderHome();
++      }
++    } catch (error) {
++      await window.KaPUI.ShowAlert({
++        title: 'Import Failed',
++        message: error && error.message ? error.message : 'Unable to import recipe .kap file.'
++      });
++    }
++  }
++
+   function handleRecordOpen(record, section) {
+     if (section.id === 'lists') {
+       window.KaPRouter.navigate('/list/' + record.id);
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index b1c3fca..2888f19 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -5,6 +5,7 @@
+   var VERSION_SECTION_VISIBLE_KEY = 'kap.recipeVersionSectionVisible';
+   var DESCRIPTION_SECTION_VISIBLE_KEY = 'kap.recipeDescriptionSectionVisible';
+   var TAGS_SECTION_VISIBLE_KEY = 'kap.recipeTagsSectionVisible';
++  var BATCH_SIZE_STATE_KEY = 'kap.recipeBatchSizeState';
+   var LAST_VIEWED_VERSION_KEY = 'kap.recipeLastViewedVersion';
+   var versionNoteFocusTargets = {};
+ 
+@@ -12,6 +13,1169 @@
+     await window.KaPUI.ShowAlert({ title: 'Error', message: message });
+   }
+ 
++  function sanitizeFilePart(value, fallback) {
++    var sanitized = String(value || '')
++      .trim()
++      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
++      .replace(/\s+/g, '_')
++      .replace(/_+/g, '_')
++      .replace(/^_+|_+$/g, '');
++
++    if (!sanitized) {
++      return fallback || 'value';
++    }
++
++    return sanitized;
++  }
++
++  function getRecipeExportBaseName(recipeName, versionName) {
++    var safeRecipeName = sanitizeFilePart(recipeName, 'recipe');
++    var safeVersionName = sanitizeFilePart(versionName, 'version');
++    return safeRecipeName + '_' + safeVersionName;
++  }
++
++  function getIngredientQuantityText(item) {
++    if (item && item.quantityText != null && String(item.quantityText).trim() !== '') {
++      return String(item.quantityText).trim();
++    }
++
++    if (item && item.quantityValue != null && !Number.isNaN(Number(item.quantityValue))) {
++      return String(item.quantityValue);
++    }
++
++    if (item && item.quantity != null && String(item.quantity).trim() !== '') {
++      return String(item.quantity).trim();
++    }
++
++    return '';
++  }
++
++  function formatScaledQuantityText(baseQuantityText, baseQuantityValue, batchSize) {
++    if (baseQuantityValue == null) {
++      return null;
++    }
++
++    var scaled = Number(baseQuantityValue) * Number(batchSize);
++    if (!Number.isFinite(scaled)) {
++      return null;
++    }
++
++    if (Number(batchSize) === 1 && baseQuantityText) {
++      return String(baseQuantityText).trim() || null;
++    }
++
++    return scaled.toFixed(3).replace(/\.?0+$/, '');
++  }
++
++  function getRecipeBatchSizeState() {
++    try {
++      var raw = localStorage.getItem(BATCH_SIZE_STATE_KEY);
++      var parsed = raw ? JSON.parse(raw) : {};
++      return parsed && typeof parsed === 'object' ? parsed : {};
++    } catch (error) {
++      return {};
++    }
++  }
++
++  function writeRecipeBatchSizeState(state) {
++    try {
++      localStorage.setItem(BATCH_SIZE_STATE_KEY, JSON.stringify(state || {}));
++    } catch (error) {
++      // Ignore session persistence failures.
++    }
++  }
++
++  function getRecipeBatchSize(recipeId, versionId) {
++    var state = getRecipeBatchSizeState();
++    var key = String(recipeId || '') + '::' + String(versionId || '');
++    var value = state[key];
++    var numeric = Number(value);
++
++    if (!Number.isFinite(numeric) || numeric <= 0) {
++      return 1;
++    }
++
++    return numeric;
++  }
++
++  function setRecipeBatchSize(recipeId, versionId, batchSize) {
++    var state = getRecipeBatchSizeState();
++    var key = String(recipeId || '') + '::' + String(versionId || '');
++    state[key] = Number(batchSize) > 0 ? Number(batchSize) : 1;
++    writeRecipeBatchSizeState(state);
++  }
++
++  function buildBatchScaledDetailItem(detailItem, batchSize) {
++    var baseQuantityValue = detailItem.quantityValue != null
++      ? detailItem.quantityValue
++      : (detailItem.quantity != null ? detailItem.quantity : null);
++
++    return Object.assign({}, detailItem, {
++      displayQuantityValue: baseQuantityValue == null ? null : Number(baseQuantityValue) * Number(batchSize),
++      displayQuantityText: formatScaledQuantityText(detailItem.quantityText, baseQuantityValue, batchSize),
++      displayUomAbbreviation: detailItem.uomAbbreviation || detailItem.unitOfMeasureAbbreviation || null
++    });
++  }
++
++  function buildIngredientDisplayLine(item) {
++    var quantity = getIngredientQuantityText(item);
++    var uom = '';
++    if (item && item.uomAbbreviation) {
++      uom = String(item.uomAbbreviation).trim();
++    } else if (item && item.unitOfMeasureAbbreviation) {
++      uom = String(item.unitOfMeasureAbbreviation).trim();
++    }
++    var name = item && item.name ? String(item.name).trim() : 'Unnamed ingredient';
++    var optionalSuffix = item && item.isOptional === true ? ' (optional)' : '';
++    var prefix = '';
++
++    if (quantity && uom) {
++      prefix = quantity + ' ' + uom + ' ';
++    } else if (quantity) {
++      prefix = quantity + ' ';
++    } else if (uom) {
++      prefix = uom + ' ';
++    }
++
++    return prefix + name + optionalSuffix;
++  }
++
++  function escapeHtml(value) {
++    return String(value || '')
++      .replace(/&/g, '&amp;')
++      .replace(/</g, '&lt;')
++      .replace(/>/g, '&gt;')
++      .replace(/"/g, '&quot;')
++      .replace(/'/g, '&#39;');
++  }
++
++  function buildRecipeExportPayload(recipeRecord, activeVersion, detailItems, instructions, tags) {
++    var exportedAt = new Date().toISOString();
++    var versionId = activeVersion && activeVersion.id != null ? String(activeVersion.id) : '';
++    var versionName = activeVersion && activeVersion.versionName ? String(activeVersion.versionName) : '';
++
++    return {
++      exportType: 'recipe-version',
++      schemaVersion: 1,
++      exportedAt: exportedAt,
++      recipe: {
++        id: recipeRecord && recipeRecord.id != null ? String(recipeRecord.id) : '',
++        name: recipeRecord && recipeRecord.name ? String(recipeRecord.name) : '',
++        tags: Array.isArray(tags) ? tags.slice() : []
++      },
++      version: {
++        id: versionId,
++        name: versionName,
++        createdDate: activeVersion && activeVersion.createdDate ? String(activeVersion.createdDate) : '',
++        updatedDate: activeVersion && activeVersion.updatedDate ? String(activeVersion.updatedDate) : ''
++      },
++      ingredients: (detailItems || []).map(function (item) {
++        return {
++          id: item && item.id != null ? String(item.id) : '',
++          itemId: item && item.itemId != null ? String(item.itemId) : '',
++          name: item && item.name ? String(item.name) : '',
++          quantityValue: item && item.quantityValue != null ? item.quantityValue : (item ? item.quantity : null),
++          quantityText: item && item.quantityText != null ? String(item.quantityText) : '',
++          unitOfMeasureId: item && item.unitOfMeasureId != null ? String(item.unitOfMeasureId) : '',
++          unitOfMeasureAbbreviation: item && item.uomAbbreviation ? String(item.uomAbbreviation) : '',
++          isOptional: item && item.isOptional === true,
++          description: item && item.description ? String(item.description) : ''
++        };
++      }),
++      instructions: (instructions || []).map(function (step) {
++        return {
++          id: step && step.id != null ? String(step.id) : '',
++          stepNumber: step && step.stepNumber != null ? Number(step.stepNumber) : null,
++          text: step && step.text ? String(step.text) : ''
++        };
++      })
++    };
++  }
++
++  function buildRecipeExportText(payload) {
++    var lines = [];
++    var recipeName = payload && payload.recipe ? payload.recipe.name : 'Recipe';
++    var versionName = payload && payload.version ? payload.version.name : '';
++
++    lines.push(String(recipeName || 'Recipe'));
++    if (versionName) {
++      lines.push('Version: ' + versionName);
++    }
++
++    if (payload && Array.isArray(payload.recipe.tags) && payload.recipe.tags.length > 0) {
++      lines.push('Tags: ' + payload.recipe.tags.join(', '));
++    }
++
++    lines.push('');
++    lines.push('Ingredients');
++
++    if (payload && Array.isArray(payload.ingredients) && payload.ingredients.length > 0) {
++      payload.ingredients.forEach(function (ingredient) {
++        lines.push('- ' + buildIngredientDisplayLine(ingredient));
++      });
++    } else {
++      lines.push('- None');
++    }
++
++    lines.push('');
++    lines.push('Instructions');
++
++    if (payload && Array.isArray(payload.instructions) && payload.instructions.length > 0) {
++      payload.instructions.forEach(function (instruction, index) {
++        var number = instruction && instruction.stepNumber != null
++          ? instruction.stepNumber
++          : (index + 1);
++        lines.push(String(number) + '. ' + String((instruction && instruction.text) || ''));
++      });
++    } else {
++      lines.push('1. No instructions.');
++    }
++
++    return lines.join('\n');
++  }
++
++  function buildRecipeExportPrintHtml(payload, pdfFileName) {
++    var text = buildRecipeExportText(payload);
++    return [
++      '<!doctype html>',
++      '<html>',
++      '<head>',
++      '<meta charset="utf-8">',
++      '<title>' + escapeHtml(pdfFileName) + '</title>',
++      '<style>',
++      'body { font-family: "Segoe UI", Tahoma, sans-serif; margin: 24px; color: #111; }',
++      'h1 { margin: 0 0 12px 0; font-size: 24px; }',
++      'pre { white-space: pre-wrap; line-height: 1.4; font-size: 14px; margin: 0; }',
++      '</style>',
++      '</head>',
++      '<body>',
++      '<pre>' + escapeHtml(text) + '</pre>',
++      '<script>setTimeout(function(){ window.print(); }, 120);<\/script>',
++      '</body>',
++      '</html>'
++    ].join('');
++  }
++
++  function downloadTextFile(fileName, textContent, mimeType) {
++    var blob = new Blob([String(textContent || '')], {
++      type: mimeType || 'text/plain;charset=utf-8'
++    });
++    var link = document.createElement('a');
++    var objectUrl = URL.createObjectURL(blob);
++
++    link.href = objectUrl;
++    link.download = fileName;
++    document.body.appendChild(link);
++    link.click();
++    document.body.removeChild(link);
++
++    setTimeout(function () {
++      URL.revokeObjectURL(objectUrl);
++    }, 0);
++  }
++
++  async function copyTextToClipboard(text) {
++    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
++      await navigator.clipboard.writeText(text);
++      return;
++    }
++
++    var temp = document.createElement('textarea');
++    temp.value = text;
++    temp.setAttribute('readonly', 'readonly');
++    temp.style.position = 'fixed';
++    temp.style.opacity = '0';
++    document.body.appendChild(temp);
++    temp.focus();
++    temp.select();
++
++    var copied = false;
++    try {
++      copied = document.execCommand('copy');
++    } catch (error) {
++      copied = false;
++    }
++
++    document.body.removeChild(temp);
++
++    if (!copied) {
++      throw new Error('Clipboard copy is not available in this browser session.');
++    }
++  }
++
++  async function exportRecipeVersion(record, activeVersion, detailItems, instructions, tags) {
++    var versionName = activeVersion && activeVersion.versionName
++      ? activeVersion.versionName
++      : 'version';
++    var baseName = getRecipeExportBaseName(record && record.name, versionName);
++    var payload = buildRecipeExportPayload(record, activeVersion, detailItems, instructions, tags);
++
++    var exportFormat = await window.KaPUI.ShowRecipeExportModal({
++      title: 'Export Recipe',
++      confirmLabel: 'Export',
++      defaultFormat: 'kap',
++      pdfDescription: 'Create printable file as ' + baseName + '.pdf',
++      textDescription: 'Copy readable text to clipboard for messages and email.',
++      kapDescription: 'Download recipe data as ' + baseName + '.kap'
++    });
++
++    if (!exportFormat) {
++      return;
++    }
++
++    if (exportFormat === 'kap') {
++      downloadTextFile(baseName + '.kap', JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
++      window.KaPUI.ShowTimedNotice({
++        title: 'Export Complete',
++        message: 'Downloaded ' + baseName + '.kap',
++        durationMs: 3000
++      });
++      return;
++    }
++
++    if (exportFormat === 'text') {
++      await copyTextToClipboard(buildRecipeExportText(payload));
++      window.KaPUI.ShowTimedNotice({
++        title: 'Copied',
++        message: 'Recipe text copied to clipboard.',
++        durationMs: 3000
++      });
++      return;
++    }
++
++    if (exportFormat === 'pdf') {
++      var printWindow = window.open('', '_blank');
++      if (!printWindow) {
++        throw new Error('Popup blocked. Allow popups to export PDF.');
++      }
++
++      printWindow.document.open();
++      printWindow.document.write(buildRecipeExportPrintHtml(payload, baseName + '.pdf'));
++      printWindow.document.close();
++
++      window.KaPUI.ShowTimedNotice({
++        title: 'PDF Export Ready',
++        message: 'Use Save as PDF in the print dialog and name the file ' + baseName + '.pdf',
++        durationMs: 3000
++      });
++    }
++  }
++
++  function asTrimmedString(value) {
++    return String(value == null ? '' : value).trim();
++  }
++
++  function asOptionalString(value) {
++    var trimmed = asTrimmedString(value);
++    return trimmed || '';
++  }
++
++  function asOptionalNumber(value) {
++    if (value == null || value === '') {
++      return null;
++    }
++
++    var numeric = Number(value);
++    return Number.isFinite(numeric) ? numeric : null;
++  }
++
++  function normalizeTagListForImport(tags) {
++    var source = Array.isArray(tags) ? tags : [];
++    var seen = {};
++    var normalized = [];
++
++    for (var i = 0; i < source.length; i++) {
++      var tag = asTrimmedString(source[i]).toLowerCase();
++      if (!tag || seen[tag]) {
++        continue;
++      }
++
++      seen[tag] = true;
++      normalized.push(tag);
++    }
++
++    return normalized;
++  }
++
++  function normalizeImportedIngredients(rawIngredients) {
++    var ingredients = Array.isArray(rawIngredients) ? rawIngredients : [];
++
++    return ingredients.map(function (ingredient, index) {
++      var id = asTrimmedString(ingredient && ingredient.id) || window.KaPIds.NewId();
++      var itemId = asTrimmedString(ingredient && ingredient.itemId) || window.KaPIds.NewId();
++      var quantityValue = asOptionalNumber(ingredient && ingredient.quantityValue);
++      var quantityText = asOptionalString(ingredient && ingredient.quantityText);
++
++      return {
++        id: id,
++        itemId: itemId,
++        name: asTrimmedString(ingredient && ingredient.name) || ('Imported ingredient ' + String(index + 1)),
++        quantityValue: quantityValue,
++        quantityText: quantityText,
++        unitOfMeasureId: asOptionalString(ingredient && ingredient.unitOfMeasureId),
++        unitOfMeasureAbbreviation: asOptionalString(ingredient && ingredient.unitOfMeasureAbbreviation),
++        description: asOptionalString(ingredient && ingredient.description),
++        isOptional: ingredient && ingredient.isOptional === true
++      };
++    });
++  }
++
++  function normalizeImportedInstructions(rawInstructions) {
++    var instructions = Array.isArray(rawInstructions) ? rawInstructions : [];
++
++    return instructions.map(function (instruction, index) {
++      var stepNumber = asOptionalNumber(instruction && instruction.stepNumber);
++      return {
++        id: asTrimmedString(instruction && instruction.id) || window.KaPIds.NewId(),
++        stepNumber: stepNumber == null ? (index + 1) : stepNumber,
++        text: asTrimmedString(instruction && instruction.text)
++      };
++    }).filter(function (instruction) {
++      return !!instruction.text;
++    }).sort(function (a, b) {
++      return Number(a.stepNumber || 0) - Number(b.stepNumber || 0);
++    }).map(function (instruction, index) {
++      instruction.stepNumber = index + 1;
++      return instruction;
++    });
++  }
++
++  function validateKapRecipePayload(payload) {
++    if (!payload || typeof payload !== 'object') {
++      throw new Error('Invalid .kap file.');
++    }
++
++    if (String(payload.exportType || '') !== 'recipe-version') {
++      throw new Error('Unsupported .kap file type.');
++    }
++
++    if (!payload.recipe || !payload.version) {
++      throw new Error('.kap file is missing recipe/version data.');
++    }
++
++    var recipeId = asTrimmedString(payload.recipe.id);
++    var versionId = asTrimmedString(payload.version.id);
++    if (!recipeId || !versionId) {
++      throw new Error('.kap file must include recipe id and version id.');
++    }
++
++    var recipeName = asTrimmedString(payload.recipe.name);
++    var versionName = asTrimmedString(payload.version.name);
++    if (!recipeName || !versionName) {
++      throw new Error('.kap file must include recipe and version names.');
++    }
++
++    var ingredients = normalizeImportedIngredients(payload.ingredients);
++    var instructions = normalizeImportedInstructions(payload.instructions);
++
++    return {
++      schemaVersion: Number(payload.schemaVersion || 1),
++      exportedAt: asOptionalString(payload.exportedAt),
++      recipe: {
++        id: recipeId,
++        name: recipeName,
++        tags: normalizeTagListForImport(payload.recipe.tags)
++      },
++      version: {
++        id: versionId,
++        name: versionName,
++        createdDate: asOptionalString(payload.version.createdDate),
++        updatedDate: asOptionalString(payload.version.updatedDate)
++      },
++      ingredients: ingredients,
++      instructions: instructions
++    };
++  }
++
++  function toTimestampMs(value) {
++    var raw = asOptionalString(value);
++    if (!raw) {
++      return null;
++    }
++
++    var parsed = Date.parse(raw);
++    return Number.isFinite(parsed) ? parsed : null;
++  }
++
++  async function countActiveRecipeDerivedLists(recipeId, versionId) {
++    var allRecords = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.LIST_RECORDS);
++    var targetRecipeId = asTrimmedString(recipeId);
++    var targetVersionId = asTrimmedString(versionId);
++
++    var active = allRecords.filter(function (record) {
++      if (!record || String(record.type || '') !== 'List') {
++        return false;
++      }
++
++      if (String(record.sourceKind || '') !== 'recipe') {
++        return false;
++      }
++
++      if (asTrimmedString(record.sourceRecipeId) !== targetRecipeId) {
++        return false;
++      }
++
++      if (asTrimmedString(record.sourceRecipeVersionId) !== targetVersionId) {
++        return false;
++      }
++
++      if (record.isDeleted === true) {
++        return false;
++      }
++
++      if (record.deletedDate && asTrimmedString(record.deletedDate)) {
++        return false;
++      }
++
++      return true;
++    });
++
++    return active.length;
++  }
++
++  function pickKapFile() {
++    return new Promise(function (resolve) {
++      var input = document.createElement('input');
++      input.type = 'file';
++      input.accept = '.kap,application/json';
++      input.style.display = 'none';
++
++      function cleanup() {
++        input.removeEventListener('change', onChange);
++        if (input.parentNode) {
++          document.body.removeChild(input);
++        }
++      }
++
++      function onChange() {
++        var file = input.files && input.files[0] ? input.files[0] : null;
++        cleanup();
++        resolve(file);
++      }
++
++      input.addEventListener('change', onChange);
++      document.body.appendChild(input);
++      input.click();
++    });
++  }
++
++  async function parseKapFile(file) {
++    if (!file) {
++      return null;
++    }
++
++    var fileName = asTrimmedString(file.name).toLowerCase();
++    if (fileName && fileName.lastIndexOf('.kap') < 0) {
++      throw new Error('Only .kap files are supported for recipe import.');
++    }
++
++    var text = await file.text();
++    var payload = JSON.parse(text);
++    return validateKapRecipePayload(payload);
++  }
++
++  async function readRecipeVersionScope(importDraft) {
++    var recipeRecord = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, importDraft.recipe.id);
++    var versionRecord = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, importDraft.version.id);
++    var hasRecipe = !!(recipeRecord && recipeRecord.type === 'Recipe');
++    var hasVersion = !!(versionRecord && versionRecord.recipeId === importDraft.recipe.id);
++
++    return {
++      recipeRecord: hasRecipe ? recipeRecord : null,
++      versionRecord: hasVersion ? versionRecord : null,
++      hasMatch: hasRecipe && hasVersion
++    };
++  }
++
++  function normalizeImportedIngredientForCompare(ingredient, recipeId) {
++    return {
++      id: asTrimmedString(ingredient && ingredient.id),
++      listRecordId: asTrimmedString(recipeId),
++      itemId: asTrimmedString(ingredient && ingredient.itemId),
++      name: asTrimmedString(ingredient && ingredient.name),
++      quantityValue: asOptionalNumber(ingredient && ingredient.quantityValue),
++      quantityText: asOptionalString(ingredient && ingredient.quantityText),
++      unitOfMeasureId: asOptionalString(ingredient && ingredient.unitOfMeasureId),
++      description: asOptionalString(ingredient && ingredient.description),
++      isOptional: ingredient && ingredient.isOptional === true
++    };
++  }
++
++  function normalizeExistingIngredientForCompare(existing) {
++    var quantityValue = existing && existing.quantityValue != null
++      ? asOptionalNumber(existing.quantityValue)
++      : asOptionalNumber(existing && existing.quantity);
++
++    return {
++      id: asTrimmedString(existing && existing.id),
++      listRecordId: asTrimmedString(existing && existing.listRecordId),
++      itemId: asTrimmedString(existing && existing.itemId),
++      name: asTrimmedString(existing && existing.name),
++      quantityValue: quantityValue,
++      quantityText: asOptionalString(existing && existing.quantityText),
++      unitOfMeasureId: asOptionalString(existing && existing.unitOfMeasureId),
++      description: asOptionalString(existing && existing.description),
++      isOptional: existing && existing.isOptional === true
++    };
++  }
++
++  function areIngredientsEquivalent(existing, incoming, recipeId) {
++    var lhs = normalizeExistingIngredientForCompare(existing);
++    var rhs = normalizeImportedIngredientForCompare(incoming, recipeId);
++
++    return lhs.id === rhs.id
++      && lhs.listRecordId === rhs.listRecordId
++      && lhs.itemId === rhs.itemId
++      && lhs.name === rhs.name
++      && lhs.quantityValue === rhs.quantityValue
++      && lhs.quantityText === rhs.quantityText
++      && lhs.unitOfMeasureId === rhs.unitOfMeasureId
++      && lhs.description === rhs.description
++      && lhs.isOptional === rhs.isOptional;
++  }
++
++  function normalizeImportedInstructionForCompare(instruction, recipeId, stepNumber) {
++    return {
++      id: asTrimmedString(instruction && instruction.id),
++      recipeId: asTrimmedString(recipeId),
++      stepNumber: Number(stepNumber || 0),
++      text: asTrimmedString(instruction && instruction.text)
++    };
++  }
++
++  function normalizeExistingInstructionForCompare(instruction) {
++    return {
++      id: asTrimmedString(instruction && instruction.id),
++      recipeId: asTrimmedString(instruction && instruction.recipeId),
++      stepNumber: Number(instruction && instruction.stepNumber || 0),
++      text: asTrimmedString(instruction && instruction.text)
++    };
++  }
++
++  function areInstructionsEquivalent(existing, incoming, recipeId, stepNumber) {
++    var lhs = normalizeExistingInstructionForCompare(existing);
++    var rhs = normalizeImportedInstructionForCompare(incoming, recipeId, stepNumber);
++
++    return lhs.id === rhs.id
++      && lhs.recipeId === rhs.recipeId
++      && lhs.stepNumber === rhs.stepNumber
++      && lhs.text === rhs.text;
++  }
++
++  function findDuplicateIds(records, selector) {
++    var seen = {};
++    var duplicates = [];
++
++    for (var i = 0; i < records.length; i++) {
++      var id = asTrimmedString(selector(records[i]));
++      if (!id) {
++        continue;
++      }
++
++      if (seen[id]) {
++        duplicates.push(id);
++      } else {
++        seen[id] = true;
++      }
++    }
++
++    return duplicates;
++  }
++
++  async function buildIngredientNameConflicts(importDraft, scope) {
++    var conflicts = [];
++    if (scope.hasMatch) {
++      return conflicts;
++    }
++
++    for (var i = 0; i < importDraft.ingredients.length; i++) {
++      var ingredient = importDraft.ingredients[i];
++      var itemId = asTrimmedString(ingredient.itemId);
++      if (!itemId) {
++        continue;
++      }
++
++      var existingItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
++      if (!existingItem) {
++        continue;
++      }
++
++      var existingName = asTrimmedString(existingItem.name);
++      var incomingName = asTrimmedString(ingredient.name);
++      if (!existingName || !incomingName || existingName.toLowerCase() === incomingName.toLowerCase()) {
++        continue;
++      }
++
++      conflicts.push({
++        ingredientId: itemId,
++        existingName: existingName,
++        incomingName: incomingName
++      });
++    }
++
++    return conflicts;
++  }
++
++  async function buildImportPreflight(importDraft, scope, ingredientConflicts) {
++    var preflight = {
++      target: {
++        recipeId: importDraft.recipe.id,
++        recipeName: importDraft.recipe.name,
++        versionId: importDraft.version.id,
++        versionName: importDraft.version.name
++      },
++      versionConflictStatus: scope.hasMatch ? 'same_or_unknown' : 'new_version',
++      versionConflictDetail: '',
++      ingredientCounts: {
++        newCount: 0,
++        overwriteCount: 0,
++        unchangedCount: 0
++      },
++      instructionCounts: {
++        newCount: 0,
++        overwriteCount: 0,
++        unchangedCount: 0
++      },
++      ingredientConflictCount: Array.isArray(ingredientConflicts) ? ingredientConflicts.length : 0,
++      recipeDerivedListsPreservedCount: 0,
++      blockingErrors: [],
++      warnings: []
++    };
++
++    preflight.recipeDerivedListsPreservedCount = await countActiveRecipeDerivedLists(importDraft.recipe.id, importDraft.version.id);
++
++    var ingredientIdDuplicates = findDuplicateIds(importDraft.ingredients, function (ingredient) {
++      return ingredient && ingredient.id;
++    });
++    if (ingredientIdDuplicates.length > 0) {
++      preflight.blockingErrors.push('Duplicate ingredient ids in .kap payload.');
++    }
++
++    var instructionIdDuplicates = findDuplicateIds(importDraft.instructions, function (instruction) {
++      return instruction && instruction.id;
++    });
++    if (instructionIdDuplicates.length > 0) {
++      preflight.blockingErrors.push('Duplicate instruction ids in .kap payload.');
++    }
++
++    if (importDraft.ingredients.length === 0) {
++      preflight.warnings.push('No ingredients were found in this .kap file.');
++    }
++
++    if (importDraft.instructions.length === 0) {
++      preflight.warnings.push('No instructions were found in this .kap file.');
++    }
++
++    for (var i = 0; i < importDraft.ingredients.length; i++) {
++      var incomingIngredient = importDraft.ingredients[i];
++      var existingIngredient = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, incomingIngredient.id);
++
++      if (!existingIngredient) {
++        preflight.ingredientCounts.newCount += 1;
++        continue;
++      }
++
++      if (areIngredientsEquivalent(existingIngredient, incomingIngredient, importDraft.recipe.id)) {
++        preflight.ingredientCounts.unchangedCount += 1;
++      } else {
++        preflight.ingredientCounts.overwriteCount += 1;
++      }
++    }
++
++    for (var j = 0; j < importDraft.instructions.length; j++) {
++      var incomingInstruction = importDraft.instructions[j];
++      var existingInstruction = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, incomingInstruction.id);
++
++      if (!existingInstruction) {
++        preflight.instructionCounts.newCount += 1;
++        continue;
++      }
++
++      if (areInstructionsEquivalent(existingInstruction, incomingInstruction, importDraft.recipe.id, j + 1)) {
++        preflight.instructionCounts.unchangedCount += 1;
++      } else {
++        preflight.instructionCounts.overwriteCount += 1;
++      }
++    }
++
++    if (scope.hasMatch) {
++      preflight.warnings.push('This recipe version already exists. Import will update that version with the incoming file data.');
++
++      var existingUpdatedMs = toTimestampMs(scope.versionRecord && scope.versionRecord.updatedDate);
++      var importedUpdatedMs = toTimestampMs(importDraft.version.updatedDate) || toTimestampMs(importDraft.exportedAt);
++
++      if (existingUpdatedMs != null && importedUpdatedMs != null) {
++        if (importedUpdatedMs < existingUpdatedMs) {
++          preflight.versionConflictStatus = 'older';
++          preflight.versionConflictDetail = 'Imported version timestamp is older than local version timestamp.';
++        } else if (importedUpdatedMs > existingUpdatedMs) {
++          preflight.versionConflictStatus = 'newer';
++          preflight.versionConflictDetail = 'Imported version timestamp is newer than local version timestamp.';
++        } else {
++          preflight.versionConflictStatus = 'same';
++          preflight.versionConflictDetail = 'Imported and local version timestamps match.';
++        }
++      }
++
++      if (preflight.ingredientCounts.newCount === 0
++        && preflight.ingredientCounts.overwriteCount === 0
++        && preflight.instructionCounts.newCount === 0
++        && preflight.instructionCounts.overwriteCount === 0
++        && asTrimmedString(importDraft.version.name) === asTrimmedString(scope.versionRecord && scope.versionRecord.versionName)) {
++        preflight.versionConflictStatus = 'duplicate';
++        preflight.versionConflictDetail = 'Imported payload matches the current recipe/version state.';
++        preflight.warnings.push('This file matches what is already saved. No changes are needed.');
++      }
++    }
++
++    if (preflight.recipeDerivedListsPreservedCount > 0) {
++      preflight.warnings.push('Existing grocery lists created from this recipe version will stay as-is: '
++        + String(preflight.recipeDerivedListsPreservedCount) + '.');
++    }
++
++    return preflight;
++  }
++
++  function buildImportPreflightMessage(preflight) {
++    var lines = [];
++    lines.push('You are importing: ' + preflight.target.recipeName);
++    lines.push('Version: ' + preflight.target.versionName);
++    lines.push('');
++    lines.push('What will change:');
++    lines.push('- Ingredients to add: ' + String(preflight.ingredientCounts.newCount));
++    lines.push('- Ingredients to update: ' + String(preflight.ingredientCounts.overwriteCount));
++    lines.push('- Instructions to add: ' + String(preflight.instructionCounts.newCount));
++    lines.push('- Instructions to update: ' + String(preflight.instructionCounts.overwriteCount));
++
++    if (preflight.ingredientConflictCount > 0) {
++      lines.push('- Ingredient name decisions needed: ' + String(preflight.ingredientConflictCount));
++    }
++
++    if (preflight.recipeDerivedListsPreservedCount > 0) {
++      lines.push('- Existing grocery lists kept: ' + String(preflight.recipeDerivedListsPreservedCount));
++    }
++
++    if (preflight.versionConflictDetail) {
++      lines.push('');
++      lines.push('Version note: ' + preflight.versionConflictDetail);
++    }
++
++    if (preflight.warnings.length > 0) {
++      lines.push('');
++      lines.push('Please review:');
++      for (var i = 0; i < preflight.warnings.length; i++) {
++        lines.push('- ' + preflight.warnings[i]);
++      }
++    }
++
++    lines.push('');
++    lines.push('Important: Applying import will replace matching items in this recipe version.');
++    lines.push('There is no automatic undo for this action.');
++    return lines.join('\n');
++  }
++
++  async function ensureTagRecordByName(tagName) {
++    var normalizedTag = asTrimmedString(tagName).toLowerCase();
++    if (!normalizedTag) {
++      return null;
++    }
++
++    var existingMatches = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.TAGS,
++      window.KaPStores.INDEX_NAMES.TAGS_BY_NAME,
++      normalizedTag
++    );
++
++    if (existingMatches && existingMatches[0]) {
++      return existingMatches[0];
++    }
++
++    var created = {
++      id: window.KaPIds.NewId(),
++      name: normalizedTag,
++      createdDate: new Date().toISOString()
++    };
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.TAGS, created);
++    return created;
++  }
++
++  async function replaceRecipeTagMappings(recipeId, tagNames) {
++    var existingMaps = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
++      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_ID,
++      recipeId
++    );
++
++    for (var i = 0; i < existingMaps.length; i++) {
++      await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, existingMaps[i].id);
++    }
++
++    var tags = normalizeTagListForImport(tagNames);
++    for (var j = 0; j < tags.length; j++) {
++      var tagRecord = await ensureTagRecordByName(tags[j]);
++      if (!tagRecord) {
++        continue;
++      }
++
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, {
++        id: window.KaPIds.NewId(),
++        recipeId: recipeId,
++        tagId: tagRecord.id,
++        createdDate: new Date().toISOString()
++      });
++    }
++  }
++
++  async function resolveIngredientNameConflicts(importDraft, conflicts) {
++    if (!Array.isArray(conflicts) || conflicts.length === 0) {
++      return;
++    }
++
++    var applyAllDecision = null;
++    for (var i = 0; i < conflicts.length; i++) {
++      var conflict = conflicts[i];
++      var itemId = asTrimmedString(conflict.ingredientId);
++      var ingredient = importDraft.ingredients.find(function (entry) {
++        return asTrimmedString(entry && entry.itemId) === itemId;
++      });
++      if (!ingredient) {
++        continue;
++      }
++
++      var existingItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
++      if (!existingItem) {
++        continue;
++      }
++
++      var decision = applyAllDecision;
++      if (!decision) {
++        var userChoice = await window.KaPUI.ShowIngredientNameConflictPrompt({
++          ingredientId: itemId,
++          existingName: asTrimmedString(conflict.existingName),
++          incomingName: asTrimmedString(conflict.incomingName)
++        });
++
++        if (!userChoice || !userChoice.decision) {
++          throw new Error('Import cancelled.');
++        }
++
++        decision = userChoice.decision;
++        if (userChoice.applyToAll === true) {
++          applyAllDecision = decision;
++        }
++      }
++
++      if (decision === 'keep_existing') {
++        ingredient.name = asTrimmedString(conflict.existingName);
++        continue;
++      }
++
++      existingItem.name = asTrimmedString(conflict.incomingName);
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, existingItem);
++    }
++  }
++
++  async function upsertRecipeImportData(importDraft, scope) {
++    var nowIso = new Date().toISOString();
++    var existingRecipe = scope.recipeRecord;
++    var recipeRecord = existingRecipe || {
++      id: importDraft.recipe.id,
++      type: 'Recipe',
++      createdDate: nowIso
++    };
++
++    recipeRecord.name = importDraft.recipe.name;
++    recipeRecord.description = asOptionalString(recipeRecord.description);
++    recipeRecord.tags = normalizeTagListForImport(importDraft.recipe.tags);
++    recipeRecord.updatedDate = nowIso;
++    if (!recipeRecord.createdDate) {
++      recipeRecord.createdDate = nowIso;
++    }
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeRecord);
++
++    await replaceRecipeTagMappings(recipeRecord.id, recipeRecord.tags);
++
++    var incomingIngredientIds = {};
++    for (var i = 0; i < importDraft.ingredients.length; i++) {
++      var ingredient = importDraft.ingredients[i];
++      incomingIngredientIds[ingredient.id] = true;
++
++      var itemRecord = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, ingredient.itemId);
++      if (!itemRecord) {
++        itemRecord = {
++          id: ingredient.itemId,
++          name: ingredient.name,
++          description: ingredient.description || '',
++          categoryId: '',
++          categoryName: ''
++        };
++      }
++
++      itemRecord.name = ingredient.name;
++      if (ingredient.description) {
++        itemRecord.description = ingredient.description;
++      }
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, itemRecord);
++
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, {
++        id: ingredient.id,
++        listRecordId: recipeRecord.id,
++        itemId: ingredient.itemId,
++        name: ingredient.name,
++        quantity: ingredient.quantityValue,
++        quantityValue: ingredient.quantityValue,
++        quantityText: ingredient.quantityText || null,
++        unitOfMeasureId: ingredient.unitOfMeasureId || null,
++        description: ingredient.description || '',
++        isOptional: ingredient.isOptional === true
++      });
++    }
++
++    var existingRecipeItems = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS,
++      window.KaPStores.INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID,
++      recipeRecord.id
++    );
++    for (var j = 0; j < existingRecipeItems.length; j++) {
++      var existingIngredientRecord = existingRecipeItems[j];
++      if (!incomingIngredientIds[existingIngredientRecord.id]) {
++        await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingIngredientRecord.id);
++      }
++    }
++
++    var incomingInstructionIds = {};
++    for (var k = 0; k < importDraft.instructions.length; k++) {
++      var instruction = importDraft.instructions[k];
++      incomingInstructionIds[instruction.id] = true;
++      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, {
++        id: instruction.id,
++        recipeId: recipeRecord.id,
++        stepNumber: k + 1,
++        text: instruction.text,
++        createdDate: nowIso,
++        updatedDate: nowIso
++      });
++    }
++
++    var existingInstructions = await window.KaPDB.readAllFromIndex(
++      window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS,
++      window.KaPStores.INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_ID,
++      recipeRecord.id
++    );
++    for (var m = 0; m < existingInstructions.length; m++) {
++      var existingInstruction = existingInstructions[m];
++      if (!incomingInstructionIds[existingInstruction.id]) {
++        await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, existingInstruction.id);
++      }
++    }
++
++    var snapshotItems = importDraft.ingredients.map(function (ingredient) {
++      return {
++        itemId: ingredient.itemId,
++        name: ingredient.name,
++        quantity: ingredient.quantityValue,
++        quantityValue: ingredient.quantityValue,
++        quantityText: ingredient.quantityText || null,
++        unitOfMeasureId: ingredient.unitOfMeasureId || null,
++        description: ingredient.description || '',
++        categoryId: '',
++        categoryName: '',
++        isOptional: ingredient.isOptional === true
++      };
++    });
++
++    var snapshotInstructions = importDraft.instructions.map(function (instruction, index) {
++      return {
++        instructionId: instruction.id,
++        stepNumber: index + 1,
++        text: instruction.text
++      };
++    });
++
++    var existingVersion = scope.versionRecord;
++    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, {
++      id: importDraft.version.id,
++      recipeId: recipeRecord.id,
++      versionName: importDraft.version.name,
++      parentVersionId: asOptionalString(existingVersion && existingVersion.parentVersionId),
++      createdDate: asOptionalString(existingVersion && existingVersion.createdDate) || nowIso,
++      updatedDate: nowIso,
++      versionNote: 'Imported on ' + new Date().toLocaleString(),
++      snapshotItems: snapshotItems,
++      snapshotInstructions: snapshotInstructions
++    });
++
++    var preservedCountAfterImport = await countActiveRecipeDerivedLists(recipeRecord.id, importDraft.version.id);
++
++    return {
++      recipeId: recipeRecord.id,
++      recipeName: recipeRecord.name,
++      versionId: importDraft.version.id,
++      versionName: importDraft.version.name,
++      ingredientCount: importDraft.ingredients.length,
++      instructionCount: importDraft.instructions.length,
++      recipeDerivedListsPreservedCount: preservedCountAfterImport
++    };
++  }
++
++  async function importRecipeFromKap() {
++    var file = await pickKapFile();
++    if (!file) {
++      return null;
++    }
++
++    var importDraft = await parseKapFile(file);
++    var scope = await readRecipeVersionScope(importDraft);
++    var ingredientConflicts = await buildIngredientNameConflicts(importDraft, scope);
++    var preflight = await buildImportPreflight(importDraft, scope, ingredientConflicts);
++
++    if (preflight.blockingErrors.length > 0) {
++      throw new Error('Import blocked:\n- ' + preflight.blockingErrors.join('\n- '));
++    }
++
++    if (preflight.versionConflictStatus === 'duplicate') {
++      window.KaPUI.ShowTimedNotice({
++        title: 'No Changes Applied',
++        message: 'Imported recipe/version is already up to date.',
++        durationMs: 3000
++      });
++      return null;
++    }
++
++    if (preflight.versionConflictStatus === 'older') {
++      var importOlderConfirmed = await window.KaPUI.ShowConfirm({
++        title: 'Import Older Version?',
++        message: 'This file appears older than what you currently have. Continue only if you want to replace current recipe-version data with older data.',
++        confirmLabel: 'Import Older Version',
++        isDanger: true
++      });
++
++      if (!importOlderConfirmed) {
++        return null;
++      }
++    }
++
++    var reviewDecision = await window.KaPUI.ShowRecipeImportReviewModal({
++      preflight: preflight
++    });
++
++    if (!reviewDecision || reviewDecision.action !== 'apply') {
++      return null;
++    }
++
++    await resolveIngredientNameConflicts(importDraft, ingredientConflicts);
++    var result = await upsertRecipeImportData(importDraft, scope);
++
++    window.KaPUI.ShowTimedNotice({
++      title: 'Import Complete',
++      message: 'Imported ' + result.recipeName + ' (' + result.versionName + '). Preserved recipe-derived lists: '
++        + String(result.recipeDerivedListsPreservedCount || 0),
++      durationMs: 3000
++    });
++
++    return result;
++  }
++
+   function readAccordionState(storageKey) {
+     try {
+       var raw = sessionStorage.getItem(storageKey);
+@@ -517,8 +1681,10 @@
+     });
+   }
+ 
+-  function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion) {
+-    return window.KaPUI.NewDetailItemRow(detailItem, {
++  function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion, batchSize) {
++    var displayDetailItem = buildBatchScaledDetailItem(detailItem, batchSize || 1);
++
++    return window.KaPUI.NewDetailItemRow(displayDetailItem, {
+       onEdit: async function () {
+         if (isViewingLatestVersion) {
+           await editRecipeItemWithPrompt(recipeRecord, detailItem);
+@@ -1221,6 +2387,58 @@
+     }
+   }
+ 
++  function appendBatchSizeSection(container, record, hooks, selectedVersionId, batchSize) {
++    var detailShell = container.querySelector('.detail-shell');
++    if (!detailShell) {
++      return;
++    }
++
++    var section = document.createElement('section');
++    section.className = 'recipe-batch-size-section';
++
++    var row = document.createElement('div');
++    row.className = 'recipe-batch-size-row';
++
++    var textWrap = document.createElement('div');
++    textWrap.className = 'recipe-batch-size-text';
++
++    var label = document.createElement('label');
++    label.className = 'recipe-batch-size-label';
++    label.textContent = 'Batch Size';
++    textWrap.appendChild(label);
++
++    var hint = document.createElement('p');
++    hint.className = 'recipe-batch-size-hint';
++    hint.textContent = 'Recipe source quantities stay the same.';
++    textWrap.appendChild(hint);
++
++    row.appendChild(textWrap);
++
++    var stepperWrap = document.createElement('div');
++    stepperWrap.className = 'recipe-batch-size-stepper-wrap';
++
++    var isInitializing = true;
++    var stepper = window.KaPUI.BuildBatchSizeStepper({
++      initialValue: batchSize,
++      allowEdit: true,
++      onChange: function (value) {
++        if (isInitializing) {
++          return;
++        }
++
++        setRecipeBatchSize(record.id, selectedVersionId, value);
++        renderDetailInto(container, record, hooks, selectedVersionId);
++      }
++    });
++    isInitializing = false;
++
++    stepperWrap.appendChild(stepper.node);
++    row.appendChild(stepperWrap);
++
++    section.appendChild(row);
++    detailShell.appendChild(section);
++  }
++
+   function appendIngredientsSection(container, recipeRecord, detailItems, isViewingLatestVersion, hooks, selectedVersionNumber) {
+     var detailShell = container.querySelector('.detail-shell');
+     var detailList = container.querySelector('[data-detail-item-list]');
+@@ -1591,6 +2809,7 @@
+     var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
+     var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
+     record.tags = recipeTags;
++    var recipeBatchSize = getRecipeBatchSize(record.id, activeVersion ? activeVersion.id : selectedVersionId);
+ 
+     var sortedItems = sortByNameAscending(detailItems);
+     var titleText = record.name;
+@@ -1604,7 +2823,15 @@
+       onAddItem: null,
+       detailItems: sortedItems,
+       itemRowBuilder: function (detailItem) {
+-        return buildRecipeDetailItemRow(record, detailItem, container, hooks, activeVersion ? activeVersion.id : undefined, isViewingLatestVersion);
++        return buildRecipeDetailItemRow(
++          record,
++          detailItem,
++          container,
++          hooks,
++          activeVersion ? activeVersion.id : undefined,
++          isViewingLatestVersion,
++          recipeBatchSize
++        );
+       },
+       actions: [
+         {
+@@ -1616,12 +2843,44 @@
+               return;
+             }
+ 
++            var activeVersionId = activeVersion ? activeVersion.id : '';
++            var recipeBatchSize = getRecipeBatchSize(record.id, activeVersionId);
++            var existingRecipeList = await window.KaPListsService.findActiveRecipeDerivedList(record.id, activeVersionId);
++            var currentBatchSize = existingRecipeList && existingRecipeList.batchSize != null
++              ? Number(existingRecipeList.batchSize)
++              : 1;
++
++            var existingListItems = existingRecipeList
++              ? await window.KaPListsService.getListItems(existingRecipeList.id)
++              : [];
++            var existingSourceKeys = new Set(
++              existingListItems
++                .filter(function (item) { return item.sourceRecipeItemKey; })
++                .map(function (item) { return String(item.sourceRecipeItemKey); })
++            );
++
+             var result = await window.KaPUI.ShowAddToListModal({
+               recipeName: record.name,
+               ingredients: ingredients,
+-              getAllLists: function () {
+-                return window.KaPListsService.getAllLists();
+-              }
++              initialBatchSize: recipeBatchSize,
++              batchLabel: existingRecipeList ? 'Additional Batch' : 'Batch Size',
++              preCheckedKeys: existingRecipeList ? existingSourceKeys : null,
++              batchHintFormatter: existingRecipeList
++                ? function (additionalBatch) {
++                  var pluralizeHelper = function(value) {
++                    var num = Number(value);
++                    return Math.abs(num - 1) < 0.001 ? 'batch' : 'batches';
++                  };
++                  var additional = Number(additionalBatch || 0);
++                  var total = currentBatchSize + additional;
++                  return 'This recipe already has a grocery list. Adding \''
++                    + window.KaPUI.FormatBatchSize(additional)
++                    + '\' ' + pluralizeHelper(additional)
++                    + ' for total \''
++                    + window.KaPUI.FormatBatchSize(total)
++                    + '\' ' + pluralizeHelper(total);
++                }
++                : null
+             });
+ 
+             if (!result) {
+@@ -1629,26 +2888,38 @@
+             }
+ 
+             try {
+-              var targetListId = result.targetListId;
+-              if (result.isNewList) {
+-                var newList = await window.KaPListsService.createList(result.newListName);
+-                targetListId = newList.id;
++              var targetList = existingRecipeList;
++              if (!targetList) {
++                targetList = await window.KaPListsService.createRecipeDerivedList({
++                  recipeId: record.id,
++                  recipeVersionId: activeVersionId,
++                  recipeVersionName: activeVersion && activeVersion.versionName ? activeVersion.versionName : '',
++                  recipeName: record.name,
++                  batchSize: result.batchSize
++                });
+               }
+ 
+-              await Promise.all(result.selectedIngredients.map(function (ingredient) {
+-                return window.KaPListsService.addItemToList(
+-                  targetListId,
+-                  ingredient.itemId,
+-                  ingredient.name,
+-                  ingredient.quantityValue != null ? ingredient.quantityValue : ingredient.quantity,
+-                  ingredient.description
+-                );
+-              }));
++              await window.KaPListsService.upsertRecipeDerivedItems(
++                targetList.id,
++                result.selectedIngredients,
++                existingRecipeList ? result.batchSize : undefined,
++                existingRecipeList ? true : false
++              );
+             } catch (error) {
+               await showError(error.message || 'Unable to add ingredients to list.');
+             }
+           }
+         },
++        {
++          label: 'Export Recipe',
++          onClick: async function () {
++            try {
++              await exportRecipeVersion(record, activeVersion, detailItems, instructions, recipeTags);
++            } catch (error) {
++              await showError(error.message || 'Unable to export recipe.');
++            }
++          }
++        },
+         {
+           label: areVersionsVisible ? 'Hide Versions' : 'Show Versions',
+           onClick: async function () {
+@@ -1708,6 +2979,13 @@
+         allRecipeTags
+       );
+     }
++    appendBatchSizeSection(
++      container,
++      record,
++      hooks,
++      activeVersion ? activeVersion.id : null,
++      recipeBatchSize
++    );
+     appendIngredientsSection(
+       container,
+       record,
+@@ -1729,6 +3007,7 @@
+ 
+   window.KaPRecipesPage = {
+     createRecipe: createRecipe,
++    importRecipeFromKap: importRecipeFromKap,
+     renderInto: renderInto,
+     renderDetailInto: renderDetailInto
+   };
+diff --git a/src/styles.css b/src/styles.css
+index 428e634..f892b96 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -1782,6 +1782,84 @@ body {
+   color: var(--color-text);
+   font-size: 0.95rem;
+   font-family: inherit;
++
++.timed-notice {
++  position: fixed;
++  right: 1rem;
++  bottom: 1rem;
++  z-index: 120;
++  display: flex;
++  align-items: flex-start;
++  gap: 0.5rem;
++  min-width: 16rem;
++  max-width: min(30rem, calc(100vw - 2rem));
++  padding: 0.75rem 0.75rem 0.75rem 0.875rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-surface);
++  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
++  opacity: 0;
++  transform: translateY(0.35rem);
++  transition: opacity 0.18s ease, transform 0.18s ease;
++}
++
++.timed-notice--visible {
++  opacity: 1;
++  transform: translateY(0);
++}
++
++.timed-notice-text {
++  display: grid;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.timed-notice-title {
++  font-size: 0.92rem;
++  font-weight: 600;
++  color: var(--color-text);
++}
++
++.timed-notice-message {
++  margin: 0;
++  font-size: 0.86rem;
++  line-height: 1.35;
++  color: var(--color-muted);
++}
++
++.timed-notice-close {
++  border: none;
++  background: transparent;
++  color: var(--color-muted);
++  width: 1.5rem;
++  height: 1.5rem;
++  margin-left: auto;
++  border-radius: 0.35rem;
++  cursor: pointer;
++  font-size: 1.1rem;
++  line-height: 1;
++  padding: 0;
++}
++
++.timed-notice-close:hover {
++  background: var(--color-surface-light);
++  color: var(--color-text);
++}
++
++.timed-notice-close:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 1px;
++}
++
++@media (max-width: 640px) {
++  .timed-notice {
++    right: 0.75rem;
++    left: 0.75rem;
++    bottom: 0.75rem;
++    min-width: 0;
++    max-width: none;
++  }
++}
+   padding: 0.5625rem 0.75rem;
+ }
+ 
+@@ -1837,6 +1915,61 @@ body {
+   border-color: var(--color-brand);
+ }
+ 
++.modal-hint {
++  margin: 0;
++  color: var(--color-muted);
++  font-size: 0.86rem;
++  line-height: 1.35;
++}
++
++.modal-batch-stepper {
++  display: grid;
++  grid-template-columns: repeat(3, 1fr);
++  align-items: center;
++  width: 12rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-bg);
++  overflow: hidden;
++}
++
++.modal-batch-stepper-button {
++  appearance: none;
++  border: none;
++  background: transparent;
++  color: var(--color-text);
++  font-size: 1.2rem;
++  font-weight: 700;
++  min-height: 2.5rem;
++  cursor: pointer;
++}
++
++.modal-batch-stepper-button:hover:not(:disabled) {
++  background: var(--color-surface);
++}
++
++.modal-batch-stepper-button:disabled {
++  opacity: 0.45;
++  cursor: default;
++}
++
++.modal-batch-stepper-value {
++  text-align: center;
++  font-size: 1rem;
++  font-weight: 600;
++  color: var(--color-text);
++  border-left: 1px solid var(--color-border);
++  border-right: 1px solid var(--color-border);
++  min-height: 2.5rem;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++}
++
++.modal-batch-stepper--locked .modal-batch-stepper-value {
++  color: var(--color-muted);
++}
++
+ .modal-message {
+   margin: 0;
+   color: var(--color-text);
+@@ -1884,6 +2017,171 @@ body {
+   line-height: 1.4;
+ }
+ 
++.modal-conflict-form {
++  gap: 0.5rem;
++}
++
++.modal-conflict-apply-row {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.5rem;
++  margin-top: 0.25rem;
++  color: var(--color-text);
++  font-size: 0.9rem;
++}
++
++.modal-conflict-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
++  margin-top: 0.5rem;
++}
++
++.modal-conflict-actions .modal-button {
++  justify-self: auto;
++}
++
++.modal-card--import-review {
++  max-width: 640px;
++}
++
++.modal-import-review {
++  display: grid;
++  gap: 0.75rem;
++}
++
++.modal-import-review-intro {
++  margin: 0;
++}
++
++.modal-import-section {
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  padding: 0.625rem 0.75rem;
++  display: grid;
++  gap: 0.5rem;
++  background: var(--color-bg);
++}
++
++.modal-import-section-title {
++  margin: 0;
++  font-size: 0.95rem;
++  font-weight: 600;
++  color: var(--color-text);
++}
++
++.modal-import-line {
++  margin: 0;
++  font-size: 0.9rem;
++  color: var(--color-text);
++}
++
++.modal-import-metrics {
++  display: grid;
++  gap: 0.5rem;
++}
++
++.modal-import-metric {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 0.75rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.5rem 0.625rem;
++  background: var(--color-surface);
++}
++
++.modal-import-metric-label {
++  font-size: 0.88rem;
++  color: var(--color-text);
++}
++
++.modal-import-metric-value {
++  min-width: 1.75rem;
++  text-align: right;
++  font-size: 0.92rem;
++  font-weight: 700;
++  color: var(--color-brand);
++}
++
++.modal-import-note {
++  margin: 0;
++  font-size: 0.88rem;
++  color: var(--color-muted);
++}
++
++.modal-import-warning {
++  border-color: #e4b4af;
++}
++
++.modal-import-warning-list {
++  margin: 0;
++  padding-left: 1.125rem;
++  display: grid;
++  gap: 0.25rem;
++  color: var(--color-text);
++  font-size: 0.88rem;
++  line-height: 1.35;
++}
++
++.modal-import-danger-note {
++  margin: 0;
++  border: 1px solid #e4b4af;
++  border-radius: 0.5rem;
++  padding: 0.625rem 0.75rem;
++  background: rgba(228, 180, 175, 0.12);
++  color: var(--color-text);
++  font-size: 0.88rem;
++  line-height: 1.35;
++}
++
++.modal-import-decisions {
++  display: grid;
++  gap: 0.5rem;
++}
++
++.modal-import-decision {
++  width: 100%;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-surface-light);
++  color: var(--color-text);
++  text-align: left;
++  padding: 0.625rem 0.75rem;
++  display: grid;
++  gap: 0.25rem;
++  cursor: pointer;
++}
++
++.modal-import-decision:hover {
++  border-color: var(--color-brand);
++  background: var(--color-surface-light-hover);
++}
++
++.modal-import-decision:focus-visible {
++  outline: 2px solid var(--color-brand);
++  outline-offset: 2px;
++}
++
++.modal-import-decision--danger {
++  border-color: #e4b4af;
++}
++
++.modal-import-decision--safe {
++  border-color: var(--color-border);
++}
++
++.modal-import-decision-title {
++  font-size: 0.94rem;
++  font-weight: 600;
++}
++
++.modal-import-decision-description {
++  font-size: 0.85rem;
++  color: var(--color-muted);
++}
++
+ .modal-link {
+   color: var(--color-brand);
+   text-decoration: underline;
+@@ -2213,6 +2511,48 @@ body {
+   align-items: center;
+   gap: 0.5rem;
+   min-width: 0;
++
++.recipe-batch-size-section {
++  display: grid;
++  gap: 0.5rem;
++  margin: 0.5rem 0 0.875rem 0;
++  padding: 0.75rem 0.875rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.625rem;
++  background: var(--color-surface);
++}
++
++.recipe-batch-size-row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 1rem;
++  flex-wrap: wrap;
++}
++
++.recipe-batch-size-text {
++  display: grid;
++  gap: 0.25rem;
++  min-width: 0;
++}
++
++.recipe-batch-size-label {
++  color: var(--color-text);
++  font-size: 0.95rem;
++  font-weight: 600;
++}
++
++.recipe-batch-size-hint {
++  margin: 0;
++  color: var(--color-muted);
++  font-size: 0.86rem;
++  line-height: 1.35;
++}
++
++.recipe-batch-size-stepper-wrap {
++  display: inline-flex;
++  align-items: center;
++}
+ }
+ 
+ .recipe-tags-picker {
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index 5b165a7..99af049 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -1,5 +1,6 @@
+ (function () {
+   var activeOverflowMenu = null;
++  var activeTimedNotice = null;
+ 
+   document.addEventListener('click', function (event) {
+     if (!activeOverflowMenu) {
+@@ -286,9 +287,13 @@
+     var qtyPillNode = node.querySelector('.detail-item-qty-pill');
+     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
+     var descriptionText = detailItem.description || '';
+-    var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
+-    var currentQuantityText = detailItem.quantityText == null ? null : String(detailItem.quantityText);
+-    var uomAbbreviation = detailItem.uomAbbreviation || null;
++    var currentQuantity = detailItem.displayQuantityValue != null
++      ? detailItem.displayQuantityValue
++      : (detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity);
++    var currentQuantityText = detailItem.displayQuantityText != null
++      ? String(detailItem.displayQuantityText)
++      : (detailItem.quantityText == null ? null : String(detailItem.quantityText));
++    var uomAbbreviation = detailItem.displayUomAbbreviation || detailItem.uomAbbreviation || null;
+     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
+     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
+ 
+@@ -2249,8 +2254,147 @@
+     });
+   }
+ 
++  function normalizeBatchSizeValue(value) {
++    var numeric = Number(value);
++    if (!Number.isFinite(numeric) || numeric <= 0) {
++      return 1;
++    }
++
++    var stepped = Math.round(numeric * 2) / 2;
++    return Math.max(0.5, stepped);
++  }
++
++  function formatBatchSizeFraction(value) {
++    var normalized = normalizeBatchSizeValue(value);
++    var whole = Math.floor(normalized);
++    var hasHalf = Math.abs(normalized - whole - 0.5) < 0.001;
++
++    if (hasHalf) {
++      if (whole <= 0) {
++        return '1/2';
++      }
++
++      return String(whole) + ' 1/2';
++    }
++
++    return String(whole);
++  }
++
++  function buildBatchSizeStepper(options) {
++    var canEdit = options.allowEdit !== false;
++    var value = normalizeBatchSizeValue(options.initialValue);
++
++    var stepper = document.createElement('div');
++    stepper.className = 'modal-batch-stepper' + (canEdit ? '' : ' modal-batch-stepper--locked');
++
++    var decreaseButton = document.createElement('button');
++    decreaseButton.type = 'button';
++    decreaseButton.className = 'modal-batch-stepper-button';
++    decreaseButton.textContent = '-';
++    decreaseButton.setAttribute('aria-label', 'Decrease batch size');
++
++    var valueNode = document.createElement('div');
++    valueNode.className = 'modal-batch-stepper-value';
++    valueNode.textContent = formatBatchSizeFraction(value);
++
++    var increaseButton = document.createElement('button');
++    increaseButton.type = 'button';
++    increaseButton.className = 'modal-batch-stepper-button';
++    increaseButton.textContent = '+';
++    increaseButton.setAttribute('aria-label', 'Increase batch size');
++
++    function refresh() {
++      valueNode.textContent = formatBatchSizeFraction(value);
++      decreaseButton.disabled = !canEdit || value <= 0.5;
++      increaseButton.disabled = !canEdit;
++      if (typeof options.onChange === 'function') {
++        options.onChange(value);
++      }
++    }
++
++    increaseButton.addEventListener('click', function () {
++      if (!canEdit) {
++        return;
++      }
++
++      value = normalizeBatchSizeValue(value + 0.5);
++      refresh();
++    });
++
++    decreaseButton.addEventListener('click', function () {
++      if (!canEdit) {
++        return;
++      }
++
++      value = normalizeBatchSizeValue(value - 0.5);
++      refresh();
++    });
++
++    stepper.appendChild(decreaseButton);
++    stepper.appendChild(valueNode);
++    stepper.appendChild(increaseButton);
++    refresh();
++
++    return {
++      node: stepper,
++      focus: function () {
++        if (canEdit) {
++          increaseButton.focus();
++        }
++      },
++      getValue: function () {
++        return value;
++      }
++    };
++  }
++
++  function ShowBatchSizeModal(config) {
++    return showModal(function (bodyNode, confirmButton, cancelButton) {
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var label = document.createElement('label');
++      label.className = 'modal-field-label';
++      label.textContent = config.label || 'Batch Size';
++      form.appendChild(label);
++
++      var stepper = buildBatchSizeStepper({
++        initialValue: config.initialBatchSize == null ? 1 : config.initialBatchSize,
++        allowEdit: config.allowBatchEdit !== false
++      });
++      form.appendChild(stepper.node);
++
++      if (config.message) {
++        var messageNode = document.createElement('p');
++        messageNode.className = 'modal-hint';
++        messageNode.textContent = config.message;
++        form.appendChild(messageNode);
++      }
++
++      bodyNode.appendChild(form);
++
++      requestAnimationFrame(function () {
++        if (config.allowBatchEdit === false) {
++          cancelButton.focus();
++          return;
++        }
++
++        stepper.focus();
++      });
++
++      return function () {
++        return stepper.getValue();
++      };
++    }, {
++      title: config.title || 'Set Batch Size',
++      confirmLabel: config.confirmLabel || 'Save',
++      cancelValue: null,
++      isDanger: false
++    });
++  }
++
+   function ShowAddToListModal(config) {
+-    // config: { recipeName, ingredients, getAllLists }
++    // config: { recipeName, ingredients, initialBatchSize, batchLabel, batchHintFormatter }
+     return new Promise(function (resolve) {
+       var node = newFromTemplate('modal-template');
+       var overlay = node;
+@@ -2269,6 +2413,31 @@
+       var form = document.createElement('div');
+       form.className = 'modal-item-form';
+ 
++      var batchHintNode = null;
++
++      var batchLabel = document.createElement('label');
++      batchLabel.className = 'modal-field-label';
++      batchLabel.textContent = config.batchLabel || 'Batch Size';
++      form.appendChild(batchLabel);
++
++      var batchStepper = buildBatchSizeStepper({
++        initialValue: config.initialBatchSize == null ? 1 : config.initialBatchSize,
++        allowEdit: true,
++        onChange: function (value) {
++          if (batchHintNode && typeof config.batchHintFormatter === 'function') {
++            batchHintNode.textContent = String(config.batchHintFormatter(value) || '');
++          }
++        }
++      });
++      form.appendChild(batchStepper.node);
++
++      if (typeof config.batchHintFormatter === 'function') {
++        batchHintNode = document.createElement('p');
++        batchHintNode.className = 'modal-hint';
++        batchHintNode.textContent = String(config.batchHintFormatter(batchStepper.getValue()) || '');
++        form.appendChild(batchHintNode);
++      }
++
+       // ---- Ingredients ----
+       var ingredientsLabel = document.createElement('span');
+       ingredientsLabel.className = 'modal-field-label';
+@@ -2285,7 +2454,10 @@
+ 
+         var checkbox = document.createElement('input');
+         checkbox.type = 'checkbox';
+-        checkbox.checked = true;
++        var ingredientKey = ingredient.id
++          ? String(ingredient.id)
++          : String((ingredient.name || '')).trim().toLowerCase();
++        checkbox.checked = config.preCheckedKeys ? config.preCheckedKeys.has(ingredientKey) : true;
+         checkbox.className = 'modal-checklist-checkbox';
+ 
+         var nameNode = document.createElement('span');
+@@ -2314,61 +2486,6 @@
+ 
+       form.appendChild(ingredientList);
+ 
+-      // ---- List mode toggle ----
+-      var listLabel = document.createElement('span');
+-      listLabel.className = 'modal-field-label';
+-      listLabel.textContent = 'Target List';
+-      form.appendChild(listLabel);
+-
+-      var toggleGroup = document.createElement('div');
+-      toggleGroup.className = 'modal-toggle-group';
+-
+-      var existingButton = document.createElement('button');
+-      existingButton.type = 'button';
+-      existingButton.className = 'modal-toggle-button is-active';
+-      existingButton.textContent = 'Existing List';
+-
+-      var newButton = document.createElement('button');
+-      newButton.type = 'button';
+-      newButton.className = 'modal-toggle-button';
+-      newButton.textContent = 'New List';
+-
+-      toggleGroup.appendChild(existingButton);
+-      toggleGroup.appendChild(newButton);
+-      form.appendChild(toggleGroup);
+-
+-      // ---- Existing list section ----
+-      var existingSection = document.createElement('div');
+-
+-      var targetInputWrapper = document.createElement('div');
+-      targetInputWrapper.className = 'modal-input-wrapper';
+-
+-      var targetInput = document.createElement('input');
+-      targetInput.type = 'text';
+-      targetInput.className = 'modal-input';
+-      targetInput.placeholder = 'Search grocery lists';
+-
+-      var targetSuggestionsList = document.createElement('div');
+-      targetSuggestionsList.className = 'modal-suggestions';
+-      targetSuggestionsList.hidden = true;
+-
+-      targetInputWrapper.appendChild(targetInput);
+-      targetInputWrapper.appendChild(targetSuggestionsList);
+-      existingSection.appendChild(targetInputWrapper);
+-      form.appendChild(existingSection);
+-
+-      // ---- New list section ----
+-      var newSection = document.createElement('div');
+-      newSection.hidden = true;
+-
+-      var newListInput = document.createElement('input');
+-      newListInput.type = 'text';
+-      newListInput.className = 'modal-input';
+-      newListInput.value = config.recipeName || '';
+-      newListInput.placeholder = 'New list name';
+-      newSection.appendChild(newListInput);
+-      form.appendChild(newSection);
+-
+       var errorNode = document.createElement('p');
+       errorNode.className = 'modal-error';
+       form.appendChild(errorNode);
+@@ -2376,98 +2493,8 @@
+       bodyNode.appendChild(form);
+ 
+       // ---- State ----
+-      var mode = 'existing';
+-      var selectedList = null;
+-      var currentSuggestions = [];
+-
+-      function setMode(nextMode) {
+-        mode = nextMode;
+-        existingButton.classList.toggle('is-active', mode === 'existing');
+-        newButton.classList.toggle('is-active', mode === 'new');
+-        existingSection.hidden = mode !== 'existing';
+-        newSection.hidden = mode !== 'new';
+-        errorNode.textContent = '';
+-        if (mode === 'existing') {
+-          targetInput.focus();
+-        } else {
+-          newListInput.focus();
+-          newListInput.select();
+-        }
+-      }
+-
+-      existingButton.addEventListener('click', function () { setMode('existing'); });
+-      newButton.addEventListener('click', function () { setMode('new'); });
+-
+-      // ---- Suggestions ----
+-      function renderSuggestions() {
+-        targetSuggestionsList.replaceChildren();
+-        var query = String(targetInput.value || '').trim().toLowerCase();
+-        var filtered = currentSuggestions.filter(function (list) {
+-          return !query || String(list.name || '').toLowerCase().indexOf(query) !== -1;
+-        });
+-
+-        if (filtered.length === 0) {
+-          targetSuggestionsList.hidden = true;
+-          return;
+-        }
+-
+-        targetSuggestionsList.hidden = false;
+-        filtered.slice(0, 8).forEach(function (list) {
+-          var row = document.createElement('div');
+-          row.className = 'modal-suggestion-row';
+-
+-          var btn = document.createElement('button');
+-          btn.type = 'button';
+-          btn.className = 'modal-suggestion-main';
+-
+-          var content = document.createElement('div');
+-          content.className = 'modal-suggestion-content';
+-
+-          var nameNode = document.createElement('div');
+-          nameNode.className = 'modal-suggestion-name';
+-          nameNode.textContent = list.name;
+-          content.appendChild(nameNode);
+-          btn.appendChild(content);
+-
+-          btn.addEventListener('click', function () {
+-            selectedList = { id: list.id, name: list.name };
+-            targetInput.value = list.name;
+-            currentSuggestions = [];
+-            renderSuggestions();
+-            errorNode.textContent = '';
+-          });
+-
+-          row.appendChild(btn);
+-          targetSuggestionsList.appendChild(row);
+-        });
+-      }
+-
+-      function loadSuggestions() {
+-        return Promise.resolve(config.getAllLists ? config.getAllLists() : []).then(function (lists) {
+-          currentSuggestions = (lists || []).slice().sort(function (a, b) {
+-            return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+-          });
+-          renderSuggestions();
+-        });
+-      }
+-
+-      function closeSuggestions() {
+-        currentSuggestions = [];
+-        renderSuggestions();
+-      }
+-
+-      targetInput.addEventListener('focus', function () {
+-        loadSuggestions().catch(function () {});
+-      });
+-      targetInput.addEventListener('input', function () {
+-        selectedList = null;
+-        loadSuggestions().catch(function () {});
+-      });
+-
+-      // ---- Validate & close ----
+       function close(result) {
+         document.removeEventListener('keydown', onKeyDown);
+-        document.removeEventListener('click', onDocumentClick);
+         document.body.removeChild(node);
+         resolve(result);
+       }
+@@ -2484,49 +2511,18 @@
+           return;
+         }
+ 
+-        if (mode === 'new') {
+-          var newName = String(newListInput.value || '').trim();
+-          if (!newName) {
+-            errorNode.textContent = 'List name is required.';
+-            newListInput.focus();
+-            return;
+-          }
+-          close({ selectedIngredients: selectedIngredients, isNewList: true, newListName: newName, targetListId: null });
+-          return;
+-        }
+-
+-        var typedName = String(targetInput.value || '').trim();
+-        if (!typedName) {
+-          errorNode.textContent = 'Select a grocery list.';
+-          targetInput.focus();
+-          return;
+-        }
+-
+-        if (!selectedList || String(selectedList.name || '').trim().toLowerCase() !== typedName.toLowerCase()) {
+-          errorNode.textContent = 'Select a list from the suggestions.';
+-          targetInput.focus();
+-          return;
+-        }
+-
+-        close({ selectedIngredients: selectedIngredients, isNewList: false, newListName: null, targetListId: selectedList.id });
++        close({
++          selectedIngredients: selectedIngredients,
++          batchSize: batchStepper.getValue()
++        });
+       }
+ 
+       function onKeyDown(event) {
+         if (event.key === 'Escape') {
+-          if (!targetSuggestionsList.hidden) {
+-            closeSuggestions();
+-            return;
+-          }
+           close(null);
+         }
+       }
+ 
+-      function onDocumentClick(event) {
+-        if (!targetSuggestionsList.hidden && !targetInputWrapper.contains(event.target)) {
+-          closeSuggestions();
+-        }
+-      }
+-
+       overlay.addEventListener('click', function (event) {
+         if (event.target === overlay) { close(null); }
+       });
+@@ -2534,12 +2530,10 @@
+       confirmButton.addEventListener('click', function () { validateAndClose(); });
+ 
+       document.addEventListener('keydown', onKeyDown);
+-      document.addEventListener('click', onDocumentClick);
+       document.body.appendChild(node);
+ 
+       requestAnimationFrame(function () {
+-        targetInput.focus();
+-        loadSuggestions().catch(function () {});
++        batchStepper.focus();
+       });
+     });
+   }
+@@ -2850,6 +2844,423 @@
+     });
+   }
+ 
++  function ShowRecipeExportModal(config) {
++    return showModal(function (bodyNode, confirmButton) {
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var options = [
++        {
++          value: 'pdf',
++          title: 'PDF File',
++          description: String(config.pdfDescription || 'Download a printable PDF file.')
++        },
++        {
++          value: 'text',
++          title: 'Copy as Text',
++          description: String(config.textDescription || 'Copy a user-readable recipe to your clipboard.')
++        },
++        {
++          value: 'kap',
++          title: '.kap File',
++          description: String(config.kapDescription || 'Download recipe data in .kap format.')
++        }
++      ];
++
++      var selectedValue = String(config.defaultFormat || 'kap');
++      var foundDefault = false;
++
++      options.forEach(function (option) {
++        if (option.value === selectedValue) {
++          foundDefault = true;
++        }
++      });
++
++      if (!foundDefault) {
++        selectedValue = 'kap';
++      }
++
++      options.forEach(function (option) {
++        var label = document.createElement('label');
++        label.className = 'modal-choice-row';
++
++        var radio = document.createElement('input');
++        radio.type = 'radio';
++        radio.name = 'kap-recipe-export-format';
++        radio.value = option.value;
++        radio.className = 'modal-choice-radio';
++        radio.checked = option.value === selectedValue;
++        radio.addEventListener('change', function () {
++          if (radio.checked) {
++            selectedValue = option.value;
++          }
++        });
++        label.appendChild(radio);
++
++        var content = document.createElement('div');
++        content.className = 'modal-choice-content';
++
++        var title = document.createElement('div');
++        title.className = 'modal-choice-title';
++        title.textContent = option.title;
++        content.appendChild(title);
++
++        var description = document.createElement('p');
++        description.className = 'modal-choice-description';
++        description.textContent = option.description;
++        content.appendChild(description);
++
++        label.appendChild(content);
++        form.appendChild(label);
++      });
++
++      bodyNode.appendChild(form);
++
++      requestAnimationFrame(function () {
++        var selectedRadio = form.querySelector('.modal-choice-radio:checked');
++        if (selectedRadio) {
++          selectedRadio.focus();
++        } else {
++          confirmButton.focus();
++        }
++      });
++
++      return function () {
++        return selectedValue;
++      };
++    }, {
++      title: config.title || 'Export Recipe',
++      confirmLabel: config.confirmLabel || 'Continue',
++      cancelValue: null,
++      isDanger: false,
++      compact: false
++    });
++  }
++
++  function ShowIngredientNameConflictPrompt(config) {
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      titleNode.textContent = 'Ingredient Name Conflict';
++      card.setAttribute('aria-label', 'Ingredient Name Conflict');
++      cancelButton.style.display = 'none';
++      confirmButton.style.display = 'none';
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form modal-conflict-form';
++
++      var lineOne = document.createElement('p');
++      lineOne.className = 'modal-message';
++      lineOne.textContent = 'Imported ingredient uses the same Id as an existing ingredient, but the names are different.';
++      form.appendChild(lineOne);
++
++      var idLine = document.createElement('p');
++      idLine.className = 'modal-message';
++      idLine.textContent = 'Id: ' + String(config.ingredientId || '');
++      form.appendChild(idLine);
++
++      var existingLine = document.createElement('p');
++      existingLine.className = 'modal-message';
++      existingLine.textContent = 'Existing: ' + String(config.existingName || '');
++      form.appendChild(existingLine);
++
++      var incomingLine = document.createElement('p');
++      incomingLine.className = 'modal-message';
++      incomingLine.textContent = 'Incoming: ' + String(config.incomingName || '');
++      form.appendChild(incomingLine);
++
++      var applyWrap = document.createElement('label');
++      applyWrap.className = 'modal-conflict-apply-row';
++
++      var applyCheckbox = document.createElement('input');
++      applyCheckbox.type = 'checkbox';
++      applyCheckbox.className = 'modal-choice-radio';
++      applyWrap.appendChild(applyCheckbox);
++
++      var applyText = document.createElement('span');
++      applyText.textContent = 'Apply this decision to all remaining conflicts.';
++      applyWrap.appendChild(applyText);
++      form.appendChild(applyWrap);
++
++      var actions = document.createElement('div');
++      actions.className = 'modal-conflict-actions';
++
++      var useIncomingButton = document.createElement('button');
++      useIncomingButton.type = 'button';
++      useIncomingButton.className = 'modal-button modal-button--primary';
++      useIncomingButton.textContent = 'Use Incoming Name';
++
++      var keepExistingButton = document.createElement('button');
++      keepExistingButton.type = 'button';
++      keepExistingButton.className = 'modal-button modal-button--secondary';
++      keepExistingButton.textContent = 'Keep Existing Name';
++
++      var cancelImportButton = document.createElement('button');
++      cancelImportButton.type = 'button';
++      cancelImportButton.className = 'modal-button modal-button--secondary';
++      cancelImportButton.textContent = 'Cancel Import';
++
++      actions.appendChild(useIncomingButton);
++      actions.appendChild(keepExistingButton);
++      actions.appendChild(cancelImportButton);
++      form.appendChild(actions);
++
++      bodyNode.appendChild(form);
++
++      function close(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      function decisionResult(decision) {
++        return {
++          decision: decision,
++          applyToAll: applyCheckbox.checked === true
++        };
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') {
++          event.preventDefault();
++          close(null);
++          return;
++        }
++
++        if (event.key === 'Enter') {
++          var focused = document.activeElement;
++          if (focused === useIncomingButton || focused === keepExistingButton || focused === cancelImportButton) {
++            event.preventDefault();
++            focused.click();
++          }
++        }
++      }
++
++      useIncomingButton.addEventListener('click', function () {
++        close(decisionResult('use_incoming'));
++      });
++
++      keepExistingButton.addEventListener('click', function () {
++        close(decisionResult('keep_existing'));
++      });
++
++      cancelImportButton.addEventListener('click', function () {
++        close(null);
++      });
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) {
++          close(null);
++        }
++      });
++
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++
++      requestAnimationFrame(function () {
++        keepExistingButton.focus();
++      });
++    });
++  }
++
++  function ShowRecipeImportReviewModal(config) {
++    return new Promise(function (resolve) {
++      var preflight = config && config.preflight ? config.preflight : null;
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      overlay.classList.add('modal-overlay--compact');
++      card.classList.add('modal-card--compact');
++      card.classList.add('modal-card--import-review');
++      titleNode.textContent = 'Review Recipe Import';
++      card.setAttribute('aria-label', 'Review Recipe Import');
++      cancelButton.style.display = 'none';
++      confirmButton.style.display = 'none';
++
++      var wrap = document.createElement('div');
++      wrap.className = 'modal-import-review';
++
++      var intro = document.createElement('p');
++      intro.className = 'modal-message modal-import-review-intro';
++      intro.textContent = 'Review what will change before you apply this import.';
++      wrap.appendChild(intro);
++
++      var targetCard = document.createElement('div');
++      targetCard.className = 'modal-import-section';
++      var targetTitle = document.createElement('h3');
++      targetTitle.className = 'modal-import-section-title';
++      targetTitle.textContent = 'Import Target';
++      targetCard.appendChild(targetTitle);
++
++      var recipeLine = document.createElement('p');
++      recipeLine.className = 'modal-import-line';
++      recipeLine.textContent = 'Recipe: ' + String((preflight && preflight.target && preflight.target.recipeName) || 'Unknown');
++      targetCard.appendChild(recipeLine);
++
++      var versionLine = document.createElement('p');
++      versionLine.className = 'modal-import-line';
++      versionLine.textContent = 'Version: ' + String((preflight && preflight.target && preflight.target.versionName) || 'Unknown');
++      targetCard.appendChild(versionLine);
++
++      wrap.appendChild(targetCard);
++
++      var changesCard = document.createElement('div');
++      changesCard.className = 'modal-import-section';
++      var changesTitle = document.createElement('h3');
++      changesTitle.className = 'modal-import-section-title';
++      changesTitle.textContent = 'What Will Change';
++      changesCard.appendChild(changesTitle);
++
++      var metrics = document.createElement('div');
++      metrics.className = 'modal-import-metrics';
++
++      function addMetric(label, value) {
++        var row = document.createElement('div');
++        row.className = 'modal-import-metric';
++
++        var labelNode = document.createElement('span');
++        labelNode.className = 'modal-import-metric-label';
++        labelNode.textContent = label;
++
++        var valueNode = document.createElement('span');
++        valueNode.className = 'modal-import-metric-value';
++        valueNode.textContent = String(value);
++
++        row.appendChild(labelNode);
++        row.appendChild(valueNode);
++        metrics.appendChild(row);
++      }
++
++      addMetric('Ingredients to add', preflight && preflight.ingredientCounts ? preflight.ingredientCounts.newCount : 0);
++      addMetric('Ingredients to update', preflight && preflight.ingredientCounts ? preflight.ingredientCounts.overwriteCount : 0);
++      addMetric('Instructions to add', preflight && preflight.instructionCounts ? preflight.instructionCounts.newCount : 0);
++      addMetric('Instructions to update', preflight && preflight.instructionCounts ? preflight.instructionCounts.overwriteCount : 0);
++
++      if (preflight && preflight.ingredientConflictCount > 0) {
++        addMetric('Name decisions needed', preflight.ingredientConflictCount);
++      }
++
++      if (preflight && preflight.recipeDerivedListsPreservedCount > 0) {
++        addMetric('Existing grocery lists kept', preflight.recipeDerivedListsPreservedCount);
++      }
++
++      changesCard.appendChild(metrics);
++      wrap.appendChild(changesCard);
++
++      if (preflight && preflight.versionConflictDetail) {
++        var versionNote = document.createElement('p');
++        versionNote.className = 'modal-message modal-import-note';
++        versionNote.textContent = 'Version note: ' + preflight.versionConflictDetail;
++        wrap.appendChild(versionNote);
++      }
++
++      if (preflight && Array.isArray(preflight.warnings) && preflight.warnings.length > 0) {
++        var warningCard = document.createElement('div');
++        warningCard.className = 'modal-import-section modal-import-warning';
++
++        var warningTitle = document.createElement('h3');
++        warningTitle.className = 'modal-import-section-title';
++        warningTitle.textContent = 'Please Review';
++        warningCard.appendChild(warningTitle);
++
++        var warningList = document.createElement('ul');
++        warningList.className = 'modal-import-warning-list';
++        for (var i = 0; i < preflight.warnings.length; i++) {
++          var item = document.createElement('li');
++          item.textContent = String(preflight.warnings[i]);
++          warningList.appendChild(item);
++        }
++
++        warningCard.appendChild(warningList);
++        wrap.appendChild(warningCard);
++      }
++
++      var dangerNote = document.createElement('p');
++      dangerNote.className = 'modal-message modal-import-danger-note';
++      dangerNote.textContent = 'Applying import replaces matching data for this recipe version. There is no automatic undo.';
++      wrap.appendChild(dangerNote);
++
++      var decisionTitle = document.createElement('h3');
++      decisionTitle.className = 'modal-import-section-title';
++      decisionTitle.textContent = 'Choose What To Do';
++      wrap.appendChild(decisionTitle);
++
++      var decisions = document.createElement('div');
++      decisions.className = 'modal-import-decisions';
++
++      var applyButton = document.createElement('button');
++      applyButton.type = 'button';
++      applyButton.className = 'modal-import-decision modal-import-decision--danger';
++      applyButton.innerHTML = '<span class="modal-import-decision-title">Apply Import</span>'
++        + '<span class="modal-import-decision-description">Update this recipe version using the imported file.</span>';
++
++      var cancelImportButton = document.createElement('button');
++      cancelImportButton.type = 'button';
++      cancelImportButton.className = 'modal-import-decision modal-import-decision--safe';
++      cancelImportButton.innerHTML = '<span class="modal-import-decision-title">Cancel Import</span>'
++        + '<span class="modal-import-decision-description">Close this dialog and keep everything unchanged.</span>';
++
++      decisions.appendChild(applyButton);
++      decisions.appendChild(cancelImportButton);
++      wrap.appendChild(decisions);
++      bodyNode.appendChild(wrap);
++
++      function close(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') {
++          event.preventDefault();
++          close({ action: 'cancel' });
++          return;
++        }
++
++        if (event.key === 'Enter') {
++          var focused = document.activeElement;
++          if (focused === applyButton || focused === cancelImportButton) {
++            event.preventDefault();
++            focused.click();
++          }
++        }
++      }
++
++      applyButton.addEventListener('click', function () {
++        close({ action: 'apply' });
++      });
++
++      cancelImportButton.addEventListener('click', function () {
++        close({ action: 'cancel' });
++      });
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) {
++          close({ action: 'cancel' });
++        }
++      });
++
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++
++      requestAnimationFrame(function () {
++        cancelImportButton.focus();
++      });
++    });
++  }
++
+   function ShowConfirm(config) {
+     return showModal(function (bodyNode, confirmButton, cancelButton) {
+       if (config.message) {
+@@ -2948,6 +3359,81 @@
+     });
+   }
+ 
++  function ShowTimedNotice(config) {
++    var durationMs = Number(config && config.durationMs);
++    if (!Number.isFinite(durationMs) || durationMs <= 0) {
++      durationMs = 3000;
++    }
++
++    if (activeTimedNotice && typeof activeTimedNotice.close === 'function') {
++      activeTimedNotice.close();
++    }
++
++    var notice = document.createElement('div');
++    notice.className = 'timed-notice';
++    notice.setAttribute('role', 'status');
++    notice.setAttribute('aria-live', 'polite');
++
++    var textWrap = document.createElement('div');
++    textWrap.className = 'timed-notice-text';
++
++    var titleNode = document.createElement('div');
++    titleNode.className = 'timed-notice-title';
++    titleNode.textContent = String((config && config.title) || 'Done');
++    textWrap.appendChild(titleNode);
++
++    if (config && config.message) {
++      var messageNode = document.createElement('p');
++      messageNode.className = 'timed-notice-message';
++      messageNode.textContent = String(config.message);
++      textWrap.appendChild(messageNode);
++    }
++
++    var closeButton = document.createElement('button');
++    closeButton.type = 'button';
++    closeButton.className = 'timed-notice-close';
++    closeButton.textContent = '\u00d7';
++    closeButton.setAttribute('aria-label', 'Dismiss notice');
++
++    var timeoutId = null;
++
++    function closeNotice() {
++      if (timeoutId) {
++        clearTimeout(timeoutId);
++        timeoutId = null;
++      }
++
++      if (notice.parentNode) {
++        notice.parentNode.removeChild(notice);
++      }
++
++      if (activeTimedNotice && activeTimedNotice.node === notice) {
++        activeTimedNotice = null;
++      }
++    }
++
++    closeButton.addEventListener('click', function () {
++      closeNotice();
++    });
++
++    notice.appendChild(textWrap);
++    notice.appendChild(closeButton);
++    document.body.appendChild(notice);
++
++    requestAnimationFrame(function () {
++      notice.classList.add('timed-notice--visible');
++    });
++
++    timeoutId = setTimeout(function () {
++      closeNotice();
++    }, durationMs);
++
++    activeTimedNotice = {
++      node: notice,
++      close: closeNotice
++    };
++  }
++
+   window.KaPUI = {
+     NewMainTab: NewMainTab,
+     AddMainTab: AddMainTab,
+@@ -2968,13 +3454,20 @@
+     ShowTemplateConfigModal: ShowTemplateConfigModal,
+     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
+     ShowPrompt: ShowPrompt,
++    ShowBatchSizeModal: ShowBatchSizeModal,
++    FormatBatchSize: formatBatchSizeFraction,
+     ShowAddToListModal: ShowAddToListModal,
+     ShowNewVersionModal: ShowNewVersionModal,
+     ShowRecipeCloneModal: ShowRecipeCloneModal,
+     ShowImportModeModal: ShowImportModeModal,
++    BuildBatchSizeStepper: buildBatchSizeStepper,
++    ShowRecipeExportModal: ShowRecipeExportModal,
++    ShowRecipeImportReviewModal: ShowRecipeImportReviewModal,
++    ShowIngredientNameConflictPrompt: ShowIngredientNameConflictPrompt,
+     ShowConfirm: ShowConfirm,
+     ShowAlert: ShowAlert,
+     ShowAboutModal: ShowAboutModal,
++    ShowTimedNotice: ShowTimedNotice,
+     SetActiveOverflowMenu: setActiveOverflowMenu,
+     ShouldOpenOverflowUp: shouldOpenOverflowUp
+   };
