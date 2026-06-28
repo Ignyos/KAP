@@ -5,11 +5,1175 @@
   var VERSION_SECTION_VISIBLE_KEY = 'kap.recipeVersionSectionVisible';
   var DESCRIPTION_SECTION_VISIBLE_KEY = 'kap.recipeDescriptionSectionVisible';
   var TAGS_SECTION_VISIBLE_KEY = 'kap.recipeTagsSectionVisible';
+  var BATCH_SIZE_STATE_KEY = 'kap.recipeBatchSizeState';
   var LAST_VIEWED_VERSION_KEY = 'kap.recipeLastViewedVersion';
   var versionNoteFocusTargets = {};
 
   async function showError(message) {
     await window.KaPUI.ShowAlert({ title: 'Error', message: message });
+  }
+
+  function sanitizeFilePart(value, fallback) {
+    var sanitized = String(value || '')
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    if (!sanitized) {
+      return fallback || 'value';
+    }
+
+    return sanitized;
+  }
+
+  function getRecipeExportBaseName(recipeName, versionName) {
+    var safeRecipeName = sanitizeFilePart(recipeName, 'recipe');
+    var safeVersionName = sanitizeFilePart(versionName, 'version');
+    return safeRecipeName + '_' + safeVersionName;
+  }
+
+  function getIngredientQuantityText(item) {
+    if (item && item.quantityText != null && String(item.quantityText).trim() !== '') {
+      return String(item.quantityText).trim();
+    }
+
+    if (item && item.quantityValue != null && !Number.isNaN(Number(item.quantityValue))) {
+      return String(item.quantityValue);
+    }
+
+    if (item && item.quantity != null && String(item.quantity).trim() !== '') {
+      return String(item.quantity).trim();
+    }
+
+    return '';
+  }
+
+  function formatScaledQuantityText(baseQuantityText, baseQuantityValue, batchSize) {
+    if (baseQuantityValue == null) {
+      return null;
+    }
+
+    var scaled = Number(baseQuantityValue) * Number(batchSize);
+    if (!Number.isFinite(scaled)) {
+      return null;
+    }
+
+    if (Number(batchSize) === 1 && baseQuantityText) {
+      return String(baseQuantityText).trim() || null;
+    }
+
+    return scaled.toFixed(3).replace(/\.?0+$/, '');
+  }
+
+  function getRecipeBatchSizeState() {
+    try {
+      var raw = localStorage.getItem(BATCH_SIZE_STATE_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function writeRecipeBatchSizeState(state) {
+    try {
+      localStorage.setItem(BATCH_SIZE_STATE_KEY, JSON.stringify(state || {}));
+    } catch (error) {
+      // Ignore session persistence failures.
+    }
+  }
+
+  function getRecipeBatchSize(recipeId, versionId) {
+    var state = getRecipeBatchSizeState();
+    var key = String(recipeId || '') + '::' + String(versionId || '');
+    var value = state[key];
+    var numeric = Number(value);
+
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 1;
+    }
+
+    return numeric;
+  }
+
+  function setRecipeBatchSize(recipeId, versionId, batchSize) {
+    var state = getRecipeBatchSizeState();
+    var key = String(recipeId || '') + '::' + String(versionId || '');
+    state[key] = Number(batchSize) > 0 ? Number(batchSize) : 1;
+    writeRecipeBatchSizeState(state);
+  }
+
+  function buildBatchScaledDetailItem(detailItem, batchSize) {
+    var baseQuantityValue = detailItem.quantityValue != null
+      ? detailItem.quantityValue
+      : (detailItem.quantity != null ? detailItem.quantity : null);
+
+    return Object.assign({}, detailItem, {
+      displayQuantityValue: baseQuantityValue == null ? null : Number(baseQuantityValue) * Number(batchSize),
+      displayQuantityText: formatScaledQuantityText(detailItem.quantityText, baseQuantityValue, batchSize),
+      displayUomAbbreviation: detailItem.uomAbbreviation || detailItem.unitOfMeasureAbbreviation || null
+    });
+  }
+
+  function buildIngredientDisplayLine(item) {
+    var quantity = getIngredientQuantityText(item);
+    var uom = '';
+    if (item && item.uomAbbreviation) {
+      uom = String(item.uomAbbreviation).trim();
+    } else if (item && item.unitOfMeasureAbbreviation) {
+      uom = String(item.unitOfMeasureAbbreviation).trim();
+    }
+    var name = item && item.name ? String(item.name).trim() : 'Unnamed ingredient';
+    var optionalSuffix = item && item.isOptional === true ? ' (optional)' : '';
+    var prefix = '';
+
+    if (quantity && uom) {
+      prefix = quantity + ' ' + uom + ' ';
+    } else if (quantity) {
+      prefix = quantity + ' ';
+    } else if (uom) {
+      prefix = uom + ' ';
+    }
+
+    return prefix + name + optionalSuffix;
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function buildRecipeExportPayload(recipeRecord, activeVersion, detailItems, instructions, tags) {
+    var exportedAt = new Date().toISOString();
+    var versionId = activeVersion && activeVersion.id != null ? String(activeVersion.id) : '';
+    var versionName = activeVersion && activeVersion.versionName ? String(activeVersion.versionName) : '';
+
+    return {
+      exportType: 'recipe-version',
+      schemaVersion: 1,
+      exportedAt: exportedAt,
+      recipe: {
+        id: recipeRecord && recipeRecord.id != null ? String(recipeRecord.id) : '',
+        name: recipeRecord && recipeRecord.name ? String(recipeRecord.name) : '',
+        tags: Array.isArray(tags) ? tags.slice() : []
+      },
+      version: {
+        id: versionId,
+        name: versionName,
+        createdDate: activeVersion && activeVersion.createdDate ? String(activeVersion.createdDate) : '',
+        updatedDate: activeVersion && activeVersion.updatedDate ? String(activeVersion.updatedDate) : ''
+      },
+      ingredients: (detailItems || []).map(function (item) {
+        return {
+          id: item && item.id != null ? String(item.id) : '',
+          itemId: item && item.itemId != null ? String(item.itemId) : '',
+          name: item && item.name ? String(item.name) : '',
+          quantityValue: item && item.quantityValue != null ? item.quantityValue : (item ? item.quantity : null),
+          quantityText: item && item.quantityText != null ? String(item.quantityText) : '',
+          unitOfMeasureId: item && item.unitOfMeasureId != null ? String(item.unitOfMeasureId) : '',
+          unitOfMeasureAbbreviation: item && item.uomAbbreviation ? String(item.uomAbbreviation) : '',
+          isOptional: item && item.isOptional === true,
+          description: item && item.description ? String(item.description) : ''
+        };
+      }),
+      instructions: (instructions || []).map(function (step) {
+        return {
+          id: step && step.id != null ? String(step.id) : '',
+          stepNumber: step && step.stepNumber != null ? Number(step.stepNumber) : null,
+          text: step && step.text ? String(step.text) : ''
+        };
+      })
+    };
+  }
+
+  function buildRecipeExportText(payload) {
+    var lines = [];
+    var recipeName = payload && payload.recipe ? payload.recipe.name : 'Recipe';
+    var versionName = payload && payload.version ? payload.version.name : '';
+
+    lines.push(String(recipeName || 'Recipe'));
+    if (versionName) {
+      lines.push('Version: ' + versionName);
+    }
+
+    if (payload && Array.isArray(payload.recipe.tags) && payload.recipe.tags.length > 0) {
+      lines.push('Tags: ' + payload.recipe.tags.join(', '));
+    }
+
+    lines.push('');
+    lines.push('Ingredients');
+
+    if (payload && Array.isArray(payload.ingredients) && payload.ingredients.length > 0) {
+      payload.ingredients.forEach(function (ingredient) {
+        lines.push('- ' + buildIngredientDisplayLine(ingredient));
+      });
+    } else {
+      lines.push('- None');
+    }
+
+    lines.push('');
+    lines.push('Instructions');
+
+    if (payload && Array.isArray(payload.instructions) && payload.instructions.length > 0) {
+      payload.instructions.forEach(function (instruction, index) {
+        var number = instruction && instruction.stepNumber != null
+          ? instruction.stepNumber
+          : (index + 1);
+        lines.push(String(number) + '. ' + String((instruction && instruction.text) || ''));
+      });
+    } else {
+      lines.push('1. No instructions.');
+    }
+
+    return lines.join('\n');
+  }
+
+  function buildRecipeExportPrintHtml(payload, pdfFileName) {
+    var text = buildRecipeExportText(payload);
+    return [
+      '<!doctype html>',
+      '<html>',
+      '<head>',
+      '<meta charset="utf-8">',
+      '<title>' + escapeHtml(pdfFileName) + '</title>',
+      '<style>',
+      'body { font-family: "Segoe UI", Tahoma, sans-serif; margin: 24px; color: #111; }',
+      'h1 { margin: 0 0 12px 0; font-size: 24px; }',
+      'pre { white-space: pre-wrap; line-height: 1.4; font-size: 14px; margin: 0; }',
+      '</style>',
+      '</head>',
+      '<body>',
+      '<pre>' + escapeHtml(text) + '</pre>',
+      '<script>setTimeout(function(){ window.print(); }, 120);<\/script>',
+      '</body>',
+      '</html>'
+    ].join('');
+  }
+
+  function downloadTextFile(fileName, textContent, mimeType) {
+    var blob = new Blob([String(textContent || '')], {
+      type: mimeType || 'text/plain;charset=utf-8'
+    });
+    var link = document.createElement('a');
+    var objectUrl = URL.createObjectURL(blob);
+
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setTimeout(function () {
+      URL.revokeObjectURL(objectUrl);
+    }, 0);
+  }
+
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    var temp = document.createElement('textarea');
+    temp.value = text;
+    temp.setAttribute('readonly', 'readonly');
+    temp.style.position = 'fixed';
+    temp.style.opacity = '0';
+    document.body.appendChild(temp);
+    temp.focus();
+    temp.select();
+
+    var copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch (error) {
+      copied = false;
+    }
+
+    document.body.removeChild(temp);
+
+    if (!copied) {
+      throw new Error('Clipboard copy is not available in this browser session.');
+    }
+  }
+
+  async function exportRecipeVersion(record, activeVersion, detailItems, instructions, tags) {
+    var versionName = activeVersion && activeVersion.versionName
+      ? activeVersion.versionName
+      : 'version';
+    var baseName = getRecipeExportBaseName(record && record.name, versionName);
+    var payload = buildRecipeExportPayload(record, activeVersion, detailItems, instructions, tags);
+
+    var exportFormat = await window.KaPUI.ShowRecipeExportModal({
+      title: 'Export Recipe',
+      confirmLabel: 'Export',
+      defaultFormat: 'kap',
+      pdfDescription: 'Create printable file as ' + baseName + '.pdf',
+      textDescription: 'Copy readable text to clipboard for messages and email.',
+      kapDescription: 'Download recipe data as ' + baseName + '.kap'
+    });
+
+    if (!exportFormat) {
+      return;
+    }
+
+    if (exportFormat === 'kap') {
+      downloadTextFile(baseName + '.kap', JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
+      window.KaPUI.ShowTimedNotice({
+        title: 'Export Complete',
+        message: 'Downloaded ' + baseName + '.kap',
+        durationMs: 3000
+      });
+      return;
+    }
+
+    if (exportFormat === 'text') {
+      await copyTextToClipboard(buildRecipeExportText(payload));
+      window.KaPUI.ShowTimedNotice({
+        title: 'Copied',
+        message: 'Recipe text copied to clipboard.',
+        durationMs: 3000
+      });
+      return;
+    }
+
+    if (exportFormat === 'pdf') {
+      var printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        throw new Error('Popup blocked. Allow popups to export PDF.');
+      }
+
+      printWindow.document.open();
+      printWindow.document.write(buildRecipeExportPrintHtml(payload, baseName + '.pdf'));
+      printWindow.document.close();
+
+      window.KaPUI.ShowTimedNotice({
+        title: 'PDF Export Ready',
+        message: 'Use Save as PDF in the print dialog and name the file ' + baseName + '.pdf',
+        durationMs: 3000
+      });
+    }
+  }
+
+  function asTrimmedString(value) {
+    return String(value == null ? '' : value).trim();
+  }
+
+  function asOptionalString(value) {
+    var trimmed = asTrimmedString(value);
+    return trimmed || '';
+  }
+
+  function asOptionalNumber(value) {
+    if (value == null || value === '') {
+      return null;
+    }
+
+    var numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function normalizeTagListForImport(tags) {
+    var source = Array.isArray(tags) ? tags : [];
+    var seen = {};
+    var normalized = [];
+
+    for (var i = 0; i < source.length; i++) {
+      var tag = asTrimmedString(source[i]).toLowerCase();
+      if (!tag || seen[tag]) {
+        continue;
+      }
+
+      seen[tag] = true;
+      normalized.push(tag);
+    }
+
+    return normalized;
+  }
+
+  function normalizeImportedIngredients(rawIngredients) {
+    var ingredients = Array.isArray(rawIngredients) ? rawIngredients : [];
+
+    return ingredients.map(function (ingredient, index) {
+      var id = asTrimmedString(ingredient && ingredient.id) || window.KaPIds.NewId();
+      var itemId = asTrimmedString(ingredient && ingredient.itemId) || window.KaPIds.NewId();
+      var quantityValue = asOptionalNumber(ingredient && ingredient.quantityValue);
+      var quantityText = asOptionalString(ingredient && ingredient.quantityText);
+
+      return {
+        id: id,
+        itemId: itemId,
+        name: asTrimmedString(ingredient && ingredient.name) || ('Imported ingredient ' + String(index + 1)),
+        quantityValue: quantityValue,
+        quantityText: quantityText,
+        unitOfMeasureId: asOptionalString(ingredient && ingredient.unitOfMeasureId),
+        unitOfMeasureAbbreviation: asOptionalString(ingredient && ingredient.unitOfMeasureAbbreviation),
+        description: asOptionalString(ingredient && ingredient.description),
+        isOptional: ingredient && ingredient.isOptional === true
+      };
+    });
+  }
+
+  function normalizeImportedInstructions(rawInstructions) {
+    var instructions = Array.isArray(rawInstructions) ? rawInstructions : [];
+
+    return instructions.map(function (instruction, index) {
+      var stepNumber = asOptionalNumber(instruction && instruction.stepNumber);
+      return {
+        id: asTrimmedString(instruction && instruction.id) || window.KaPIds.NewId(),
+        stepNumber: stepNumber == null ? (index + 1) : stepNumber,
+        text: asTrimmedString(instruction && instruction.text)
+      };
+    }).filter(function (instruction) {
+      return !!instruction.text;
+    }).sort(function (a, b) {
+      return Number(a.stepNumber || 0) - Number(b.stepNumber || 0);
+    }).map(function (instruction, index) {
+      instruction.stepNumber = index + 1;
+      return instruction;
+    });
+  }
+
+  function validateKapRecipePayload(payload) {
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Invalid .kap file.');
+    }
+
+    if (String(payload.exportType || '') !== 'recipe-version') {
+      throw new Error('Unsupported .kap file type.');
+    }
+
+    if (!payload.recipe || !payload.version) {
+      throw new Error('.kap file is missing recipe/version data.');
+    }
+
+    var recipeId = asTrimmedString(payload.recipe.id);
+    var versionId = asTrimmedString(payload.version.id);
+    if (!recipeId || !versionId) {
+      throw new Error('.kap file must include recipe id and version id.');
+    }
+
+    var recipeName = asTrimmedString(payload.recipe.name);
+    var versionName = asTrimmedString(payload.version.name);
+    if (!recipeName || !versionName) {
+      throw new Error('.kap file must include recipe and version names.');
+    }
+
+    var ingredients = normalizeImportedIngredients(payload.ingredients);
+    var instructions = normalizeImportedInstructions(payload.instructions);
+
+    return {
+      schemaVersion: Number(payload.schemaVersion || 1),
+      exportedAt: asOptionalString(payload.exportedAt),
+      recipe: {
+        id: recipeId,
+        name: recipeName,
+        tags: normalizeTagListForImport(payload.recipe.tags)
+      },
+      version: {
+        id: versionId,
+        name: versionName,
+        createdDate: asOptionalString(payload.version.createdDate),
+        updatedDate: asOptionalString(payload.version.updatedDate)
+      },
+      ingredients: ingredients,
+      instructions: instructions
+    };
+  }
+
+  function toTimestampMs(value) {
+    var raw = asOptionalString(value);
+    if (!raw) {
+      return null;
+    }
+
+    var parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  async function countActiveRecipeDerivedLists(recipeId, versionId) {
+    var allRecords = await window.KaPDB.readAll(window.KaPStores.STORE_NAMES.LIST_RECORDS);
+    var targetRecipeId = asTrimmedString(recipeId);
+    var targetVersionId = asTrimmedString(versionId);
+
+    var active = allRecords.filter(function (record) {
+      if (!record || String(record.type || '') !== 'List') {
+        return false;
+      }
+
+      if (String(record.sourceKind || '') !== 'recipe') {
+        return false;
+      }
+
+      if (asTrimmedString(record.sourceRecipeId) !== targetRecipeId) {
+        return false;
+      }
+
+      if (asTrimmedString(record.sourceRecipeVersionId) !== targetVersionId) {
+        return false;
+      }
+
+      if (record.isDeleted === true) {
+        return false;
+      }
+
+      if (record.deletedDate && asTrimmedString(record.deletedDate)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return active.length;
+  }
+
+  function pickKapFile() {
+    return new Promise(function (resolve) {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.kap,application/json';
+      input.style.display = 'none';
+
+      function cleanup() {
+        input.removeEventListener('change', onChange);
+        if (input.parentNode) {
+          document.body.removeChild(input);
+        }
+      }
+
+      function onChange() {
+        var file = input.files && input.files[0] ? input.files[0] : null;
+        cleanup();
+        resolve(file);
+      }
+
+      input.addEventListener('change', onChange);
+      document.body.appendChild(input);
+      input.click();
+    });
+  }
+
+  async function parseKapFile(file) {
+    if (!file) {
+      return null;
+    }
+
+    var fileName = asTrimmedString(file.name).toLowerCase();
+    if (fileName && fileName.lastIndexOf('.kap') < 0) {
+      throw new Error('Only .kap files are supported for recipe import.');
+    }
+
+    var text = await file.text();
+    var payload = JSON.parse(text);
+    return validateKapRecipePayload(payload);
+  }
+
+  async function readRecipeVersionScope(importDraft) {
+    var recipeRecord = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORDS, importDraft.recipe.id);
+    var versionRecord = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, importDraft.version.id);
+    var hasRecipe = !!(recipeRecord && recipeRecord.type === 'Recipe');
+    var hasVersion = !!(versionRecord && versionRecord.recipeId === importDraft.recipe.id);
+
+    return {
+      recipeRecord: hasRecipe ? recipeRecord : null,
+      versionRecord: hasVersion ? versionRecord : null,
+      hasMatch: hasRecipe && hasVersion
+    };
+  }
+
+  function normalizeImportedIngredientForCompare(ingredient, recipeId) {
+    return {
+      id: asTrimmedString(ingredient && ingredient.id),
+      listRecordId: asTrimmedString(recipeId),
+      itemId: asTrimmedString(ingredient && ingredient.itemId),
+      name: asTrimmedString(ingredient && ingredient.name),
+      quantityValue: asOptionalNumber(ingredient && ingredient.quantityValue),
+      quantityText: asOptionalString(ingredient && ingredient.quantityText),
+      unitOfMeasureId: asOptionalString(ingredient && ingredient.unitOfMeasureId),
+      description: asOptionalString(ingredient && ingredient.description),
+      isOptional: ingredient && ingredient.isOptional === true
+    };
+  }
+
+  function normalizeExistingIngredientForCompare(existing) {
+    var quantityValue = existing && existing.quantityValue != null
+      ? asOptionalNumber(existing.quantityValue)
+      : asOptionalNumber(existing && existing.quantity);
+
+    return {
+      id: asTrimmedString(existing && existing.id),
+      listRecordId: asTrimmedString(existing && existing.listRecordId),
+      itemId: asTrimmedString(existing && existing.itemId),
+      name: asTrimmedString(existing && existing.name),
+      quantityValue: quantityValue,
+      quantityText: asOptionalString(existing && existing.quantityText),
+      unitOfMeasureId: asOptionalString(existing && existing.unitOfMeasureId),
+      description: asOptionalString(existing && existing.description),
+      isOptional: existing && existing.isOptional === true
+    };
+  }
+
+  function areIngredientsEquivalent(existing, incoming, recipeId) {
+    var lhs = normalizeExistingIngredientForCompare(existing);
+    var rhs = normalizeImportedIngredientForCompare(incoming, recipeId);
+
+    return lhs.id === rhs.id
+      && lhs.listRecordId === rhs.listRecordId
+      && lhs.itemId === rhs.itemId
+      && lhs.name === rhs.name
+      && lhs.quantityValue === rhs.quantityValue
+      && lhs.quantityText === rhs.quantityText
+      && lhs.unitOfMeasureId === rhs.unitOfMeasureId
+      && lhs.description === rhs.description
+      && lhs.isOptional === rhs.isOptional;
+  }
+
+  function normalizeImportedInstructionForCompare(instruction, recipeId, stepNumber) {
+    return {
+      id: asTrimmedString(instruction && instruction.id),
+      recipeId: asTrimmedString(recipeId),
+      stepNumber: Number(stepNumber || 0),
+      text: asTrimmedString(instruction && instruction.text)
+    };
+  }
+
+  function normalizeExistingInstructionForCompare(instruction) {
+    return {
+      id: asTrimmedString(instruction && instruction.id),
+      recipeId: asTrimmedString(instruction && instruction.recipeId),
+      stepNumber: Number(instruction && instruction.stepNumber || 0),
+      text: asTrimmedString(instruction && instruction.text)
+    };
+  }
+
+  function areInstructionsEquivalent(existing, incoming, recipeId, stepNumber) {
+    var lhs = normalizeExistingInstructionForCompare(existing);
+    var rhs = normalizeImportedInstructionForCompare(incoming, recipeId, stepNumber);
+
+    return lhs.id === rhs.id
+      && lhs.recipeId === rhs.recipeId
+      && lhs.stepNumber === rhs.stepNumber
+      && lhs.text === rhs.text;
+  }
+
+  function findDuplicateIds(records, selector) {
+    var seen = {};
+    var duplicates = [];
+
+    for (var i = 0; i < records.length; i++) {
+      var id = asTrimmedString(selector(records[i]));
+      if (!id) {
+        continue;
+      }
+
+      if (seen[id]) {
+        duplicates.push(id);
+      } else {
+        seen[id] = true;
+      }
+    }
+
+    return duplicates;
+  }
+
+  async function buildIngredientNameConflicts(importDraft, scope) {
+    var conflicts = [];
+    if (scope.hasMatch) {
+      return conflicts;
+    }
+
+    for (var i = 0; i < importDraft.ingredients.length; i++) {
+      var ingredient = importDraft.ingredients[i];
+      var itemId = asTrimmedString(ingredient.itemId);
+      if (!itemId) {
+        continue;
+      }
+
+      var existingItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
+      if (!existingItem) {
+        continue;
+      }
+
+      var existingName = asTrimmedString(existingItem.name);
+      var incomingName = asTrimmedString(ingredient.name);
+      if (!existingName || !incomingName || existingName.toLowerCase() === incomingName.toLowerCase()) {
+        continue;
+      }
+
+      conflicts.push({
+        ingredientId: itemId,
+        existingName: existingName,
+        incomingName: incomingName
+      });
+    }
+
+    return conflicts;
+  }
+
+  async function buildImportPreflight(importDraft, scope, ingredientConflicts) {
+    var preflight = {
+      target: {
+        recipeId: importDraft.recipe.id,
+        recipeName: importDraft.recipe.name,
+        versionId: importDraft.version.id,
+        versionName: importDraft.version.name
+      },
+      versionConflictStatus: scope.hasMatch ? 'same_or_unknown' : 'new_version',
+      versionConflictDetail: '',
+      ingredientCounts: {
+        newCount: 0,
+        overwriteCount: 0,
+        unchangedCount: 0
+      },
+      instructionCounts: {
+        newCount: 0,
+        overwriteCount: 0,
+        unchangedCount: 0
+      },
+      ingredientConflictCount: Array.isArray(ingredientConflicts) ? ingredientConflicts.length : 0,
+      recipeDerivedListsPreservedCount: 0,
+      blockingErrors: [],
+      warnings: []
+    };
+
+    preflight.recipeDerivedListsPreservedCount = await countActiveRecipeDerivedLists(importDraft.recipe.id, importDraft.version.id);
+
+    var ingredientIdDuplicates = findDuplicateIds(importDraft.ingredients, function (ingredient) {
+      return ingredient && ingredient.id;
+    });
+    if (ingredientIdDuplicates.length > 0) {
+      preflight.blockingErrors.push('Duplicate ingredient ids in .kap payload.');
+    }
+
+    var instructionIdDuplicates = findDuplicateIds(importDraft.instructions, function (instruction) {
+      return instruction && instruction.id;
+    });
+    if (instructionIdDuplicates.length > 0) {
+      preflight.blockingErrors.push('Duplicate instruction ids in .kap payload.');
+    }
+
+    if (importDraft.ingredients.length === 0) {
+      preflight.warnings.push('No ingredients were found in this .kap file.');
+    }
+
+    if (importDraft.instructions.length === 0) {
+      preflight.warnings.push('No instructions were found in this .kap file.');
+    }
+
+    for (var i = 0; i < importDraft.ingredients.length; i++) {
+      var incomingIngredient = importDraft.ingredients[i];
+      var existingIngredient = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, incomingIngredient.id);
+
+      if (!existingIngredient) {
+        preflight.ingredientCounts.newCount += 1;
+        continue;
+      }
+
+      if (areIngredientsEquivalent(existingIngredient, incomingIngredient, importDraft.recipe.id)) {
+        preflight.ingredientCounts.unchangedCount += 1;
+      } else {
+        preflight.ingredientCounts.overwriteCount += 1;
+      }
+    }
+
+    for (var j = 0; j < importDraft.instructions.length; j++) {
+      var incomingInstruction = importDraft.instructions[j];
+      var existingInstruction = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, incomingInstruction.id);
+
+      if (!existingInstruction) {
+        preflight.instructionCounts.newCount += 1;
+        continue;
+      }
+
+      if (areInstructionsEquivalent(existingInstruction, incomingInstruction, importDraft.recipe.id, j + 1)) {
+        preflight.instructionCounts.unchangedCount += 1;
+      } else {
+        preflight.instructionCounts.overwriteCount += 1;
+      }
+    }
+
+    if (scope.hasMatch) {
+      preflight.warnings.push('This recipe version already exists. Import will update that version with the incoming file data.');
+
+      var existingUpdatedMs = toTimestampMs(scope.versionRecord && scope.versionRecord.updatedDate);
+      var importedUpdatedMs = toTimestampMs(importDraft.version.updatedDate) || toTimestampMs(importDraft.exportedAt);
+
+      if (existingUpdatedMs != null && importedUpdatedMs != null) {
+        if (importedUpdatedMs < existingUpdatedMs) {
+          preflight.versionConflictStatus = 'older';
+          preflight.versionConflictDetail = 'Imported version timestamp is older than local version timestamp.';
+        } else if (importedUpdatedMs > existingUpdatedMs) {
+          preflight.versionConflictStatus = 'newer';
+          preflight.versionConflictDetail = 'Imported version timestamp is newer than local version timestamp.';
+        } else {
+          preflight.versionConflictStatus = 'same';
+          preflight.versionConflictDetail = 'Imported and local version timestamps match.';
+        }
+      }
+
+      if (preflight.ingredientCounts.newCount === 0
+        && preflight.ingredientCounts.overwriteCount === 0
+        && preflight.instructionCounts.newCount === 0
+        && preflight.instructionCounts.overwriteCount === 0
+        && asTrimmedString(importDraft.version.name) === asTrimmedString(scope.versionRecord && scope.versionRecord.versionName)) {
+        preflight.versionConflictStatus = 'duplicate';
+        preflight.versionConflictDetail = 'Imported payload matches the current recipe/version state.';
+        preflight.warnings.push('This file matches what is already saved. No changes are needed.');
+      }
+    }
+
+    if (preflight.recipeDerivedListsPreservedCount > 0) {
+      preflight.warnings.push('Existing grocery lists created from this recipe version will stay as-is: '
+        + String(preflight.recipeDerivedListsPreservedCount) + '.');
+    }
+
+    return preflight;
+  }
+
+  function buildImportPreflightMessage(preflight) {
+    var lines = [];
+    lines.push('You are importing: ' + preflight.target.recipeName);
+    lines.push('Version: ' + preflight.target.versionName);
+    lines.push('');
+    lines.push('What will change:');
+    lines.push('- Ingredients to add: ' + String(preflight.ingredientCounts.newCount));
+    lines.push('- Ingredients to update: ' + String(preflight.ingredientCounts.overwriteCount));
+    lines.push('- Instructions to add: ' + String(preflight.instructionCounts.newCount));
+    lines.push('- Instructions to update: ' + String(preflight.instructionCounts.overwriteCount));
+
+    if (preflight.ingredientConflictCount > 0) {
+      lines.push('- Ingredient name decisions needed: ' + String(preflight.ingredientConflictCount));
+    }
+
+    if (preflight.recipeDerivedListsPreservedCount > 0) {
+      lines.push('- Existing grocery lists kept: ' + String(preflight.recipeDerivedListsPreservedCount));
+    }
+
+    if (preflight.versionConflictDetail) {
+      lines.push('');
+      lines.push('Version note: ' + preflight.versionConflictDetail);
+    }
+
+    if (preflight.warnings.length > 0) {
+      lines.push('');
+      lines.push('Please review:');
+      for (var i = 0; i < preflight.warnings.length; i++) {
+        lines.push('- ' + preflight.warnings[i]);
+      }
+    }
+
+    lines.push('');
+    lines.push('Important: Applying import will replace matching items in this recipe version.');
+    lines.push('There is no automatic undo for this action.');
+    return lines.join('\n');
+  }
+
+  async function ensureTagRecordByName(tagName) {
+    var normalizedTag = asTrimmedString(tagName).toLowerCase();
+    if (!normalizedTag) {
+      return null;
+    }
+
+    var existingMatches = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.TAGS,
+      window.KaPStores.INDEX_NAMES.TAGS_BY_NAME,
+      normalizedTag
+    );
+
+    if (existingMatches && existingMatches[0]) {
+      return existingMatches[0];
+    }
+
+    var created = {
+      id: window.KaPIds.NewId(),
+      name: normalizedTag,
+      createdDate: new Date().toISOString()
+    };
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.TAGS, created);
+    return created;
+  }
+
+  async function replaceRecipeTagMappings(recipeId, tagNames) {
+    var existingMaps = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP,
+      window.KaPStores.INDEX_NAMES.RECIPE_TAG_MAP_BY_RECIPE_ID,
+      recipeId
+    );
+
+    for (var i = 0; i < existingMaps.length; i++) {
+      await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, existingMaps[i].id);
+    }
+
+    var tags = normalizeTagListForImport(tagNames);
+    for (var j = 0; j < tags.length; j++) {
+      var tagRecord = await ensureTagRecordByName(tags[j]);
+      if (!tagRecord) {
+        continue;
+      }
+
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_TAG_MAP, {
+        id: window.KaPIds.NewId(),
+        recipeId: recipeId,
+        tagId: tagRecord.id,
+        createdDate: new Date().toISOString()
+      });
+    }
+  }
+
+  async function resolveIngredientNameConflicts(importDraft, conflicts) {
+    if (!Array.isArray(conflicts) || conflicts.length === 0) {
+      return;
+    }
+
+    var applyAllDecision = null;
+    for (var i = 0; i < conflicts.length; i++) {
+      var conflict = conflicts[i];
+      var itemId = asTrimmedString(conflict.ingredientId);
+      var ingredient = importDraft.ingredients.find(function (entry) {
+        return asTrimmedString(entry && entry.itemId) === itemId;
+      });
+      if (!ingredient) {
+        continue;
+      }
+
+      var existingItem = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, itemId);
+      if (!existingItem) {
+        continue;
+      }
+
+      var decision = applyAllDecision;
+      if (!decision) {
+        var userChoice = await window.KaPUI.ShowIngredientNameConflictPrompt({
+          ingredientId: itemId,
+          existingName: asTrimmedString(conflict.existingName),
+          incomingName: asTrimmedString(conflict.incomingName)
+        });
+
+        if (!userChoice || !userChoice.decision) {
+          throw new Error('Import cancelled.');
+        }
+
+        decision = userChoice.decision;
+        if (userChoice.applyToAll === true) {
+          applyAllDecision = decision;
+        }
+      }
+
+      if (decision === 'keep_existing') {
+        ingredient.name = asTrimmedString(conflict.existingName);
+        continue;
+      }
+
+      existingItem.name = asTrimmedString(conflict.incomingName);
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, existingItem);
+    }
+  }
+
+  async function upsertRecipeImportData(importDraft, scope) {
+    var nowIso = new Date().toISOString();
+    var existingRecipe = scope.recipeRecord;
+    var recipeRecord = existingRecipe || {
+      id: importDraft.recipe.id,
+      type: 'Recipe',
+      createdDate: nowIso
+    };
+
+    recipeRecord.name = importDraft.recipe.name;
+    recipeRecord.description = asOptionalString(recipeRecord.description);
+    recipeRecord.tags = normalizeTagListForImport(importDraft.recipe.tags);
+    recipeRecord.updatedDate = nowIso;
+    if (!recipeRecord.createdDate) {
+      recipeRecord.createdDate = nowIso;
+    }
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORDS, recipeRecord);
+
+    await replaceRecipeTagMappings(recipeRecord.id, recipeRecord.tags);
+
+    var incomingIngredientIds = {};
+    for (var i = 0; i < importDraft.ingredients.length; i++) {
+      var ingredient = importDraft.ingredients[i];
+      incomingIngredientIds[ingredient.id] = true;
+
+      var itemRecord = await window.KaPDB.readByKey(window.KaPStores.STORE_NAMES.ITEMS, ingredient.itemId);
+      if (!itemRecord) {
+        itemRecord = {
+          id: ingredient.itemId,
+          name: ingredient.name,
+          description: ingredient.description || '',
+          categoryId: '',
+          categoryName: ''
+        };
+      }
+
+      itemRecord.name = ingredient.name;
+      if (ingredient.description) {
+        itemRecord.description = ingredient.description;
+      }
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.ITEMS, itemRecord);
+
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, {
+        id: ingredient.id,
+        listRecordId: recipeRecord.id,
+        itemId: ingredient.itemId,
+        name: ingredient.name,
+        quantity: ingredient.quantityValue,
+        quantityValue: ingredient.quantityValue,
+        quantityText: ingredient.quantityText || null,
+        unitOfMeasureId: ingredient.unitOfMeasureId || null,
+        description: ingredient.description || '',
+        isOptional: ingredient.isOptional === true
+      });
+    }
+
+    var existingRecipeItems = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS,
+      window.KaPStores.INDEX_NAMES.LIST_RECORD_ITEMS_BY_LIST_RECORD_ID,
+      recipeRecord.id
+    );
+    for (var j = 0; j < existingRecipeItems.length; j++) {
+      var existingIngredientRecord = existingRecipeItems[j];
+      if (!incomingIngredientIds[existingIngredientRecord.id]) {
+        await window.KaPDB.remove(window.KaPStores.STORE_NAMES.LIST_RECORD_ITEMS, existingIngredientRecord.id);
+      }
+    }
+
+    var incomingInstructionIds = {};
+    for (var k = 0; k < importDraft.instructions.length; k++) {
+      var instruction = importDraft.instructions[k];
+      incomingInstructionIds[instruction.id] = true;
+      await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, {
+        id: instruction.id,
+        recipeId: recipeRecord.id,
+        stepNumber: k + 1,
+        text: instruction.text,
+        createdDate: nowIso,
+        updatedDate: nowIso
+      });
+    }
+
+    var existingInstructions = await window.KaPDB.readAllFromIndex(
+      window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS,
+      window.KaPStores.INDEX_NAMES.RECIPE_INSTRUCTIONS_BY_RECIPE_ID,
+      recipeRecord.id
+    );
+    for (var m = 0; m < existingInstructions.length; m++) {
+      var existingInstruction = existingInstructions[m];
+      if (!incomingInstructionIds[existingInstruction.id]) {
+        await window.KaPDB.remove(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, existingInstruction.id);
+      }
+    }
+
+    var snapshotItems = importDraft.ingredients.map(function (ingredient) {
+      return {
+        itemId: ingredient.itemId,
+        name: ingredient.name,
+        quantity: ingredient.quantityValue,
+        quantityValue: ingredient.quantityValue,
+        quantityText: ingredient.quantityText || null,
+        unitOfMeasureId: ingredient.unitOfMeasureId || null,
+        description: ingredient.description || '',
+        categoryId: '',
+        categoryName: '',
+        isOptional: ingredient.isOptional === true
+      };
+    });
+
+    var snapshotInstructions = importDraft.instructions.map(function (instruction, index) {
+      return {
+        instructionId: instruction.id,
+        stepNumber: index + 1,
+        text: instruction.text
+      };
+    });
+
+    var existingVersion = scope.versionRecord;
+    await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_VERSIONS, {
+      id: importDraft.version.id,
+      recipeId: recipeRecord.id,
+      versionName: importDraft.version.name,
+      parentVersionId: asOptionalString(existingVersion && existingVersion.parentVersionId),
+      createdDate: asOptionalString(existingVersion && existingVersion.createdDate) || nowIso,
+      updatedDate: nowIso,
+      versionNote: 'Imported on ' + new Date().toLocaleString(),
+      snapshotItems: snapshotItems,
+      snapshotInstructions: snapshotInstructions
+    });
+
+    var preservedCountAfterImport = await countActiveRecipeDerivedLists(recipeRecord.id, importDraft.version.id);
+
+    return {
+      recipeId: recipeRecord.id,
+      recipeName: recipeRecord.name,
+      versionId: importDraft.version.id,
+      versionName: importDraft.version.name,
+      ingredientCount: importDraft.ingredients.length,
+      instructionCount: importDraft.instructions.length,
+      recipeDerivedListsPreservedCount: preservedCountAfterImport
+    };
+  }
+
+  async function importRecipeFromKap() {
+    var file = await pickKapFile();
+    if (!file) {
+      return null;
+    }
+
+    var importDraft = await parseKapFile(file);
+    var scope = await readRecipeVersionScope(importDraft);
+    var ingredientConflicts = await buildIngredientNameConflicts(importDraft, scope);
+    var preflight = await buildImportPreflight(importDraft, scope, ingredientConflicts);
+
+    if (preflight.blockingErrors.length > 0) {
+      throw new Error('Import blocked:\n- ' + preflight.blockingErrors.join('\n- '));
+    }
+
+    if (preflight.versionConflictStatus === 'duplicate') {
+      window.KaPUI.ShowTimedNotice({
+        title: 'No Changes Applied',
+        message: 'Imported recipe/version is already up to date.',
+        durationMs: 3000
+      });
+      return null;
+    }
+
+    if (preflight.versionConflictStatus === 'older') {
+      var importOlderConfirmed = await window.KaPUI.ShowConfirm({
+        title: 'Import Older Version?',
+        message: 'This file appears older than what you currently have. Continue only if you want to replace current recipe-version data with older data.',
+        confirmLabel: 'Import Older Version',
+        isDanger: true
+      });
+
+      if (!importOlderConfirmed) {
+        return null;
+      }
+    }
+
+    var reviewDecision = await window.KaPUI.ShowRecipeImportReviewModal({
+      preflight: preflight
+    });
+
+    if (!reviewDecision || reviewDecision.action !== 'apply') {
+      return null;
+    }
+
+    await resolveIngredientNameConflicts(importDraft, ingredientConflicts);
+    var result = await upsertRecipeImportData(importDraft, scope);
+
+    window.KaPUI.ShowTimedNotice({
+      title: 'Import Complete',
+      message: 'Imported ' + result.recipeName + ' (' + result.versionName + '). Preserved recipe-derived lists: '
+        + String(result.recipeDerivedListsPreservedCount || 0),
+      durationMs: 3000
+    });
+
+    return result;
   }
 
   function readAccordionState(storageKey) {
@@ -517,8 +1681,10 @@
     });
   }
 
-  function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion) {
-    return window.KaPUI.NewDetailItemRow(detailItem, {
+  function buildRecipeDetailItemRow(recipeRecord, detailItem, container, hooks, selectedVersionId, isViewingLatestVersion, batchSize) {
+    var displayDetailItem = buildBatchScaledDetailItem(detailItem, batchSize || 1);
+
+    return window.KaPUI.NewDetailItemRow(displayDetailItem, {
       onEdit: async function () {
         if (isViewingLatestVersion) {
           await editRecipeItemWithPrompt(recipeRecord, detailItem);
@@ -1221,6 +2387,58 @@
     }
   }
 
+  function appendBatchSizeSection(container, record, hooks, selectedVersionId, batchSize) {
+    var detailShell = container.querySelector('.detail-shell');
+    if (!detailShell) {
+      return;
+    }
+
+    var section = document.createElement('section');
+    section.className = 'recipe-batch-size-section';
+
+    var row = document.createElement('div');
+    row.className = 'recipe-batch-size-row';
+
+    var textWrap = document.createElement('div');
+    textWrap.className = 'recipe-batch-size-text';
+
+    var label = document.createElement('label');
+    label.className = 'recipe-batch-size-label';
+    label.textContent = 'Batch Size';
+    textWrap.appendChild(label);
+
+    var hint = document.createElement('p');
+    hint.className = 'recipe-batch-size-hint';
+    hint.textContent = 'Recipe source quantities stay the same.';
+    textWrap.appendChild(hint);
+
+    row.appendChild(textWrap);
+
+    var stepperWrap = document.createElement('div');
+    stepperWrap.className = 'recipe-batch-size-stepper-wrap';
+
+    var isInitializing = true;
+    var stepper = window.KaPUI.BuildBatchSizeStepper({
+      initialValue: batchSize,
+      allowEdit: true,
+      onChange: function (value) {
+        if (isInitializing) {
+          return;
+        }
+
+        setRecipeBatchSize(record.id, selectedVersionId, value);
+        renderDetailInto(container, record, hooks, selectedVersionId);
+      }
+    });
+    isInitializing = false;
+
+    stepperWrap.appendChild(stepper.node);
+    row.appendChild(stepperWrap);
+
+    section.appendChild(row);
+    detailShell.appendChild(section);
+  }
+
   function appendIngredientsSection(container, recipeRecord, detailItems, isViewingLatestVersion, hooks, selectedVersionNumber) {
     var detailShell = container.querySelector('.detail-shell');
     var detailList = container.querySelector('[data-detail-item-list]');
@@ -1591,6 +2809,7 @@
     var recipeTags = await window.KaPRecipesService.getRecipeTags(record.id);
     var allRecipeTags = await window.KaPRecipesService.getAllRecipeTags();
     record.tags = recipeTags;
+    var recipeBatchSize = getRecipeBatchSize(record.id, activeVersion ? activeVersion.id : selectedVersionId);
 
     var sortedItems = sortByNameAscending(detailItems);
     var titleText = record.name;
@@ -1604,7 +2823,15 @@
       onAddItem: null,
       detailItems: sortedItems,
       itemRowBuilder: function (detailItem) {
-        return buildRecipeDetailItemRow(record, detailItem, container, hooks, activeVersion ? activeVersion.id : undefined, isViewingLatestVersion);
+        return buildRecipeDetailItemRow(
+          record,
+          detailItem,
+          container,
+          hooks,
+          activeVersion ? activeVersion.id : undefined,
+          isViewingLatestVersion,
+          recipeBatchSize
+        );
       },
       actions: [
         {
@@ -1617,6 +2844,7 @@
             }
 
             var activeVersionId = activeVersion ? activeVersion.id : '';
+            var recipeBatchSize = getRecipeBatchSize(record.id, activeVersionId);
             var existingRecipeList = await window.KaPListsService.findActiveRecipeDerivedList(record.id, activeVersionId);
             var currentBatchSize = existingRecipeList && existingRecipeList.batchSize != null
               ? Number(existingRecipeList.batchSize)
@@ -1634,7 +2862,7 @@
             var result = await window.KaPUI.ShowAddToListModal({
               recipeName: record.name,
               ingredients: ingredients,
-              initialBatchSize: existingRecipeList ? 0.5 : 1,
+              initialBatchSize: recipeBatchSize,
               batchLabel: existingRecipeList ? 'Additional Batch' : 'Batch Size',
               preCheckedKeys: existingRecipeList ? existingSourceKeys : null,
               batchHintFormatter: existingRecipeList
@@ -1679,6 +2907,16 @@
               );
             } catch (error) {
               await showError(error.message || 'Unable to add ingredients to list.');
+            }
+          }
+        },
+        {
+          label: 'Export Recipe',
+          onClick: async function () {
+            try {
+              await exportRecipeVersion(record, activeVersion, detailItems, instructions, recipeTags);
+            } catch (error) {
+              await showError(error.message || 'Unable to export recipe.');
             }
           }
         },
@@ -1741,6 +2979,13 @@
         allRecipeTags
       );
     }
+    appendBatchSizeSection(
+      container,
+      record,
+      hooks,
+      activeVersion ? activeVersion.id : null,
+      recipeBatchSize
+    );
     appendIngredientsSection(
       container,
       record,
@@ -1762,6 +3007,7 @@
 
   window.KaPRecipesPage = {
     createRecipe: createRecipe,
+    importRecipeFromKap: importRecipeFromKap,
     renderInto: renderInto,
     renderDetailInto: renderDetailInto
   };

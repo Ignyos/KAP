@@ -1,5 +1,6 @@
 (function () {
   var activeOverflowMenu = null;
+  var activeTimedNotice = null;
 
   document.addEventListener('click', function (event) {
     if (!activeOverflowMenu) {
@@ -286,9 +287,13 @@
     var qtyPillNode = node.querySelector('.detail-item-qty-pill');
     var itemName = detailItem.name || (detailItem.item && detailItem.item.name) || 'Unknown Item';
     var descriptionText = detailItem.description || '';
-    var currentQuantity = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
-    var currentQuantityText = detailItem.quantityText == null ? null : String(detailItem.quantityText);
-    var uomAbbreviation = detailItem.uomAbbreviation || null;
+    var currentQuantity = detailItem.displayQuantityValue != null
+      ? detailItem.displayQuantityValue
+      : (detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity);
+    var currentQuantityText = detailItem.displayQuantityText != null
+      ? String(detailItem.displayQuantityText)
+      : (detailItem.quantityText == null ? null : String(detailItem.quantityText));
+    var uomAbbreviation = detailItem.displayUomAbbreviation || detailItem.uomAbbreviation || null;
     var hasQtyControls = callbacks && (typeof callbacks.onIncrement === 'function' || typeof callbacks.onDecrement === 'function');
     var hasCrossOffToggle = callbacks && typeof callbacks.onToggleCrossOff === 'function';
 
@@ -2839,6 +2844,423 @@
     });
   }
 
+  function ShowRecipeExportModal(config) {
+    return showModal(function (bodyNode, confirmButton) {
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var options = [
+        {
+          value: 'pdf',
+          title: 'PDF File',
+          description: String(config.pdfDescription || 'Download a printable PDF file.')
+        },
+        {
+          value: 'text',
+          title: 'Copy as Text',
+          description: String(config.textDescription || 'Copy a user-readable recipe to your clipboard.')
+        },
+        {
+          value: 'kap',
+          title: '.kap File',
+          description: String(config.kapDescription || 'Download recipe data in .kap format.')
+        }
+      ];
+
+      var selectedValue = String(config.defaultFormat || 'kap');
+      var foundDefault = false;
+
+      options.forEach(function (option) {
+        if (option.value === selectedValue) {
+          foundDefault = true;
+        }
+      });
+
+      if (!foundDefault) {
+        selectedValue = 'kap';
+      }
+
+      options.forEach(function (option) {
+        var label = document.createElement('label');
+        label.className = 'modal-choice-row';
+
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'kap-recipe-export-format';
+        radio.value = option.value;
+        radio.className = 'modal-choice-radio';
+        radio.checked = option.value === selectedValue;
+        radio.addEventListener('change', function () {
+          if (radio.checked) {
+            selectedValue = option.value;
+          }
+        });
+        label.appendChild(radio);
+
+        var content = document.createElement('div');
+        content.className = 'modal-choice-content';
+
+        var title = document.createElement('div');
+        title.className = 'modal-choice-title';
+        title.textContent = option.title;
+        content.appendChild(title);
+
+        var description = document.createElement('p');
+        description.className = 'modal-choice-description';
+        description.textContent = option.description;
+        content.appendChild(description);
+
+        label.appendChild(content);
+        form.appendChild(label);
+      });
+
+      bodyNode.appendChild(form);
+
+      requestAnimationFrame(function () {
+        var selectedRadio = form.querySelector('.modal-choice-radio:checked');
+        if (selectedRadio) {
+          selectedRadio.focus();
+        } else {
+          confirmButton.focus();
+        }
+      });
+
+      return function () {
+        return selectedValue;
+      };
+    }, {
+      title: config.title || 'Export Recipe',
+      confirmLabel: config.confirmLabel || 'Continue',
+      cancelValue: null,
+      isDanger: false,
+      compact: false
+    });
+  }
+
+  function ShowIngredientNameConflictPrompt(config) {
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      titleNode.textContent = 'Ingredient Name Conflict';
+      card.setAttribute('aria-label', 'Ingredient Name Conflict');
+      cancelButton.style.display = 'none';
+      confirmButton.style.display = 'none';
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form modal-conflict-form';
+
+      var lineOne = document.createElement('p');
+      lineOne.className = 'modal-message';
+      lineOne.textContent = 'Imported ingredient uses the same Id as an existing ingredient, but the names are different.';
+      form.appendChild(lineOne);
+
+      var idLine = document.createElement('p');
+      idLine.className = 'modal-message';
+      idLine.textContent = 'Id: ' + String(config.ingredientId || '');
+      form.appendChild(idLine);
+
+      var existingLine = document.createElement('p');
+      existingLine.className = 'modal-message';
+      existingLine.textContent = 'Existing: ' + String(config.existingName || '');
+      form.appendChild(existingLine);
+
+      var incomingLine = document.createElement('p');
+      incomingLine.className = 'modal-message';
+      incomingLine.textContent = 'Incoming: ' + String(config.incomingName || '');
+      form.appendChild(incomingLine);
+
+      var applyWrap = document.createElement('label');
+      applyWrap.className = 'modal-conflict-apply-row';
+
+      var applyCheckbox = document.createElement('input');
+      applyCheckbox.type = 'checkbox';
+      applyCheckbox.className = 'modal-choice-radio';
+      applyWrap.appendChild(applyCheckbox);
+
+      var applyText = document.createElement('span');
+      applyText.textContent = 'Apply this decision to all remaining conflicts.';
+      applyWrap.appendChild(applyText);
+      form.appendChild(applyWrap);
+
+      var actions = document.createElement('div');
+      actions.className = 'modal-conflict-actions';
+
+      var useIncomingButton = document.createElement('button');
+      useIncomingButton.type = 'button';
+      useIncomingButton.className = 'modal-button modal-button--primary';
+      useIncomingButton.textContent = 'Use Incoming Name';
+
+      var keepExistingButton = document.createElement('button');
+      keepExistingButton.type = 'button';
+      keepExistingButton.className = 'modal-button modal-button--secondary';
+      keepExistingButton.textContent = 'Keep Existing Name';
+
+      var cancelImportButton = document.createElement('button');
+      cancelImportButton.type = 'button';
+      cancelImportButton.className = 'modal-button modal-button--secondary';
+      cancelImportButton.textContent = 'Cancel Import';
+
+      actions.appendChild(useIncomingButton);
+      actions.appendChild(keepExistingButton);
+      actions.appendChild(cancelImportButton);
+      form.appendChild(actions);
+
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function decisionResult(decision) {
+        return {
+          decision: decision,
+          applyToAll: applyCheckbox.checked === true
+        };
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          close(null);
+          return;
+        }
+
+        if (event.key === 'Enter') {
+          var focused = document.activeElement;
+          if (focused === useIncomingButton || focused === keepExistingButton || focused === cancelImportButton) {
+            event.preventDefault();
+            focused.click();
+          }
+        }
+      }
+
+      useIncomingButton.addEventListener('click', function () {
+        close(decisionResult('use_incoming'));
+      });
+
+      keepExistingButton.addEventListener('click', function () {
+        close(decisionResult('keep_existing'));
+      });
+
+      cancelImportButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        keepExistingButton.focus();
+      });
+    });
+  }
+
+  function ShowRecipeImportReviewModal(config) {
+    return new Promise(function (resolve) {
+      var preflight = config && config.preflight ? config.preflight : null;
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      overlay.classList.add('modal-overlay--compact');
+      card.classList.add('modal-card--compact');
+      card.classList.add('modal-card--import-review');
+      titleNode.textContent = 'Review Recipe Import';
+      card.setAttribute('aria-label', 'Review Recipe Import');
+      cancelButton.style.display = 'none';
+      confirmButton.style.display = 'none';
+
+      var wrap = document.createElement('div');
+      wrap.className = 'modal-import-review';
+
+      var intro = document.createElement('p');
+      intro.className = 'modal-message modal-import-review-intro';
+      intro.textContent = 'Review what will change before you apply this import.';
+      wrap.appendChild(intro);
+
+      var targetCard = document.createElement('div');
+      targetCard.className = 'modal-import-section';
+      var targetTitle = document.createElement('h3');
+      targetTitle.className = 'modal-import-section-title';
+      targetTitle.textContent = 'Import Target';
+      targetCard.appendChild(targetTitle);
+
+      var recipeLine = document.createElement('p');
+      recipeLine.className = 'modal-import-line';
+      recipeLine.textContent = 'Recipe: ' + String((preflight && preflight.target && preflight.target.recipeName) || 'Unknown');
+      targetCard.appendChild(recipeLine);
+
+      var versionLine = document.createElement('p');
+      versionLine.className = 'modal-import-line';
+      versionLine.textContent = 'Version: ' + String((preflight && preflight.target && preflight.target.versionName) || 'Unknown');
+      targetCard.appendChild(versionLine);
+
+      wrap.appendChild(targetCard);
+
+      var changesCard = document.createElement('div');
+      changesCard.className = 'modal-import-section';
+      var changesTitle = document.createElement('h3');
+      changesTitle.className = 'modal-import-section-title';
+      changesTitle.textContent = 'What Will Change';
+      changesCard.appendChild(changesTitle);
+
+      var metrics = document.createElement('div');
+      metrics.className = 'modal-import-metrics';
+
+      function addMetric(label, value) {
+        var row = document.createElement('div');
+        row.className = 'modal-import-metric';
+
+        var labelNode = document.createElement('span');
+        labelNode.className = 'modal-import-metric-label';
+        labelNode.textContent = label;
+
+        var valueNode = document.createElement('span');
+        valueNode.className = 'modal-import-metric-value';
+        valueNode.textContent = String(value);
+
+        row.appendChild(labelNode);
+        row.appendChild(valueNode);
+        metrics.appendChild(row);
+      }
+
+      addMetric('Ingredients to add', preflight && preflight.ingredientCounts ? preflight.ingredientCounts.newCount : 0);
+      addMetric('Ingredients to update', preflight && preflight.ingredientCounts ? preflight.ingredientCounts.overwriteCount : 0);
+      addMetric('Instructions to add', preflight && preflight.instructionCounts ? preflight.instructionCounts.newCount : 0);
+      addMetric('Instructions to update', preflight && preflight.instructionCounts ? preflight.instructionCounts.overwriteCount : 0);
+
+      if (preflight && preflight.ingredientConflictCount > 0) {
+        addMetric('Name decisions needed', preflight.ingredientConflictCount);
+      }
+
+      if (preflight && preflight.recipeDerivedListsPreservedCount > 0) {
+        addMetric('Existing grocery lists kept', preflight.recipeDerivedListsPreservedCount);
+      }
+
+      changesCard.appendChild(metrics);
+      wrap.appendChild(changesCard);
+
+      if (preflight && preflight.versionConflictDetail) {
+        var versionNote = document.createElement('p');
+        versionNote.className = 'modal-message modal-import-note';
+        versionNote.textContent = 'Version note: ' + preflight.versionConflictDetail;
+        wrap.appendChild(versionNote);
+      }
+
+      if (preflight && Array.isArray(preflight.warnings) && preflight.warnings.length > 0) {
+        var warningCard = document.createElement('div');
+        warningCard.className = 'modal-import-section modal-import-warning';
+
+        var warningTitle = document.createElement('h3');
+        warningTitle.className = 'modal-import-section-title';
+        warningTitle.textContent = 'Please Review';
+        warningCard.appendChild(warningTitle);
+
+        var warningList = document.createElement('ul');
+        warningList.className = 'modal-import-warning-list';
+        for (var i = 0; i < preflight.warnings.length; i++) {
+          var item = document.createElement('li');
+          item.textContent = String(preflight.warnings[i]);
+          warningList.appendChild(item);
+        }
+
+        warningCard.appendChild(warningList);
+        wrap.appendChild(warningCard);
+      }
+
+      var dangerNote = document.createElement('p');
+      dangerNote.className = 'modal-message modal-import-danger-note';
+      dangerNote.textContent = 'Applying import replaces matching data for this recipe version. There is no automatic undo.';
+      wrap.appendChild(dangerNote);
+
+      var decisionTitle = document.createElement('h3');
+      decisionTitle.className = 'modal-import-section-title';
+      decisionTitle.textContent = 'Choose What To Do';
+      wrap.appendChild(decisionTitle);
+
+      var decisions = document.createElement('div');
+      decisions.className = 'modal-import-decisions';
+
+      var applyButton = document.createElement('button');
+      applyButton.type = 'button';
+      applyButton.className = 'modal-import-decision modal-import-decision--danger';
+      applyButton.innerHTML = '<span class="modal-import-decision-title">Apply Import</span>'
+        + '<span class="modal-import-decision-description">Update this recipe version using the imported file.</span>';
+
+      var cancelImportButton = document.createElement('button');
+      cancelImportButton.type = 'button';
+      cancelImportButton.className = 'modal-import-decision modal-import-decision--safe';
+      cancelImportButton.innerHTML = '<span class="modal-import-decision-title">Cancel Import</span>'
+        + '<span class="modal-import-decision-description">Close this dialog and keep everything unchanged.</span>';
+
+      decisions.appendChild(applyButton);
+      decisions.appendChild(cancelImportButton);
+      wrap.appendChild(decisions);
+      bodyNode.appendChild(wrap);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          close({ action: 'cancel' });
+          return;
+        }
+
+        if (event.key === 'Enter') {
+          var focused = document.activeElement;
+          if (focused === applyButton || focused === cancelImportButton) {
+            event.preventDefault();
+            focused.click();
+          }
+        }
+      }
+
+      applyButton.addEventListener('click', function () {
+        close({ action: 'apply' });
+      });
+
+      cancelImportButton.addEventListener('click', function () {
+        close({ action: 'cancel' });
+      });
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close({ action: 'cancel' });
+        }
+      });
+
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        cancelImportButton.focus();
+      });
+    });
+  }
+
   function ShowConfirm(config) {
     return showModal(function (bodyNode, confirmButton, cancelButton) {
       if (config.message) {
@@ -2937,6 +3359,81 @@
     });
   }
 
+  function ShowTimedNotice(config) {
+    var durationMs = Number(config && config.durationMs);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      durationMs = 3000;
+    }
+
+    if (activeTimedNotice && typeof activeTimedNotice.close === 'function') {
+      activeTimedNotice.close();
+    }
+
+    var notice = document.createElement('div');
+    notice.className = 'timed-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+
+    var textWrap = document.createElement('div');
+    textWrap.className = 'timed-notice-text';
+
+    var titleNode = document.createElement('div');
+    titleNode.className = 'timed-notice-title';
+    titleNode.textContent = String((config && config.title) || 'Done');
+    textWrap.appendChild(titleNode);
+
+    if (config && config.message) {
+      var messageNode = document.createElement('p');
+      messageNode.className = 'timed-notice-message';
+      messageNode.textContent = String(config.message);
+      textWrap.appendChild(messageNode);
+    }
+
+    var closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'timed-notice-close';
+    closeButton.textContent = '\u00d7';
+    closeButton.setAttribute('aria-label', 'Dismiss notice');
+
+    var timeoutId = null;
+
+    function closeNotice() {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+
+      if (notice.parentNode) {
+        notice.parentNode.removeChild(notice);
+      }
+
+      if (activeTimedNotice && activeTimedNotice.node === notice) {
+        activeTimedNotice = null;
+      }
+    }
+
+    closeButton.addEventListener('click', function () {
+      closeNotice();
+    });
+
+    notice.appendChild(textWrap);
+    notice.appendChild(closeButton);
+    document.body.appendChild(notice);
+
+    requestAnimationFrame(function () {
+      notice.classList.add('timed-notice--visible');
+    });
+
+    timeoutId = setTimeout(function () {
+      closeNotice();
+    }, durationMs);
+
+    activeTimedNotice = {
+      node: notice,
+      close: closeNotice
+    };
+  }
+
   window.KaPUI = {
     NewMainTab: NewMainTab,
     AddMainTab: AddMainTab,
@@ -2963,9 +3460,14 @@
     ShowNewVersionModal: ShowNewVersionModal,
     ShowRecipeCloneModal: ShowRecipeCloneModal,
     ShowImportModeModal: ShowImportModeModal,
+    BuildBatchSizeStepper: buildBatchSizeStepper,
+    ShowRecipeExportModal: ShowRecipeExportModal,
+    ShowRecipeImportReviewModal: ShowRecipeImportReviewModal,
+    ShowIngredientNameConflictPrompt: ShowIngredientNameConflictPrompt,
     ShowConfirm: ShowConfirm,
     ShowAlert: ShowAlert,
     ShowAboutModal: ShowAboutModal,
+    ShowTimedNotice: ShowTimedNotice,
     SetActiveOverflowMenu: setActiveOverflowMenu,
     ShouldOpenOverflowUp: shouldOpenOverflowUp
   };
