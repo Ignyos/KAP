@@ -1,0 +1,79 @@
+Release timestamp: 2026-06-28-14-51
+Diff source: 2026-06-28-13-58..HEAD
+Generated at: 2026-06-28 10:51:49Z
+diff --git a/src/features/templates/templates-page.js b/src/features/templates/templates-page.js
+index 29c898b..c17feb8 100644
+--- a/src/features/templates/templates-page.js
++++ b/src/features/templates/templates-page.js
+@@ -1,5 +1,5 @@
+ (function () {
+-  var pendingTargetAddClicksByKey = {};
++  var pendingTargetAddCountsByKey = {};
+   var processingTargetAddByKey = {};
+ 
+   async function showError(message) {
+@@ -220,10 +220,7 @@
+     }) || null;
+   }
+ 
+-  async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
+-    var targetKey = getTargetAddKey(templateRecord, detailItem);
+-    pendingTargetAddClicksByKey[targetKey] = true;
+-
++  async function processPendingTargetAdds(targetKey, templateRecord, detailItem, container, hooks) {
+     if (processingTargetAddByKey[targetKey]) {
+       return;
+     }
+@@ -231,21 +228,32 @@
+     processingTargetAddByKey[targetKey] = true;
+ 
+     try {
+-      while (pendingTargetAddClicksByKey[targetKey] === true) {
+-        pendingTargetAddClicksByKey[targetKey] = false;
++      while ((pendingTargetAddCountsByKey[targetKey] || 0) > 0) {
++        pendingTargetAddCountsByKey[targetKey] = pendingTargetAddCountsByKey[targetKey] - 1;
+         var latestDetailItem = await getLatestTemplateDetailItem(templateRecord.id, detailItem.id);
+         var didApply = await addTemplateItemToTargetListImpl(templateRecord, latestDetailItem || detailItem, container, hooks);
+         if (didApply === false) {
+           // If target list selection is canceled, clear queued clicks for this item.
+-          pendingTargetAddClicksByKey[targetKey] = false;
++          pendingTargetAddCountsByKey[targetKey] = 0;
+           break;
+         }
+       }
+     } finally {
+       processingTargetAddByKey[targetKey] = false;
++
++      // Handle clicks that arrive during the final transition out of processing.
++      if ((pendingTargetAddCountsByKey[targetKey] || 0) > 0) {
++        processPendingTargetAdds(targetKey, templateRecord, detailItem, container, hooks);
++      }
+     }
+   }
+ 
++  async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
++    var targetKey = getTargetAddKey(templateRecord, detailItem);
++    pendingTargetAddCountsByKey[targetKey] = (pendingTargetAddCountsByKey[targetKey] || 0) + 1;
++    await processPendingTargetAdds(targetKey, templateRecord, detailItem, container, hooks);
++  }
++
+   async function addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks) {
+     var latestTemplateRecord = await window.KaPDB.readByKey(
+       window.KaPStores.STORE_NAMES.LIST_RECORDS,
+@@ -314,11 +322,16 @@
+         itemId = recoveredItem.id;
+       }
+ 
++      var quantityToAdd = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
++      if (quantityToAdd == null || String(quantityToAdd).trim() === '') {
++        quantityToAdd = 1;
++      }
++
+       await window.KaPListsService.addItemToList(
+         activeTemplateRecord.targetListId,
+         itemId,
+         detailItem.name,
+-        detailItem.quantity,
++        quantityToAdd,
+         detailItem.description
+       );

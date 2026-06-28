@@ -1,3 +1,39 @@
+# Release v2026-06-28-14-51
+
+## Overview
+This release improves Pantry Entry item adds to target lists so repeated clicks are applied reliably. It also ensures first-time adds start with a clear default quantity when template quantity is empty.
+
+## New Features
+- **No New Features**: This release focuses on reliability and behavior fixes for existing Pantry Entry item add interactions.
+
+## Improvements
+- **Pantry Entry Click Handling**: Repeated clicks on a Pantry Entry item now queue and apply consistently while an add is already in progress.
+- **Rapid Add Reliability**: Additional clicks that happen during processing are now picked up and processed instead of being dropped.
+
+## Bug Fixes
+- **Target List Incrementing**: Fixes a case where the second click could appear to do nothing before the next click incremented quantity.
+- **Default Add Quantity**: First-time adds from Pantry Entry items now default to quantity `1` when the template item has no quantity set.
+
+## Technical Changes
+- Replaced boolean pending-click state with counted pending-click tracking for template item target-list adds.
+- Added a dedicated pending-add processor that drains queued clicks and re-checks for late-arriving clicks.
+- Updated template add flow to pass normalized quantity to list add operations.
+
+## Installation
+1. Clone or pull the latest code from the repository.
+2. Open `src/index.html` or `docs/index.html` in a web browser.
+
+## Requirements
+- Modern web browser with ES5 JavaScript support.
+- LocalStorage and IndexedDB support for data persistence.
+
+## Documentation
+- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
+- For feature documentation and usage guides, see `application-structure.md`.
+- For recipe feature planning notes, see `recipe-feature-definition.md`.
+
+---
+
 # Release v2026-06-28-13-58
 
 ## Overview

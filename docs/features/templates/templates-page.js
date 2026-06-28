@@ -1,5 +1,5 @@
 (function () {
-  var pendingTargetAddClicksByKey = {};
+  var pendingTargetAddCountsByKey = {};
   var processingTargetAddByKey = {};
 
   async function showError(message) {
@@ -220,10 +220,7 @@
     }) || null;
   }
 
-  async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
-    var targetKey = getTargetAddKey(templateRecord, detailItem);
-    pendingTargetAddClicksByKey[targetKey] = true;
-
+  async function processPendingTargetAdds(targetKey, templateRecord, detailItem, container, hooks) {
     if (processingTargetAddByKey[targetKey]) {
       return;
     }
@@ -231,19 +228,30 @@
     processingTargetAddByKey[targetKey] = true;
 
     try {
-      while (pendingTargetAddClicksByKey[targetKey] === true) {
-        pendingTargetAddClicksByKey[targetKey] = false;
+      while ((pendingTargetAddCountsByKey[targetKey] || 0) > 0) {
+        pendingTargetAddCountsByKey[targetKey] = pendingTargetAddCountsByKey[targetKey] - 1;
         var latestDetailItem = await getLatestTemplateDetailItem(templateRecord.id, detailItem.id);
         var didApply = await addTemplateItemToTargetListImpl(templateRecord, latestDetailItem || detailItem, container, hooks);
         if (didApply === false) {
           // If target list selection is canceled, clear queued clicks for this item.
-          pendingTargetAddClicksByKey[targetKey] = false;
+          pendingTargetAddCountsByKey[targetKey] = 0;
           break;
         }
       }
     } finally {
       processingTargetAddByKey[targetKey] = false;
+
+      // Handle clicks that arrive during the final transition out of processing.
+      if ((pendingTargetAddCountsByKey[targetKey] || 0) > 0) {
+        processPendingTargetAdds(targetKey, templateRecord, detailItem, container, hooks);
+      }
     }
+  }
+
+  async function addTemplateItemToTargetList(templateRecord, detailItem, container, hooks) {
+    var targetKey = getTargetAddKey(templateRecord, detailItem);
+    pendingTargetAddCountsByKey[targetKey] = (pendingTargetAddCountsByKey[targetKey] || 0) + 1;
+    await processPendingTargetAdds(targetKey, templateRecord, detailItem, container, hooks);
   }
 
   async function addTemplateItemToTargetListImpl(templateRecord, detailItem, container, hooks) {
@@ -314,11 +322,16 @@
         itemId = recoveredItem.id;
       }
 
+      var quantityToAdd = detailItem.quantityValue != null ? detailItem.quantityValue : detailItem.quantity;
+      if (quantityToAdd == null || String(quantityToAdd).trim() === '') {
+        quantityToAdd = 1;
+      }
+
       await window.KaPListsService.addItemToList(
         activeTemplateRecord.targetListId,
         itemId,
         detailItem.name,
-        detailItem.quantity,
+        quantityToAdd,
         detailItem.description
       );
 
