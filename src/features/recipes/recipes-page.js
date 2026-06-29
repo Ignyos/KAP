@@ -40,17 +40,89 @@
     return safeRecipeName + '_' + safeVersionName;
   }
 
+  function getGreatestCommonDivisor(a, b) {
+    var x = Math.abs(Math.round(a));
+    var y = Math.abs(Math.round(b));
+
+    while (y) {
+      var temp = y;
+      y = x % y;
+      x = temp;
+    }
+
+    return x || 1;
+  }
+
+  function formatNumericQuantityAsFraction(value) {
+    var numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return '';
+    }
+
+    var sign = numeric < 0 ? '-' : '';
+    var absolute = Math.abs(numeric);
+    var whole = Math.floor(absolute);
+    var remainder = absolute - whole;
+    var tolerance = 0.0001;
+
+    if (remainder <= tolerance) {
+      return sign + String(whole);
+    }
+
+    if (Math.abs(1 - remainder) <= tolerance) {
+      return sign + String(whole + 1);
+    }
+
+    var bestNumerator = 0;
+    var bestDenominator = 1;
+    var bestError = Number.POSITIVE_INFINITY;
+    var denominator = 0;
+
+    for (denominator = 2; denominator <= 16; denominator += 1) {
+      var numerator = Math.round(remainder * denominator);
+      if (numerator <= 0 || numerator >= denominator) {
+        continue;
+      }
+
+      var error = Math.abs(remainder - (numerator / denominator));
+      if (error < bestError) {
+        bestError = error;
+        bestNumerator = numerator;
+        bestDenominator = denominator;
+      }
+    }
+
+    if (!Number.isFinite(bestError) || bestError > 0.02) {
+      return sign + numeric.toFixed(3).replace(/\.?0+$/, '');
+    }
+
+    var divisor = getGreatestCommonDivisor(bestNumerator, bestDenominator);
+    bestNumerator = bestNumerator / divisor;
+    bestDenominator = bestDenominator / divisor;
+
+    if (whole <= 0) {
+      return sign + String(bestNumerator) + '/' + String(bestDenominator);
+    }
+
+    return sign + String(whole) + ' ' + String(bestNumerator) + '/' + String(bestDenominator);
+  }
+
   function getIngredientQuantityText(item) {
     if (item && item.quantityText != null && String(item.quantityText).trim() !== '') {
       return String(item.quantityText).trim();
     }
 
     if (item && item.quantityValue != null && !Number.isNaN(Number(item.quantityValue))) {
-      return String(item.quantityValue);
+      return formatNumericQuantityAsFraction(item.quantityValue);
     }
 
     if (item && item.quantity != null && String(item.quantity).trim() !== '') {
-      return String(item.quantity).trim();
+      var rawQuantity = String(item.quantity).trim();
+      if (/^-?(?:\d+|\d*\.\d+)$/.test(rawQuantity) && !Number.isNaN(Number(rawQuantity))) {
+        return formatNumericQuantityAsFraction(Number(rawQuantity));
+      }
+
+      return rawQuantity;
     }
 
     return '';
@@ -70,7 +142,7 @@
       return String(baseQuantityText).trim() || null;
     }
 
-    return scaled.toFixed(3).replace(/\.?0+$/, '');
+    return formatNumericQuantityAsFraction(scaled);
   }
 
   function getRecipeBatchSizeState() {
@@ -146,6 +218,113 @@
     return prefix + name + optionalSuffix;
   }
 
+  function normalizeInstructionIngredientRefs(instruction) {
+    var seen = {};
+    return (Array.isArray(instruction && instruction.ingredientRefs) ? instruction.ingredientRefs : []).map(function (itemId) {
+      return String(itemId || '').trim();
+    }).filter(function (itemId) {
+      if (!itemId || seen[itemId]) {
+        return false;
+      }
+
+      seen[itemId] = true;
+      return true;
+    });
+  }
+
+  function normalizeInstructionTimer(timer) {
+    if (!timer || typeof timer !== 'object') {
+      return null;
+    }
+
+    var durationSeconds = Number(timer.durationSeconds);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      return null;
+    }
+
+    return {
+      durationSeconds: Math.floor(durationSeconds),
+      label: String(timer.label || '').trim()
+    };
+  }
+
+  function formatStepTimerDuration(durationSeconds) {
+    var totalSeconds = Number(durationSeconds);
+    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+      return '';
+    }
+
+    totalSeconds = Math.floor(totalSeconds);
+    var hours = Math.floor(totalSeconds / 3600);
+    var minutes = Math.floor((totalSeconds % 3600) / 60);
+    var seconds = totalSeconds % 60;
+    var parts = [];
+
+    if (hours > 0) {
+      parts.push(String(hours) + 'h');
+    }
+    if (minutes > 0) {
+      parts.push(String(minutes) + 'm');
+    }
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(String(seconds) + 's');
+    }
+
+    return parts.join(' ');
+  }
+
+  function buildStepEditorIngredientOptions(detailItems, instructions, currentInstructionId) {
+    var usedByOtherSteps = {};
+    (instructions || []).forEach(function (instruction) {
+      if (instruction && instruction.id === currentInstructionId) {
+        return;
+      }
+
+      normalizeInstructionIngredientRefs(instruction).forEach(function (itemId) {
+        usedByOtherSteps[itemId] = true;
+      });
+    });
+
+    var seen = {};
+    return sortByNameAscending((detailItems || []).filter(function (detailItem) {
+      var itemId = String(detailItem && detailItem.itemId || '').trim();
+      if (!itemId || seen[itemId]) {
+        return false;
+      }
+
+      seen[itemId] = true;
+      return true;
+    }).map(function (detailItem) {
+      var displayLine = buildIngredientDisplayLine(detailItem);
+      var name = String(detailItem.name || '').trim() || displayLine;
+      return {
+        itemId: String(detailItem.itemId || '').trim(),
+        name: name,
+        meta: displayLine !== name ? displayLine : '',
+        isUsedElsewhere: usedByOtherSteps[String(detailItem.itemId || '').trim()] === true
+      };
+    }));
+  }
+
+  function buildStepDraftFromInstruction(instruction) {
+    return {
+      text: String(instruction && instruction.text || ''),
+      ingredientRefs: normalizeInstructionIngredientRefs(instruction),
+      timer: normalizeInstructionTimer(instruction && instruction.timer)
+    };
+  }
+
+  async function showStepEditor(detailItems, instructions, currentInstruction, title, confirmLabel) {
+    return window.KaPUI.ShowStepEditorModal({
+      title: title,
+      confirmLabel: confirmLabel,
+      placeholder: 'Describe this cooking step',
+      initialStep: buildStepDraftFromInstruction(currentInstruction),
+      ingredients: buildStepEditorIngredientOptions(detailItems, instructions, currentInstruction && currentInstruction.id),
+      overlapWarningMessage: 'Some selected ingredients are already used in other steps.'
+    });
+  }
+
   function escapeHtml(value) {
     return String(value || '')
       .replace(/&/g, '&amp;')
@@ -204,7 +383,9 @@
         return {
           id: step && step.id != null ? String(step.id) : '',
           stepNumber: step && step.stepNumber != null ? Number(step.stepNumber) : null,
-          text: step && step.text ? String(step.text) : ''
+          text: step && step.text ? String(step.text) : '',
+          ingredientRefs: normalizeInstructionIngredientRefs(step),
+          timer: normalizeInstructionTimer(step && step.timer)
         };
       })
     };
@@ -465,10 +646,17 @@
 
     return instructions.map(function (instruction, index) {
       var stepNumber = asOptionalNumber(instruction && instruction.stepNumber);
+      var timer = normalizeInstructionTimer(instruction && instruction.timer);
+      if (instruction && instruction.timer && !timer) {
+        throw new Error('Instruction timer duration must be greater than zero.');
+      }
+
       return {
         id: asTrimmedString(instruction && instruction.id) || window.KaPIds.NewId(),
         stepNumber: stepNumber == null ? (index + 1) : stepNumber,
-        text: asTrimmedString(instruction && instruction.text)
+        text: asTrimmedString(instruction && instruction.text),
+        ingredientRefs: normalizeInstructionIngredientRefs(instruction),
+        timer: timer
       };
     }).filter(function (instruction) {
       return !!instruction.text;
@@ -691,7 +879,9 @@
       id: asTrimmedString(instruction && instruction.id),
       recipeId: asTrimmedString(recipeId),
       stepNumber: Number(stepNumber || 0),
-      text: asTrimmedString(instruction && instruction.text)
+      text: asTrimmedString(instruction && instruction.text),
+      ingredientRefs: normalizeInstructionIngredientRefs(instruction),
+      timer: normalizeInstructionTimer(instruction && instruction.timer)
     };
   }
 
@@ -700,7 +890,9 @@
       id: asTrimmedString(instruction && instruction.id),
       recipeId: asTrimmedString(instruction && instruction.recipeId),
       stepNumber: Number(instruction && instruction.stepNumber || 0),
-      text: asTrimmedString(instruction && instruction.text)
+      text: asTrimmedString(instruction && instruction.text),
+      ingredientRefs: normalizeInstructionIngredientRefs(instruction),
+      timer: normalizeInstructionTimer(instruction && instruction.timer)
     };
   }
 
@@ -711,7 +903,9 @@
     return lhs.id === rhs.id
       && lhs.recipeId === rhs.recipeId
       && lhs.stepNumber === rhs.stepNumber
-      && lhs.text === rhs.text;
+      && lhs.text === rhs.text
+      && JSON.stringify(lhs.ingredientRefs) === JSON.stringify(rhs.ingredientRefs)
+      && JSON.stringify(lhs.timer) === JSON.stringify(rhs.timer);
   }
 
   function findDuplicateIds(records, selector) {
@@ -1141,7 +1335,9 @@
       return {
         instructionId: instruction.id,
         stepNumber: index + 1,
-        text: instruction.text
+        text: instruction.text,
+        ingredientRefs: normalizeInstructionIngredientRefs(instruction),
+        timer: normalizeInstructionTimer(instruction.timer)
       };
     });
 
@@ -1521,6 +1717,7 @@
       currentContextLabel: 'recipe',
       detailItems: overrides.detailItems || [],
       quantityPlaceholder: 'e.g. 1/2 or 1.5',
+      quantityHelpText: 'Accepted formats: 1.5, 3/4, or 1 1/2',
       validateQuantity: window.KaPItemDiscovery.validateOptionalDecimal,
       showOptionalField: true,
       optionalLabel: 'Mark ingredient as optional'
@@ -1773,19 +1970,15 @@
     }
   }
 
-  async function addInstructionWithPrompt(recipeRecord) {
-    var stepText = await window.KaPUI.ShowPrompt({
-      title: 'Add Step',
-      placeholder: 'Describe this cooking step',
-      confirmLabel: 'Add'
-    });
+  async function addInstructionWithPrompt(recipeRecord, detailItems, instructions) {
+    var stepDraft = await showStepEditor(detailItems, instructions, null, 'Add Step', 'Add');
 
-    if (stepText === null) {
+    if (stepDraft === null) {
       return false;
     }
 
     try {
-      await window.KaPRecipesService.addInstructionToRecipe(recipeRecord.id, stepText);
+      await window.KaPRecipesService.addInstructionToRecipe(recipeRecord.id, stepDraft);
       return true;
     } catch (error) {
       await showError(error.message || 'Unable to add instruction.');
@@ -1793,23 +1986,40 @@
     }
   }
 
-  async function editInstructionWithPrompt(recipeRecord, instruction, selectedVersionId, isViewingLatestVersion) {
-    var nextText = await window.KaPUI.ShowPrompt({
-      title: 'Edit Step ' + instruction.stepNumber,
-      placeholder: 'Describe this cooking step',
-      value: instruction.text,
-      confirmLabel: 'Save'
-    });
+  async function addInstructionToVersionWithPrompt(recipeRecord, selectedVersionId, detailItems, instructions) {
+    var stepDraft = await showStepEditor(detailItems, instructions, null, 'Add Step', 'Add');
 
-    if (nextText === null) {
+    if (stepDraft === null) {
+      return false;
+    }
+
+    try {
+      await window.KaPRecipesService.addInstructionToVersion(recipeRecord.id, selectedVersionId, stepDraft);
+      return true;
+    } catch (error) {
+      await showError(error.message || 'Unable to add instruction.');
+      return false;
+    }
+  }
+
+  async function editInstructionWithPrompt(recipeRecord, instruction, detailItems, instructions, selectedVersionId, isViewingLatestVersion) {
+    var nextDraft = await showStepEditor(
+      detailItems,
+      instructions,
+      instruction,
+      'Edit Step ' + instruction.stepNumber,
+      'Save'
+    );
+
+    if (nextDraft === null) {
       return false;
     }
 
     try {
       if (isViewingLatestVersion === false) {
-        await window.KaPRecipesService.updateVersionInstruction(recipeRecord.id, selectedVersionId, instruction.id, nextText);
+        await window.KaPRecipesService.updateVersionInstruction(recipeRecord.id, selectedVersionId, instruction.id, nextDraft);
       } else {
-        await window.KaPRecipesService.updateRecipeInstruction(recipeRecord.id, instruction.id, nextText);
+        await window.KaPRecipesService.updateRecipeInstruction(recipeRecord.id, instruction.id, nextDraft);
       }
       return true;
     } catch (error) {
@@ -1969,7 +2179,9 @@
         return {
           id: snapshotInstruction.instructionId || ('snapshot-step-' + String(index)),
           stepNumber: Number(snapshotInstruction.stepNumber || index + 1),
-          text: snapshotInstruction.text || ''
+          text: snapshotInstruction.text || '',
+          ingredientRefs: normalizeInstructionIngredientRefs(snapshotInstruction),
+          timer: normalizeInstructionTimer(snapshotInstruction.timer)
         };
       });
   }
@@ -2632,7 +2844,7 @@
     tabs.className = 'recipe-detail-tabs';
     var activeSection = getActiveDetailsSection();
     var definitions = [
-      { key: DETAILS_SECTION_INFORMATION, label: 'Information' },
+      { key: DETAILS_SECTION_INFORMATION, label: 'Info' },
       { key: DETAILS_SECTION_DESCRIPTION, label: 'Description' },
       { key: DETAILS_SECTION_VERSIONS, label: 'Versions' },
       { key: DETAILS_SECTION_TAGS, label: 'Tags' }
@@ -3347,7 +3559,7 @@
     detailShell.appendChild(section);
   }
 
-  async function appendInstructionsSection(container, recipeRecord, instructions, isViewingLatestVersion, hooks, selectedVersionNumber) {
+  async function appendInstructionsSection(container, recipeRecord, detailItems, instructions, isViewingLatestVersion, hooks, selectedVersionNumber) {
     var detailShell = container.querySelector('.detail-shell');
     if (!detailShell) {
       return;
@@ -3370,7 +3582,7 @@
       addButton.className = 'accordion-new-button';
       addButton.textContent = '+ Step';
       addButton.addEventListener('click', async function () {
-        var changed = await addInstructionWithPrompt(recipeRecord);
+        var changed = await addInstructionWithPrompt(recipeRecord, detailItems, instructions);
         if (changed) {
           await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
         }
@@ -3384,19 +3596,9 @@
       addButtonForVersion.className = 'accordion-new-button';
       addButtonForVersion.textContent = '+ Step';
       addButtonForVersion.addEventListener('click', async function () {
-        var stepText = await window.KaPUI.ShowPrompt({
-          title: 'Add Step',
-          placeholder: 'Describe this cooking step',
-          confirmLabel: 'Add'
-        });
-
-        if (stepText !== null) {
-          try {
-            await window.KaPRecipesService.addInstructionToVersion(recipeRecord.id, selectedVersionNumber, stepText);
-            await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
-          } catch (error) {
-            await showError(error.message || 'Unable to add instruction.');
-          }
+        var changed = await addInstructionToVersionWithPrompt(recipeRecord, selectedVersionNumber, detailItems, instructions);
+        if (changed) {
+          await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
         }
       });
       header.appendChild(addButtonForVersion);
@@ -3415,6 +3617,13 @@
 
     var list = document.createElement('div');
     list.className = 'recipe-instruction-list';
+    var ingredientNameById = {};
+    (detailItems || []).forEach(function (detailItem) {
+      var itemId = String(detailItem && detailItem.itemId || '').trim();
+      if (itemId && !ingredientNameById[itemId]) {
+        ingredientNameById[itemId] = buildIngredientDisplayLine(detailItem);
+      }
+    });
 
     instructions.forEach(function (instruction) {
       var row = document.createElement('div');
@@ -3424,12 +3633,39 @@
       numberNode.className = 'recipe-instruction-number';
       numberNode.textContent = String(instruction.stepNumber) + '.';
 
+      var contentNode = document.createElement('div');
+      contentNode.className = 'recipe-instruction-content';
+
       var textNode = document.createElement('div');
       textNode.className = 'recipe-instruction-text';
       textNode.textContent = instruction.text;
+      contentNode.appendChild(textNode);
+
+      var ingredientRefs = normalizeInstructionIngredientRefs(instruction);
+      var timer = normalizeInstructionTimer(instruction.timer);
+      if (ingredientRefs.length > 0 || timer) {
+        var metaNode = document.createElement('div');
+        metaNode.className = 'recipe-instruction-meta';
+
+        if (timer) {
+          var timerBadge = document.createElement('span');
+          timerBadge.className = 'recipe-instruction-badge recipe-instruction-badge--timer';
+          timerBadge.textContent = 'Timer ' + formatStepTimerDuration(timer.durationSeconds);
+          metaNode.appendChild(timerBadge);
+        }
+
+        ingredientRefs.forEach(function (itemId) {
+          var ingredientBadge = document.createElement('span');
+          ingredientBadge.className = 'recipe-instruction-badge';
+          ingredientBadge.textContent = ingredientNameById[itemId] || 'Linked ingredient';
+          metaNode.appendChild(ingredientBadge);
+        });
+
+        contentNode.appendChild(metaNode);
+      }
 
       row.appendChild(numberNode);
-      row.appendChild(textNode);
+      row.appendChild(contentNode);
 
       if (isViewingLatestVersion) {
         var menuWrap = document.createElement('div');
@@ -3468,7 +3704,7 @@
         var menuActions = [
           { label: 'Move Up', onClick: async function () { var changed = await moveInstruction(recipeRecord, instruction, 'up'); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
           { label: 'Move Down', onClick: async function () { var changed = await moveInstruction(recipeRecord, instruction, 'down'); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
-          { label: 'Edit', onClick: async function () { var changed = await editInstructionWithPrompt(recipeRecord, instruction); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
+          { label: 'Edit', onClick: async function () { var changed = await editInstructionWithPrompt(recipeRecord, instruction, detailItems, instructions); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
           { label: 'Remove', isDanger: true, onClick: async function () { var changed = await removeInstructionWithConfirm(recipeRecord, instruction); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } }
         ];
 
@@ -3552,7 +3788,7 @@
           {
             label: 'Edit',
             onClick: async function () {
-              var changed = await editInstructionWithPrompt(recipeRecord, instruction, selectedVersionNumber, false);
+              var changed = await editInstructionWithPrompt(recipeRecord, instruction, detailItems, instructions, selectedVersionNumber, false);
               if (changed) {
                 await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
               }
@@ -3824,6 +4060,7 @@
     await appendInstructionsSection(
       container,
       record,
+      detailItems,
       instructions,
       isViewingLatestVersion,
       hooks,

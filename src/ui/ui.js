@@ -936,6 +936,13 @@
 
         quantityRow.appendChild(uomSelect);
         form.appendChild(quantityRow);
+
+        if (options.quantityHelpText) {
+          var quantityHelp = document.createElement('p');
+          quantityHelp.className = 'modal-hint';
+          quantityHelp.textContent = String(options.quantityHelpText);
+          form.appendChild(quantityHelp);
+        }
       }
 
       if (options.showOptionalField === true) {
@@ -2254,6 +2261,427 @@
     });
   }
 
+  function ShowStepEditorModal(config) {
+    return new Promise(function (resolve) {
+      var node = newFromTemplate('modal-template');
+      var overlay = node;
+      var card = node.querySelector('.modal-card');
+      var titleNode = node.querySelector('.modal-title');
+      var bodyNode = node.querySelector('.modal-body');
+      var cancelButton = node.querySelector('.modal-cancel-button');
+      var confirmButton = node.querySelector('.modal-confirm-button');
+
+      var initialStep = config.initialStep && typeof config.initialStep === 'object' ? config.initialStep : {};
+      var ingredients = Array.isArray(config.ingredients) ? config.ingredients.slice() : [];
+      var initialIngredientRefs = Array.isArray(initialStep.ingredientRefs) ? initialStep.ingredientRefs : [];
+      var initialTimer = initialStep.timer && typeof initialStep.timer === 'object' ? initialStep.timer : null;
+      var initialDurationSeconds = initialTimer && Number.isFinite(Number(initialTimer.durationSeconds))
+        ? Math.max(0, Math.floor(Number(initialTimer.durationSeconds)))
+        : 0;
+
+      titleNode.textContent = config.title || 'Step Editor';
+      confirmButton.textContent = config.confirmLabel || 'Save';
+      card.setAttribute('aria-label', titleNode.textContent);
+      cancelButton.classList.add('modal-button--secondary');
+      confirmButton.classList.add('modal-button--primary');
+
+      var form = document.createElement('div');
+      form.className = 'modal-item-form';
+
+      var textLabel = document.createElement('label');
+      textLabel.className = 'modal-field-label';
+      textLabel.textContent = 'Step Text';
+      form.appendChild(textLabel);
+
+      var textInput = document.createElement('textarea');
+      textInput.className = 'modal-input modal-step-textarea';
+      textInput.rows = 4;
+      textInput.placeholder = config.placeholder || 'Describe this cooking step';
+      textInput.value = String(initialStep.text || '');
+      form.appendChild(textInput);
+
+      var ingredientsLabel = document.createElement('span');
+      ingredientsLabel.className = 'modal-field-label';
+      ingredientsLabel.textContent = 'Ingredients Used';
+      form.appendChild(ingredientsLabel);
+
+      var ingredientList = document.createElement('div');
+      ingredientList.className = 'modal-checklist modal-step-checklist';
+      var ingredientCheckboxes = [];
+
+      function isInitiallySelected(itemId) {
+        return initialIngredientRefs.indexOf(String(itemId || '')) >= 0;
+      }
+
+      if (ingredients.length === 0) {
+        var emptyIngredients = document.createElement('p');
+        emptyIngredients.className = 'modal-hint';
+        emptyIngredients.textContent = 'No recipe ingredients available yet.';
+        form.appendChild(emptyIngredients);
+      } else {
+        ingredients.forEach(function (ingredient) {
+          var row = document.createElement('label');
+          row.className = 'modal-checklist-row modal-step-checklist-row';
+
+          var checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'modal-checklist-checkbox';
+          checkbox.checked = isInitiallySelected(ingredient.itemId);
+          row.appendChild(checkbox);
+
+          var content = document.createElement('div');
+          content.className = 'modal-step-checklist-content';
+
+          var nameNode = document.createElement('span');
+          nameNode.className = 'modal-checklist-name';
+          nameNode.textContent = ingredient.name;
+          content.appendChild(nameNode);
+
+          if (ingredient.meta) {
+            var metaNode = document.createElement('span');
+            metaNode.className = 'modal-step-checklist-meta';
+            metaNode.textContent = ingredient.meta;
+            content.appendChild(metaNode);
+          }
+
+          row.appendChild(content);
+
+          if (ingredient.isUsedElsewhere) {
+            var statusNode = document.createElement('span');
+            statusNode.className = 'modal-checklist-status';
+            statusNode.textContent = 'Already used';
+            row.appendChild(statusNode);
+          }
+
+          ingredientList.appendChild(row);
+          ingredientCheckboxes.push({
+            checkbox: checkbox,
+            ingredient: ingredient,
+            row: row
+          });
+        });
+
+        form.appendChild(ingredientList);
+      }
+
+      var timerRow = document.createElement('label');
+      timerRow.className = 'modal-checklist-row modal-step-timer-toggle';
+
+      var timerEnabledInput = document.createElement('input');
+      timerEnabledInput.type = 'checkbox';
+      timerEnabledInput.className = 'modal-checklist-checkbox';
+      timerEnabledInput.checked = !!initialTimer;
+      timerRow.appendChild(timerEnabledInput);
+
+      var timerText = document.createElement('span');
+      timerText.className = 'modal-checklist-name';
+      timerText.textContent = 'Add timer';
+      timerRow.appendChild(timerText);
+      form.appendChild(timerRow);
+
+      var timerFields = document.createElement('div');
+      timerFields.className = 'modal-step-timer-fields';
+
+      var timerDurationLabel = document.createElement('label');
+      timerDurationLabel.className = 'modal-field-label';
+      timerDurationLabel.textContent = 'Timer Duration';
+      timerFields.appendChild(timerDurationLabel);
+
+      var durationGrid = document.createElement('div');
+      durationGrid.className = 'modal-step-duration-grid';
+
+      function createDurationInput(labelText, value) {
+        var wrap = document.createElement('div');
+        wrap.className = 'modal-step-duration-part';
+
+        var inputShell = document.createElement('div');
+        inputShell.className = 'recipe-info-duration-shell';
+
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.step = '1';
+        input.className = 'modal-step-duration-input recipe-info-duration-input';
+        input.value = value > 0 ? String(value) : '';
+
+        var stepper = document.createElement('div');
+        stepper.className = 'recipe-info-stepper';
+
+        var incrementButton = document.createElement('button');
+        incrementButton.type = 'button';
+        incrementButton.className = 'recipe-info-stepper-button';
+        incrementButton.textContent = '+';
+        incrementButton.setAttribute('aria-label', 'Increase ' + labelText);
+
+        var decrementButton = document.createElement('button');
+        decrementButton.type = 'button';
+        decrementButton.className = 'recipe-info-stepper-button';
+        decrementButton.textContent = '-';
+        decrementButton.setAttribute('aria-label', 'Decrease ' + labelText);
+
+        function adjust(delta) {
+          var raw = String(input.value || '').trim();
+          var current = raw === '' ? 0 : Number(raw);
+          if (!Number.isFinite(current) || current < 0) {
+            current = 0;
+          }
+
+          var next = Math.max(0, Math.floor(current) + delta);
+          input.value = String(next);
+        }
+
+        function bindStepper(buttonNode, delta) {
+          buttonNode.addEventListener('mousedown', function (event) {
+            event.preventDefault();
+          });
+          buttonNode.addEventListener('click', function (event) {
+            event.preventDefault();
+            adjust(delta);
+          });
+        }
+
+        bindStepper(incrementButton, 1);
+        bindStepper(decrementButton, -1);
+
+        stepper.appendChild(incrementButton);
+        stepper.appendChild(decrementButton);
+
+        inputShell.appendChild(input);
+        inputShell.appendChild(stepper);
+        wrap.appendChild(inputShell);
+
+        var suffix = document.createElement('span');
+        suffix.className = 'modal-step-duration-suffix';
+        suffix.textContent = labelText;
+        wrap.appendChild(suffix);
+
+        durationGrid.appendChild(wrap);
+        return input;
+      }
+
+      var hoursInput = createDurationInput('h', Math.floor(initialDurationSeconds / 3600));
+      var minutesInput = createDurationInput('m', Math.floor((initialDurationSeconds % 3600) / 60));
+      var secondsInput = createDurationInput('s', initialDurationSeconds % 60);
+      timerFields.appendChild(durationGrid);
+
+      var timerLabel = document.createElement('label');
+      timerLabel.className = 'modal-field-label';
+      timerLabel.textContent = 'Timer Label (Optional)';
+      timerFields.appendChild(timerLabel);
+
+      var timerLabelInput = document.createElement('input');
+      timerLabelInput.type = 'text';
+      timerLabelInput.className = 'modal-input';
+      timerLabelInput.placeholder = 'e.g. Simmer';
+      timerLabelInput.value = initialTimer && initialTimer.label ? String(initialTimer.label) : '';
+      timerFields.appendChild(timerLabelInput);
+      form.appendChild(timerFields);
+
+      var errorNode = document.createElement('p');
+      errorNode.className = 'modal-error';
+      form.appendChild(errorNode);
+
+      var overlapWarning = document.createElement('div');
+      overlapWarning.className = 'modal-step-warning';
+      overlapWarning.hidden = true;
+
+      var overlapMessage = document.createElement('p');
+      overlapMessage.className = 'modal-message modal-step-warning-text';
+      overlapMessage.textContent = config.overlapWarningMessage || 'Some selected ingredients are already used in other steps.';
+      overlapWarning.appendChild(overlapMessage);
+
+      var overlapActions = document.createElement('div');
+      overlapActions.className = 'modal-step-warning-actions';
+
+      var continueButton = document.createElement('button');
+      continueButton.type = 'button';
+      continueButton.className = 'modal-step-warning-button modal-step-warning-button--primary';
+      continueButton.textContent = 'Continue and Save';
+
+      var reviewButton = document.createElement('button');
+      reviewButton.type = 'button';
+      reviewButton.className = 'modal-step-warning-button modal-step-warning-button--secondary';
+      reviewButton.textContent = 'Review Selection';
+
+      overlapActions.appendChild(continueButton);
+      overlapActions.appendChild(reviewButton);
+      overlapWarning.appendChild(overlapActions);
+      form.appendChild(overlapWarning);
+
+      bodyNode.appendChild(form);
+
+      function close(result) {
+        document.removeEventListener('keydown', onKeyDown);
+        document.body.removeChild(node);
+        resolve(result);
+      }
+
+      function getSelectedIngredientRefs() {
+        return ingredientCheckboxes.filter(function (entry) {
+          return entry.checkbox.checked;
+        }).map(function (entry) {
+          return String(entry.ingredient.itemId || '');
+        }).filter(function (itemId, index, arr) {
+          return itemId && arr.indexOf(itemId) === index;
+        });
+      }
+
+      function refreshIngredientRows() {
+        ingredientCheckboxes.forEach(function (entry) {
+          entry.row.classList.toggle('modal-step-checklist-row--used', entry.ingredient.isUsedElsewhere === true);
+          entry.row.classList.toggle('modal-step-checklist-row--selected', entry.checkbox.checked === true);
+        });
+      }
+
+      function setTimerFieldsVisible(isVisible) {
+        timerFields.hidden = !isVisible;
+      }
+
+      function setOverlapWarningVisible(isVisible) {
+        overlapWarning.hidden = !isVisible;
+        confirmButton.disabled = !!isVisible;
+      }
+
+      function parseDurationInput(inputNode) {
+        var raw = String(inputNode.value || '').trim();
+        if (!raw) {
+          return 0;
+        }
+
+        var numeric = Number(raw);
+        if (!Number.isFinite(numeric) || numeric < 0 || Math.floor(numeric) !== numeric) {
+          return NaN;
+        }
+
+        return numeric;
+      }
+
+      function buildStepResult() {
+        var text = String(textInput.value || '').trim();
+        if (!text) {
+          throw new Error('Step text is required.');
+        }
+
+        var timer = null;
+        if (timerEnabledInput.checked) {
+          var hours = parseDurationInput(hoursInput);
+          var minutes = parseDurationInput(minutesInput);
+          var seconds = parseDurationInput(secondsInput);
+
+          if (Number.isNaN(hours) || Number.isNaN(minutes) || Number.isNaN(seconds)) {
+            throw new Error('Timer values must be zero or greater whole numbers.');
+          }
+
+          var durationSeconds = (hours * 3600) + (minutes * 60) + seconds;
+          if (durationSeconds <= 0) {
+            throw new Error('Timer duration must be greater than zero.');
+          }
+
+          timer = {
+            durationSeconds: durationSeconds,
+            label: String(timerLabelInput.value || '').trim()
+          };
+        }
+
+        return {
+          text: text,
+          ingredientRefs: getSelectedIngredientRefs(),
+          timer: timer
+        };
+      }
+
+      function hasOverlap(selectedIngredientRefs) {
+        return ingredientCheckboxes.some(function (entry) {
+          return entry.ingredient.isUsedElsewhere === true
+            && selectedIngredientRefs.indexOf(String(entry.ingredient.itemId || '')) >= 0;
+        });
+      }
+
+      function handleSubmit(forceSave) {
+        errorNode.textContent = '';
+
+        var result = null;
+        try {
+          result = buildStepResult();
+        } catch (error) {
+          setOverlapWarningVisible(false);
+          errorNode.textContent = error.message || 'Unable to save step.';
+          return;
+        }
+
+        if (!forceSave && hasOverlap(result.ingredientRefs)) {
+          setOverlapWarningVisible(true);
+          reviewButton.focus();
+          return;
+        }
+
+        close(result);
+      }
+
+      ingredientCheckboxes.forEach(function (entry) {
+        entry.checkbox.addEventListener('change', function () {
+          refreshIngredientRows();
+          setOverlapWarningVisible(false);
+        });
+      });
+
+      timerEnabledInput.addEventListener('change', function () {
+        setTimerFieldsVisible(timerEnabledInput.checked);
+        setOverlapWarningVisible(false);
+      });
+
+      continueButton.addEventListener('click', function () {
+        handleSubmit(true);
+      });
+
+      reviewButton.addEventListener('click', function () {
+        setOverlapWarningVisible(false);
+        if (ingredientCheckboxes.length > 0) {
+          ingredientCheckboxes[0].checkbox.focus();
+        } else {
+          textInput.focus();
+        }
+      });
+
+      function onKeyDown(event) {
+        if (event.key === 'Escape') {
+          close(null);
+          return;
+        }
+
+        if (event.key === 'Enter' && event.target !== textInput && event.target !== continueButton && event.target !== reviewButton) {
+          event.preventDefault();
+          handleSubmit(false);
+        }
+      }
+
+      overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) {
+          close(null);
+        }
+      });
+
+      cancelButton.addEventListener('click', function () {
+        close(null);
+      });
+
+      confirmButton.addEventListener('click', function () {
+        handleSubmit(false);
+      });
+
+      refreshIngredientRows();
+      setTimerFieldsVisible(timerEnabledInput.checked);
+      setOverlapWarningVisible(false);
+      document.addEventListener('keydown', onKeyDown);
+      document.body.appendChild(node);
+
+      requestAnimationFrame(function () {
+        textInput.focus();
+        textInput.setSelectionRange(textInput.value.length, textInput.value.length);
+      });
+    });
+  }
+
   function normalizeBatchSizeValue(value) {
     var numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -3454,6 +3882,7 @@
     ShowTemplateConfigModal: ShowTemplateConfigModal,
     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
     ShowPrompt: ShowPrompt,
+    ShowStepEditorModal: ShowStepEditorModal,
     ShowBatchSizeModal: ShowBatchSizeModal,
     FormatBatchSize: formatBatchSizeFraction,
     ShowAddToListModal: ShowAddToListModal,

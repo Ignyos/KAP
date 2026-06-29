@@ -2632,7 +2632,7 @@
     tabs.className = 'recipe-detail-tabs';
     var activeSection = getActiveDetailsSection();
     var definitions = [
-      { key: DETAILS_SECTION_INFORMATION, label: 'Information' },
+      { key: DETAILS_SECTION_INFORMATION, label: 'Info' },
       { key: DETAILS_SECTION_DESCRIPTION, label: 'Description' },
       { key: DETAILS_SECTION_VERSIONS, label: 'Versions' },
       { key: DETAILS_SECTION_TAGS, label: 'Tags' }
