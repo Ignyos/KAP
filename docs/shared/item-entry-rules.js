@@ -31,8 +31,23 @@
       return null;
     }
 
-    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(raw)) {
+    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+|\d+\s+\d+\/\d+)$/.test(raw)) {
       throw new Error('Quantity must be a decimal number or fraction.');
+    }
+
+    if (/^-?\d+\s+\d+\/\d+$/.test(raw)) {
+      var wholeAndFraction = raw.split(/\s+/);
+      var wholePart = Number(wholeAndFraction[0]);
+      var fractionParts = wholeAndFraction[1].split('/');
+      var mixedNumerator = Number(fractionParts[0]);
+      var mixedDenominator = Number(fractionParts[1]);
+
+      if (!Number.isFinite(wholePart) || !Number.isFinite(mixedNumerator) || !Number.isFinite(mixedDenominator) || mixedDenominator === 0) {
+        throw new Error('Quantity must be a decimal number or fraction.');
+      }
+
+      var sign = wholePart < 0 ? -1 : 1;
+      return wholePart + sign * (mixedNumerator / mixedDenominator);
     }
 
     if (raw.indexOf('/') >= 0) {

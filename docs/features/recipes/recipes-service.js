@@ -33,6 +33,73 @@
     return trimmed;
   }
 
+  function normalizeInstructionIngredientRefs(ingredientRefs) {
+    var seen = {};
+    return (Array.isArray(ingredientRefs) ? ingredientRefs : []).map(function (itemId) {
+      return String(itemId || '').trim();
+    }).filter(function (itemId) {
+      if (!itemId || seen[itemId]) {
+        return false;
+      }
+
+      seen[itemId] = true;
+      return true;
+    });
+  }
+
+  function normalizeInstructionTimer(timer) {
+    if (!timer || typeof timer !== 'object') {
+      return null;
+    }
+
+    var rawDuration = timer.durationSeconds;
+    if (rawDuration == null || String(rawDuration).trim() === '') {
+      return null;
+    }
+
+    var durationSeconds = Number(rawDuration);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      throw new Error('Timer duration must be greater than zero.');
+    }
+
+    return {
+      durationSeconds: Math.floor(durationSeconds),
+      label: String(timer.label || '').trim()
+    };
+  }
+
+  function normalizeStoredInstructionTimer(timer) {
+    if (!timer || typeof timer !== 'object') {
+      return null;
+    }
+
+    var durationSeconds = Number(timer.durationSeconds);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      return null;
+    }
+
+    return {
+      durationSeconds: Math.floor(durationSeconds),
+      label: String(timer.label || '').trim()
+    };
+  }
+
+  function normalizeInstructionInput(input) {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+      return {
+        text: ensureValidInstructionText(input.text),
+        ingredientRefs: normalizeInstructionIngredientRefs(input.ingredientRefs),
+        timer: normalizeInstructionTimer(input.timer)
+      };
+    }
+
+    return {
+      text: ensureValidInstructionText(input),
+      ingredientRefs: [],
+      timer: null
+    };
+  }
+
   function normalizeRecipeDescription(description) {
     return window.KaPItemEntryRules.normalizeDescription(description);
   }
@@ -182,7 +249,9 @@
       return {
         instructionId: String((entry && entry.instructionId) || ''),
         stepNumber: Number((entry && entry.stepNumber) || 0),
-        text: String((entry && entry.text) || '').trim()
+        text: String((entry && entry.text) || '').trim(),
+        ingredientRefs: normalizeInstructionIngredientRefs(entry && entry.ingredientRefs),
+        timer: normalizeStoredInstructionTimer(entry && entry.timer)
       };
     }));
   }
@@ -329,6 +398,8 @@
         recipeId: instruction.recipeId,
         stepNumber: index + 1,
         text: ensureValidInstructionText(instruction.text),
+        ingredientRefs: normalizeInstructionIngredientRefs(instruction.ingredientRefs),
+        timer: normalizeStoredInstructionTimer(instruction.timer),
         createdDate: instruction.createdDate || nowIso(),
         updatedDate: nowIso()
       };
@@ -495,6 +566,8 @@
         recipeId: instruction.recipeId,
         stepNumber: Number(instruction.stepNumber || 0),
         text: String(instruction.text || ''),
+        ingredientRefs: normalizeInstructionIngredientRefs(instruction.ingredientRefs),
+        timer: normalizeStoredInstructionTimer(instruction.timer),
         createdDate: String(instruction.createdDate || ''),
         updatedDate: String(instruction.updatedDate || '')
       };
@@ -560,7 +633,9 @@
       return {
         instructionId: instruction.id,
         stepNumber: Number(instruction.stepNumber || 0),
-        text: instruction.text || ''
+        text: instruction.text || '',
+        ingredientRefs: normalizeInstructionIngredientRefs(instruction.ingredientRefs),
+        timer: normalizeStoredInstructionTimer(instruction.timer)
       };
     });
 
@@ -834,9 +909,9 @@
     return existing;
   }
 
-  async function addInstructionToRecipe(recipeId, text) {
+  async function addInstructionToRecipe(recipeId, instructionInput) {
     await requireRecipeById(recipeId);
-    var safeText = ensureValidInstructionText(text);
+    var normalizedInput = normalizeInstructionInput(instructionInput);
     var instructions = await getRecipeInstructions(recipeId);
     var nextStepNumber = instructions.length + 1;
 
@@ -844,7 +919,9 @@
       id: window.KaPIds.NewId(),
       recipeId: recipeId,
       stepNumber: nextStepNumber,
-      text: safeText,
+      text: normalizedInput.text,
+      ingredientRefs: normalizedInput.ingredientRefs,
+      timer: normalizedInput.timer,
       createdDate: nowIso(),
       updatedDate: nowIso()
     };
@@ -854,14 +931,17 @@
     return instruction;
   }
 
-  async function updateRecipeInstruction(recipeId, instructionId, text) {
+  async function updateRecipeInstruction(recipeId, instructionId, instructionInput) {
     await requireRecipeById(recipeId);
     var existing = await findInstructionById(recipeId, instructionId);
     if (!existing) {
       throw new Error('Instruction not found.');
     }
 
-    existing.text = ensureValidInstructionText(text);
+    var normalizedInput = normalizeInstructionInput(instructionInput);
+    existing.text = normalizedInput.text;
+    existing.ingredientRefs = normalizedInput.ingredientRefs;
+    existing.timer = normalizedInput.timer;
     existing.updatedDate = nowIso();
     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, existing);
     await syncLatestVersionSnapshot(recipeId);
@@ -966,6 +1046,8 @@
         recipeId: recipeId,
         stepNumber: Number(snapshotInstruction.stepNumber || i + 1),
         text: ensureValidInstructionText(snapshotInstruction.text),
+        ingredientRefs: normalizeInstructionIngredientRefs(snapshotInstruction.ingredientRefs),
+        timer: normalizeStoredInstructionTimer(snapshotInstruction.timer),
         createdDate: nowIso(),
         updatedDate: nowIso()
       };
@@ -1038,6 +1120,8 @@
         recipeId: '',
         stepNumber: Number(snapshotInstruction.stepNumber || index + 1),
         text: snapshotInstruction.text || '',
+        ingredientRefs: normalizeInstructionIngredientRefs(snapshotInstruction.ingredientRefs),
+        timer: normalizeStoredInstructionTimer(snapshotInstruction.timer),
         createdDate: '',
         updatedDate: ''
       };
@@ -1216,29 +1300,33 @@
     return getVersionItems(recipeId, versionId);
   }
 
-  async function addInstructionToVersion(recipeId, versionId, text) {
+  async function addInstructionToVersion(recipeId, versionId, instructionInput) {
     var version = await getRecipeVersionById(recipeId, versionId);
     if (!version) {
       throw new Error('Recipe version not found.');
     }
 
+    var normalizedInput = normalizeInstructionInput(instructionInput);
     var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
     snapshotInstructions.push({
       instructionId: window.KaPIds.NewId(),
       stepNumber: snapshotInstructions.length + 1,
-      text: ensureValidInstructionText(text)
+      text: normalizedInput.text,
+      ingredientRefs: normalizedInput.ingredientRefs,
+      timer: normalizedInput.timer
     });
 
     await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
     return getVersionInstructions(recipeId, versionId);
   }
 
-  async function updateVersionInstruction(recipeId, versionId, instructionId, text) {
+  async function updateVersionInstruction(recipeId, versionId, instructionId, instructionInput) {
     var version = await getRecipeVersionById(recipeId, versionId);
     if (!version) {
       throw new Error('Recipe version not found.');
     }
 
+    var normalizedInput = normalizeInstructionInput(instructionInput);
     var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
     var existing = snapshotInstructions.find(function (instruction) {
       return instruction.instructionId === instructionId;
@@ -1247,7 +1335,9 @@
       throw new Error('Instruction not found.');
     }
 
-    existing.text = ensureValidInstructionText(text);
+    existing.text = normalizedInput.text;
+    existing.ingredientRefs = normalizedInput.ingredientRefs;
+    existing.timer = normalizedInput.timer;
     await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
     return getVersionInstructions(recipeId, versionId);
   }

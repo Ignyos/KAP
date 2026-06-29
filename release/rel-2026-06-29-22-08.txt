@@ -1,0 +1,1727 @@
+Release timestamp: 2026-06-29-22-08
+Diff source: 2026-06-28-19-13..HEAD
+Generated at: 2026-06-29 18:08:25Z
+diff --git a/docs/features/recipes/recipes-page.js b/docs/features/recipes/recipes-page.js
+index a70dbab..1065701 100644
+--- a/docs/features/recipes/recipes-page.js
++++ b/docs/features/recipes/recipes-page.js
+@@ -2632,7 +2632,7 @@
+     tabs.className = 'recipe-detail-tabs';
+     var activeSection = getActiveDetailsSection();
+     var definitions = [
+-      { key: DETAILS_SECTION_INFORMATION, label: 'Information' },
++      { key: DETAILS_SECTION_INFORMATION, label: 'Info' },
+       { key: DETAILS_SECTION_DESCRIPTION, label: 'Description' },
+       { key: DETAILS_SECTION_VERSIONS, label: 'Versions' },
+       { key: DETAILS_SECTION_TAGS, label: 'Tags' }
+diff --git a/requirements/prepare-recipe-mode-requirements.md b/requirements/prepare-recipe-mode-requirements.md
+new file mode 100644
+index 0000000..a08349a
+--- /dev/null
++++ b/requirements/prepare-recipe-mode-requirements.md
+@@ -0,0 +1,118 @@
++# Prepare Recipe Mode Requirements
++
++## Purpose
++Define requirements for a future Prepare Recipe Mode that reduces back-and-forth between ingredients and instructions by presenting a step-focused cooking workflow.
++
++## Confirmed Current State
++- Recipe detail currently shows ingredients and instructions as separate sections.
++- Normal recipe viewing can require users to look back and forth between the ingredient list and the current instruction step.
++- Recipe Step Editor v2 establishes step-level ingredient links and optional single-step timers as supporting data for this future mode.
++- Prepare Recipe Mode does not exist yet in the current product experience.
++
++## Confirmed Goals
++- Prepare Recipe Mode should minimize clicks during active recipe preparation.
++- Prepare Recipe Mode should make it easier for the user to clearly see what they are dealing with at each step.
++- Recipe detail should replace the current Batch Size section with a single action row containing:
++  - `Prepare Recipe Mode`
++  - `Add To Grocery List`
++- `Add To Grocery List` should remain available in the existing recipe action menu (the row addition is for discoverability, not replacement).
++- Users should be able to step through the recipe process in a guided way.
++- Each step should surface only the ingredients relevant to that step as part of the workflow.
++- The user should not need to keep bouncing back and forth between the full ingredient list and the instruction list while cooking.
++- If a step has a timer, the user should be able to start that timer from the step.
++- Starting a timer must not prevent the user from moving on to the next step.
++- Pause/restart timer controls are expected in the future, but this document should not assume they are part of the first Prepare Recipe Mode release unless explicitly confirmed later.
++
++## Functional Requirements (Confirmed)
++1. Prepare Recipe Mode provides a dedicated step-by-step recipe flow separate from normal recipe detail viewing.
++2. Recipe detail should expose a two-action row in place of Batch Size with:
++  - `Prepare Recipe Mode`
++  - `Add To Grocery List`
++3. Existing recipe action menu should continue to include `Add To Grocery List`.
++4. The active step is the primary unit of focus in the UI.
++5. The active step displays the instruction text for that step.
++6. The active step displays the ingredients linked to that step.
++7. The user can move through the recipe step by step with fewer interactions than normal detail view navigation.
++8. If the active step has a timer, the step should expose a start action for that timer.
++9. Timer start behavior should not block navigation to later steps.
++
++## Workflow Requirements
++1. The mode should reduce the need to cross-reference the full ingredient list while preparing the recipe.
++2. The mode should emphasize the current step and current-step ingredients over the full recipe context.
++3. Step progression should feel like a guided walkthrough rather than a generic detail page.
++4. Users should be able to understand what to do next without excessive scrolling or section switching.
++5. The mode should use a dedicated view with grouped accordions.
++6. The full Ingredients section should be available in mode as its own accordion and default to collapsed.
++7. Steps should render as one accordion per step, with step 1 expanded by default and remaining steps collapsed by default.
++8. Each step should offer a simple progression affordance for moving to the next step.
++9. If a step has a timer, the collapsed representation of that step should still communicate timer presence.
++
++## Data Dependencies
++1. Prepare Recipe Mode depends on step-level instruction text.
++2. Prepare Recipe Mode depends on step-level ingredient references so ingredients can be scoped to a specific step.
++3. Prepare Recipe Mode depends on optional step-level timer metadata for steps that require timing.
++4. Steps without ingredient links must still render in Prepare Recipe Mode.
++5. Steps without timers must still render in Prepare Recipe Mode.
++
++## UI Requirements (Confirmed)
++1. The UI should show the current step clearly.
++2. The UI should show only the ingredients for the current step in the primary step workflow.
++3. The UI should support low-friction step navigation.
++4. Timer actions, when present, should be available from the active step surface.
++5. Mode UI is a dedicated screen/view rather than a minor inline panel in the existing recipe detail body.
++6. Mode UI should include:
++  - A full-recipe Ingredients accordion (default collapsed).
++  - A Steps accordion group with one accordion per step.
++7. Default accordion state should be first step expanded and remaining steps collapsed.
++8. Collapsed step headers should still indicate timer presence when a timer exists for that step.
++9. Recipe detail should provide a single row containing both `Prepare Recipe Mode` and `Add To Grocery List` to improve discoverability.
++10. The existing `Add To Grocery List` menu action should remain available.
++
++## Non-Functional Requirements
++1. Prepare Recipe Mode should optimize for active cooking use, where the user benefits from reduced cognitive load and fewer taps/clicks.
++2. The flow should be easy to scan quickly while working through a recipe.
++3. The mode should work as a focused workflow layer and should not require mutation of stored recipe content during use.
++
++## Open Questions
++- What navigation controls are required in v1:
++  - Next/Previous only?
++  - Step list overview?
++  - Jump-to-step?
++- Should the mode open on step 1 every time, or remember the userΓÇÖs last position for that recipe/version?
++- Should the mode show any persistent context outside the active step, such as recipe name, batch size, or progress count?
++- What should be shown when a step has no linked ingredients:
++  - No ingredients section?
++  - A placeholder such as `No step-specific ingredients`?
++  - A fallback to broader recipe ingredients?
++- Should the user have optional access to the full ingredient list while in Prepare Recipe Mode, or should v1 remain strictly step-focused?
++- What timer lifecycle behavior is required after Start in v1:
++  - Should countdown continue while the user opens other step accordions?
++  - Should countdown continue if the timed step becomes collapsed?
++  - Should active timers be visible in a global area, per-step header only, or both?
++- What timer completion behavior is required:
++  - Visual alert only?
++  - Sound?
++  - Notification?
++- Should multiple running timers be possible across different steps if the user starts one and moves on?
++- How should timer sound settings be controlled:
++  - Global app setting only?
++  - Global setting plus per-recipe override?
++  - Override precedence rules?
++- How should scaling interact with Prepare Recipe Mode:
++  - Use currently selected batch size?
++  - Show scaled step ingredients automatically?
++- Should versioned recipes behave exactly the same in Prepare Recipe Mode as latest recipes?
++
++## Out of Scope (For This Requirements Draft)
++- Final timer runtime specification beyond confirmed start-and-continue behavior.
++- Pause/restart timer control details.
++- Notification policy for completed timers.
++- Detailed visual design or layout styling.
++- Voice guidance, hands-free controls, or device-specific cooking modes.
++
++## Suggested Next Discussion Areas
++1. Entry point and navigation model.
++2. What persistent context should remain visible during the walkthrough.
++3. Timer lifecycle expectations after Start is pressed.
++4. Behavior for steps with incomplete or missing ingredient links.
++5. Relationship between Prepare Recipe Mode and batch scaling.
+\ No newline at end of file
+diff --git a/requirements/recipe-step-editor-requirements.md b/requirements/recipe-step-editor-requirements.md
+new file mode 100644
+index 0000000..c702437
+--- /dev/null
++++ b/requirements/recipe-step-editor-requirements.md
+@@ -0,0 +1,137 @@
++# Recipe Step Editor v2 Requirements
++
++## Purpose
++Define requirements for updating recipe step entry and editing so each step can include optional ingredient links and one optional timer, while keeping existing step behavior compatible.
++
++## Confirmed Current State
++- Add Step and Edit Step currently collect text only.
++- Instruction persistence currently stores step number and text.
++- Version snapshots currently store instruction id, step number, and text.
++- Recipe import/export currently serializes instruction id, step number, and text.
++
++## Confirmed Goals
++- Add a dedicated Step Editor modal for Add Step and Edit Step flows.
++- Keep step text as required.
++- Allow optional multi-select ingredient links for each step.
++- Allow one optional timer per step.
++- Store timer duration internally in seconds.
++- Allow users to enter timer values with second precision.
++- Preserve backward compatibility for existing recipes and old import payloads.
++- Prepare data/UI foundations for a future Prepare Recipe Mode without implementing that mode in this update.
++
++## Functional Requirements
++1. Add Step opens a Step Editor modal instead of a single text prompt.
++2. Edit Step opens the same Step Editor modal prefilled with current values.
++3. Step Editor includes these fields:
++   - Step text (required).
++   - Ingredients used (optional multi-select).
++   - Timer enabled/disabled control (optional).
++   - Timer duration input supporting hours, minutes, and seconds.
++   - Timer label input (optional).
++4. Ingredient selection source is limited to ingredients currently on the recipe.
++5. Ingredient selection stores links by `itemId` only.
++6. Ingredient selection does not allow ad-hoc free-text ingredient tags.
++7. Exactly one timer is allowed per step.
++8. Timer duration must be greater than zero when timer is enabled.
++9. Save action is blocked when step text is empty.
++10. Save action is blocked when timer is enabled but duration is invalid.
++11. If no ingredients are selected and timer is disabled, step behavior remains equivalent to text-only steps.
++12. Latest-version and non-latest-version step flows both support create, edit, remove, and move operations without losing timer or ingredient-link fields.
++
++## Data Requirements
++1. Instruction records support these fields:
++   - `text` (required string).
++   - `ingredientRefs` (optional array of `itemId` strings; default `[]`).
++   - `timer` (optional object or `null`).
++2. Timer object supports these fields:
++   - `durationSeconds` (required positive integer when timer exists).
++   - `label` (optional string).
++3. Instruction ordering remains controlled by `stepNumber`.
++4. Version snapshot instructions persist and round-trip the same new fields (`ingredientRefs`, `timer`).
++5. Existing instructions with no new fields must resolve to defaults (`ingredientRefs = []`, `timer = null`).
++6. Ingredient refs should be de-duplicated before persistence.
++
++## Import/Export Requirements
++1. Export includes new instruction fields (`ingredientRefs`, `timer`) when present.
++2. Import accepts both:
++   - Older instruction shape (id, stepNumber, text only).
++   - New instruction shape with optional `ingredientRefs` and `timer`.
++3. Import normalizes missing new fields to defaults.
++4. Import validates timer duration when timer data is provided.
++5. Import ignores ingredient refs that are empty values.
++
++## UI Requirements
++1. Step list display in recipe detail should indicate step timer when present.
++2. Step list display in recipe detail should indicate linked ingredients when present.
++3. Timer and ingredient indicators must not block current step action menus.
++4. Step Editor modal should follow existing modal accessibility patterns:
++   - Keyboard reachable controls.
++   - Escape closes without saving.
++   - Clear validation feedback when save is blocked.
++5. Ingredient multi-select should visually indicate ingredients already linked to other steps in the same recipe/version context.
++6. Already-used ingredients remain selectable and are not blocked from selection.
++7. Used-state indication must not rely on color alone; it must include supporting text and/or icon treatment.
++8. Ingredient picker should show a simple used-state indicator when overlap exists, without requiring a full list of every overlapping step.
++9. Ingredient picker should keep current step selections distinct from overlap detection; only other steps count as overlap.
++
++## Ingredient Overlap Behavior
++1. Ingredient overlap is advisory, not blocking.
++2. Overlap detection scope is limited to other steps within the same effective recipe context:
++   - Latest recipe view compares against other latest recipe steps.
++   - Historical version view compares against other steps in that version snapshot.
++3. When an ingredient is already linked to another step, the ingredient option should render in a muted/used state while remaining selectable.
++4. Used-state messaging should communicate that the ingredient is already used in another step without requiring a full overlap list.
++5. If the user saves a step with one or more overlapping ingredients, the app should show a warning before final save.
++6. The overlap warning should be simple summary messaging and should not require a full listing of affected ingredients or every existing step reference.
++7. Default warning copy for v1 should be: `Some selected ingredients are already used in other steps.`
++8. The overlap warning should provide these actions:
++   - `Continue and Save`
++   - `Review Selection`
++9. Overlap warning is evaluated only after blocking validation passes.
++10. Blocking validation continues to take precedence over overlap warnings:
++   - Required step text.
++   - Valid timer duration when timer is enabled.
++11. v1 warning behavior should trigger on any overlap at save time rather than only newly introduced overlap.
++
++## Backward Compatibility Requirements
++1. Existing recipes and versions load without migration failures.
++2. Existing text-only steps remain editable and saveable.
++3. Existing move/remove behavior remains unchanged for text-only and enriched steps.
++4. Existing clone/new version behavior preserves new step fields when they exist.
++
++## Non-Functional Requirements
++1. Step Editor interactions should be immediate and not require page navigation.
++2. Validation behavior should be deterministic and consistent across latest and version views.
++3. New fields should not introduce regressions in step ordering logic.
++
++## Out of Scope (This Update)
++- Prepare Recipe Mode runtime UI and walkthrough flow.
++- Timer runtime controls (start, pause, restart, background execution, notifications).
++- Multiple timers per step.
++- Ingredient selection from non-recipe sources (pantry/global catalog).
++- Auto-highlighting linked ingredients in a future preparation flow.
++
++## Acceptance Checks
++- [ ] Add Step opens the Step Editor modal.
++- [ ] Edit Step opens the Step Editor modal with existing values.
++- [ ] Step text is required and validated.
++- [ ] Ingredient multi-select lists recipe ingredients only.
++- [ ] Selected ingredients are stored by `itemId` only.
++- [ ] Ingredients already used in other steps render with a visible used-state indicator.
++- [ ] Used-state indicators do not rely on color alone.
++- [ ] Already-used ingredients remain selectable.
++- [ ] Saving with overlap shows a non-blocking warning.
++- [ ] Overlap warning uses simple summary messaging rather than a full overlap list.
++- [ ] Overlap warning provides `Continue and Save` and `Review Selection` actions.
++- [ ] Timer is optional and limited to one per step.
++- [ ] Timer supports second precision input and stores `durationSeconds`.
++- [ ] Steps with no timer/ingredients behave as text-only steps.
++- [ ] Latest-version and version-snapshot step edits preserve new fields.
++- [ ] Step move/remove flows keep data integrity.
++- [ ] Export includes new fields.
++- [ ] Import supports both old and new instruction shapes.
++- [ ] Existing recipes with legacy instructions continue to work.
++
++## Open Questions
++- Should timer label be displayed directly in the step list or only in the Step Editor detail?
++- Should step timer badges include formatted duration only, or formatted duration plus label when label exists?
+\ No newline at end of file
+diff --git a/src/features/recipes/recipes-page.js b/src/features/recipes/recipes-page.js
+index a70dbab..22c19b0 100644
+--- a/src/features/recipes/recipes-page.js
++++ b/src/features/recipes/recipes-page.js
+@@ -40,17 +40,89 @@
+     return safeRecipeName + '_' + safeVersionName;
+   }
+ 
++  function getGreatestCommonDivisor(a, b) {
++    var x = Math.abs(Math.round(a));
++    var y = Math.abs(Math.round(b));
++
++    while (y) {
++      var temp = y;
++      y = x % y;
++      x = temp;
++    }
++
++    return x || 1;
++  }
++
++  function formatNumericQuantityAsFraction(value) {
++    var numeric = Number(value);
++    if (!Number.isFinite(numeric)) {
++      return '';
++    }
++
++    var sign = numeric < 0 ? '-' : '';
++    var absolute = Math.abs(numeric);
++    var whole = Math.floor(absolute);
++    var remainder = absolute - whole;
++    var tolerance = 0.0001;
++
++    if (remainder <= tolerance) {
++      return sign + String(whole);
++    }
++
++    if (Math.abs(1 - remainder) <= tolerance) {
++      return sign + String(whole + 1);
++    }
++
++    var bestNumerator = 0;
++    var bestDenominator = 1;
++    var bestError = Number.POSITIVE_INFINITY;
++    var denominator = 0;
++
++    for (denominator = 2; denominator <= 16; denominator += 1) {
++      var numerator = Math.round(remainder * denominator);
++      if (numerator <= 0 || numerator >= denominator) {
++        continue;
++      }
++
++      var error = Math.abs(remainder - (numerator / denominator));
++      if (error < bestError) {
++        bestError = error;
++        bestNumerator = numerator;
++        bestDenominator = denominator;
++      }
++    }
++
++    if (!Number.isFinite(bestError) || bestError > 0.02) {
++      return sign + numeric.toFixed(3).replace(/\.?0+$/, '');
++    }
++
++    var divisor = getGreatestCommonDivisor(bestNumerator, bestDenominator);
++    bestNumerator = bestNumerator / divisor;
++    bestDenominator = bestDenominator / divisor;
++
++    if (whole <= 0) {
++      return sign + String(bestNumerator) + '/' + String(bestDenominator);
++    }
++
++    return sign + String(whole) + ' ' + String(bestNumerator) + '/' + String(bestDenominator);
++  }
++
+   function getIngredientQuantityText(item) {
+     if (item && item.quantityText != null && String(item.quantityText).trim() !== '') {
+       return String(item.quantityText).trim();
+     }
+ 
+     if (item && item.quantityValue != null && !Number.isNaN(Number(item.quantityValue))) {
+-      return String(item.quantityValue);
++      return formatNumericQuantityAsFraction(item.quantityValue);
+     }
+ 
+     if (item && item.quantity != null && String(item.quantity).trim() !== '') {
+-      return String(item.quantity).trim();
++      var rawQuantity = String(item.quantity).trim();
++      if (/^-?(?:\d+|\d*\.\d+)$/.test(rawQuantity) && !Number.isNaN(Number(rawQuantity))) {
++        return formatNumericQuantityAsFraction(Number(rawQuantity));
++      }
++
++      return rawQuantity;
+     }
+ 
+     return '';
+@@ -70,7 +142,7 @@
+       return String(baseQuantityText).trim() || null;
+     }
+ 
+-    return scaled.toFixed(3).replace(/\.?0+$/, '');
++    return formatNumericQuantityAsFraction(scaled);
+   }
+ 
+   function getRecipeBatchSizeState() {
+@@ -146,6 +218,113 @@
+     return prefix + name + optionalSuffix;
+   }
+ 
++  function normalizeInstructionIngredientRefs(instruction) {
++    var seen = {};
++    return (Array.isArray(instruction && instruction.ingredientRefs) ? instruction.ingredientRefs : []).map(function (itemId) {
++      return String(itemId || '').trim();
++    }).filter(function (itemId) {
++      if (!itemId || seen[itemId]) {
++        return false;
++      }
++
++      seen[itemId] = true;
++      return true;
++    });
++  }
++
++  function normalizeInstructionTimer(timer) {
++    if (!timer || typeof timer !== 'object') {
++      return null;
++    }
++
++    var durationSeconds = Number(timer.durationSeconds);
++    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
++      return null;
++    }
++
++    return {
++      durationSeconds: Math.floor(durationSeconds),
++      label: String(timer.label || '').trim()
++    };
++  }
++
++  function formatStepTimerDuration(durationSeconds) {
++    var totalSeconds = Number(durationSeconds);
++    if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
++      return '';
++    }
++
++    totalSeconds = Math.floor(totalSeconds);
++    var hours = Math.floor(totalSeconds / 3600);
++    var minutes = Math.floor((totalSeconds % 3600) / 60);
++    var seconds = totalSeconds % 60;
++    var parts = [];
++
++    if (hours > 0) {
++      parts.push(String(hours) + 'h');
++    }
++    if (minutes > 0) {
++      parts.push(String(minutes) + 'm');
++    }
++    if (seconds > 0 || parts.length === 0) {
++      parts.push(String(seconds) + 's');
++    }
++
++    return parts.join(' ');
++  }
++
++  function buildStepEditorIngredientOptions(detailItems, instructions, currentInstructionId) {
++    var usedByOtherSteps = {};
++    (instructions || []).forEach(function (instruction) {
++      if (instruction && instruction.id === currentInstructionId) {
++        return;
++      }
++
++      normalizeInstructionIngredientRefs(instruction).forEach(function (itemId) {
++        usedByOtherSteps[itemId] = true;
++      });
++    });
++
++    var seen = {};
++    return sortByNameAscending((detailItems || []).filter(function (detailItem) {
++      var itemId = String(detailItem && detailItem.itemId || '').trim();
++      if (!itemId || seen[itemId]) {
++        return false;
++      }
++
++      seen[itemId] = true;
++      return true;
++    }).map(function (detailItem) {
++      var displayLine = buildIngredientDisplayLine(detailItem);
++      var name = String(detailItem.name || '').trim() || displayLine;
++      return {
++        itemId: String(detailItem.itemId || '').trim(),
++        name: name,
++        meta: displayLine !== name ? displayLine : '',
++        isUsedElsewhere: usedByOtherSteps[String(detailItem.itemId || '').trim()] === true
++      };
++    }));
++  }
++
++  function buildStepDraftFromInstruction(instruction) {
++    return {
++      text: String(instruction && instruction.text || ''),
++      ingredientRefs: normalizeInstructionIngredientRefs(instruction),
++      timer: normalizeInstructionTimer(instruction && instruction.timer)
++    };
++  }
++
++  async function showStepEditor(detailItems, instructions, currentInstruction, title, confirmLabel) {
++    return window.KaPUI.ShowStepEditorModal({
++      title: title,
++      confirmLabel: confirmLabel,
++      placeholder: 'Describe this cooking step',
++      initialStep: buildStepDraftFromInstruction(currentInstruction),
++      ingredients: buildStepEditorIngredientOptions(detailItems, instructions, currentInstruction && currentInstruction.id),
++      overlapWarningMessage: 'Some selected ingredients are already used in other steps.'
++    });
++  }
++
+   function escapeHtml(value) {
+     return String(value || '')
+       .replace(/&/g, '&amp;')
+@@ -204,7 +383,9 @@
+         return {
+           id: step && step.id != null ? String(step.id) : '',
+           stepNumber: step && step.stepNumber != null ? Number(step.stepNumber) : null,
+-          text: step && step.text ? String(step.text) : ''
++          text: step && step.text ? String(step.text) : '',
++          ingredientRefs: normalizeInstructionIngredientRefs(step),
++          timer: normalizeInstructionTimer(step && step.timer)
+         };
+       })
+     };
+@@ -465,10 +646,17 @@
+ 
+     return instructions.map(function (instruction, index) {
+       var stepNumber = asOptionalNumber(instruction && instruction.stepNumber);
++      var timer = normalizeInstructionTimer(instruction && instruction.timer);
++      if (instruction && instruction.timer && !timer) {
++        throw new Error('Instruction timer duration must be greater than zero.');
++      }
++
+       return {
+         id: asTrimmedString(instruction && instruction.id) || window.KaPIds.NewId(),
+         stepNumber: stepNumber == null ? (index + 1) : stepNumber,
+-        text: asTrimmedString(instruction && instruction.text)
++        text: asTrimmedString(instruction && instruction.text),
++        ingredientRefs: normalizeInstructionIngredientRefs(instruction),
++        timer: timer
+       };
+     }).filter(function (instruction) {
+       return !!instruction.text;
+@@ -691,7 +879,9 @@
+       id: asTrimmedString(instruction && instruction.id),
+       recipeId: asTrimmedString(recipeId),
+       stepNumber: Number(stepNumber || 0),
+-      text: asTrimmedString(instruction && instruction.text)
++      text: asTrimmedString(instruction && instruction.text),
++      ingredientRefs: normalizeInstructionIngredientRefs(instruction),
++      timer: normalizeInstructionTimer(instruction && instruction.timer)
+     };
+   }
+ 
+@@ -700,7 +890,9 @@
+       id: asTrimmedString(instruction && instruction.id),
+       recipeId: asTrimmedString(instruction && instruction.recipeId),
+       stepNumber: Number(instruction && instruction.stepNumber || 0),
+-      text: asTrimmedString(instruction && instruction.text)
++      text: asTrimmedString(instruction && instruction.text),
++      ingredientRefs: normalizeInstructionIngredientRefs(instruction),
++      timer: normalizeInstructionTimer(instruction && instruction.timer)
+     };
+   }
+ 
+@@ -711,7 +903,9 @@
+     return lhs.id === rhs.id
+       && lhs.recipeId === rhs.recipeId
+       && lhs.stepNumber === rhs.stepNumber
+-      && lhs.text === rhs.text;
++      && lhs.text === rhs.text
++      && JSON.stringify(lhs.ingredientRefs) === JSON.stringify(rhs.ingredientRefs)
++      && JSON.stringify(lhs.timer) === JSON.stringify(rhs.timer);
+   }
+ 
+   function findDuplicateIds(records, selector) {
+@@ -1141,7 +1335,9 @@
+       return {
+         instructionId: instruction.id,
+         stepNumber: index + 1,
+-        text: instruction.text
++        text: instruction.text,
++        ingredientRefs: normalizeInstructionIngredientRefs(instruction),
++        timer: normalizeInstructionTimer(instruction.timer)
+       };
+     });
+ 
+@@ -1521,6 +1717,7 @@
+       currentContextLabel: 'recipe',
+       detailItems: overrides.detailItems || [],
+       quantityPlaceholder: 'e.g. 1/2 or 1.5',
++      quantityHelpText: 'Accepted formats: 1.5, 3/4, or 1 1/2',
+       validateQuantity: window.KaPItemDiscovery.validateOptionalDecimal,
+       showOptionalField: true,
+       optionalLabel: 'Mark ingredient as optional'
+@@ -1773,19 +1970,15 @@
+     }
+   }
+ 
+-  async function addInstructionWithPrompt(recipeRecord) {
+-    var stepText = await window.KaPUI.ShowPrompt({
+-      title: 'Add Step',
+-      placeholder: 'Describe this cooking step',
+-      confirmLabel: 'Add'
+-    });
++  async function addInstructionWithPrompt(recipeRecord, detailItems, instructions) {
++    var stepDraft = await showStepEditor(detailItems, instructions, null, 'Add Step', 'Add');
+ 
+-    if (stepText === null) {
++    if (stepDraft === null) {
+       return false;
+     }
+ 
+     try {
+-      await window.KaPRecipesService.addInstructionToRecipe(recipeRecord.id, stepText);
++      await window.KaPRecipesService.addInstructionToRecipe(recipeRecord.id, stepDraft);
+       return true;
+     } catch (error) {
+       await showError(error.message || 'Unable to add instruction.');
+@@ -1793,23 +1986,40 @@
+     }
+   }
+ 
+-  async function editInstructionWithPrompt(recipeRecord, instruction, selectedVersionId, isViewingLatestVersion) {
+-    var nextText = await window.KaPUI.ShowPrompt({
+-      title: 'Edit Step ' + instruction.stepNumber,
+-      placeholder: 'Describe this cooking step',
+-      value: instruction.text,
+-      confirmLabel: 'Save'
+-    });
++  async function addInstructionToVersionWithPrompt(recipeRecord, selectedVersionId, detailItems, instructions) {
++    var stepDraft = await showStepEditor(detailItems, instructions, null, 'Add Step', 'Add');
+ 
+-    if (nextText === null) {
++    if (stepDraft === null) {
++      return false;
++    }
++
++    try {
++      await window.KaPRecipesService.addInstructionToVersion(recipeRecord.id, selectedVersionId, stepDraft);
++      return true;
++    } catch (error) {
++      await showError(error.message || 'Unable to add instruction.');
++      return false;
++    }
++  }
++
++  async function editInstructionWithPrompt(recipeRecord, instruction, detailItems, instructions, selectedVersionId, isViewingLatestVersion) {
++    var nextDraft = await showStepEditor(
++      detailItems,
++      instructions,
++      instruction,
++      'Edit Step ' + instruction.stepNumber,
++      'Save'
++    );
++
++    if (nextDraft === null) {
+       return false;
+     }
+ 
+     try {
+       if (isViewingLatestVersion === false) {
+-        await window.KaPRecipesService.updateVersionInstruction(recipeRecord.id, selectedVersionId, instruction.id, nextText);
++        await window.KaPRecipesService.updateVersionInstruction(recipeRecord.id, selectedVersionId, instruction.id, nextDraft);
+       } else {
+-        await window.KaPRecipesService.updateRecipeInstruction(recipeRecord.id, instruction.id, nextText);
++        await window.KaPRecipesService.updateRecipeInstruction(recipeRecord.id, instruction.id, nextDraft);
+       }
+       return true;
+     } catch (error) {
+@@ -1969,7 +2179,9 @@
+         return {
+           id: snapshotInstruction.instructionId || ('snapshot-step-' + String(index)),
+           stepNumber: Number(snapshotInstruction.stepNumber || index + 1),
+-          text: snapshotInstruction.text || ''
++          text: snapshotInstruction.text || '',
++          ingredientRefs: normalizeInstructionIngredientRefs(snapshotInstruction),
++          timer: normalizeInstructionTimer(snapshotInstruction.timer)
+         };
+       });
+   }
+@@ -2632,7 +2844,7 @@
+     tabs.className = 'recipe-detail-tabs';
+     var activeSection = getActiveDetailsSection();
+     var definitions = [
+-      { key: DETAILS_SECTION_INFORMATION, label: 'Information' },
++      { key: DETAILS_SECTION_INFORMATION, label: 'Info' },
+       { key: DETAILS_SECTION_DESCRIPTION, label: 'Description' },
+       { key: DETAILS_SECTION_VERSIONS, label: 'Versions' },
+       { key: DETAILS_SECTION_TAGS, label: 'Tags' }
+@@ -3347,7 +3559,7 @@
+     detailShell.appendChild(section);
+   }
+ 
+-  async function appendInstructionsSection(container, recipeRecord, instructions, isViewingLatestVersion, hooks, selectedVersionNumber) {
++  async function appendInstructionsSection(container, recipeRecord, detailItems, instructions, isViewingLatestVersion, hooks, selectedVersionNumber) {
+     var detailShell = container.querySelector('.detail-shell');
+     if (!detailShell) {
+       return;
+@@ -3370,7 +3582,7 @@
+       addButton.className = 'accordion-new-button';
+       addButton.textContent = '+ Step';
+       addButton.addEventListener('click', async function () {
+-        var changed = await addInstructionWithPrompt(recipeRecord);
++        var changed = await addInstructionWithPrompt(recipeRecord, detailItems, instructions);
+         if (changed) {
+           await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
+         }
+@@ -3384,19 +3596,9 @@
+       addButtonForVersion.className = 'accordion-new-button';
+       addButtonForVersion.textContent = '+ Step';
+       addButtonForVersion.addEventListener('click', async function () {
+-        var stepText = await window.KaPUI.ShowPrompt({
+-          title: 'Add Step',
+-          placeholder: 'Describe this cooking step',
+-          confirmLabel: 'Add'
+-        });
+-
+-        if (stepText !== null) {
+-          try {
+-            await window.KaPRecipesService.addInstructionToVersion(recipeRecord.id, selectedVersionNumber, stepText);
+-            await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
+-          } catch (error) {
+-            await showError(error.message || 'Unable to add instruction.');
+-          }
++        var changed = await addInstructionToVersionWithPrompt(recipeRecord, selectedVersionNumber, detailItems, instructions);
++        if (changed) {
++          await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
+         }
+       });
+       header.appendChild(addButtonForVersion);
+@@ -3415,6 +3617,13 @@
+ 
+     var list = document.createElement('div');
+     list.className = 'recipe-instruction-list';
++    var ingredientNameById = {};
++    (detailItems || []).forEach(function (detailItem) {
++      var itemId = String(detailItem && detailItem.itemId || '').trim();
++      if (itemId && !ingredientNameById[itemId]) {
++        ingredientNameById[itemId] = buildIngredientDisplayLine(detailItem);
++      }
++    });
+ 
+     instructions.forEach(function (instruction) {
+       var row = document.createElement('div');
+@@ -3424,12 +3633,39 @@
+       numberNode.className = 'recipe-instruction-number';
+       numberNode.textContent = String(instruction.stepNumber) + '.';
+ 
++      var contentNode = document.createElement('div');
++      contentNode.className = 'recipe-instruction-content';
++
+       var textNode = document.createElement('div');
+       textNode.className = 'recipe-instruction-text';
+       textNode.textContent = instruction.text;
++      contentNode.appendChild(textNode);
++
++      var ingredientRefs = normalizeInstructionIngredientRefs(instruction);
++      var timer = normalizeInstructionTimer(instruction.timer);
++      if (ingredientRefs.length > 0 || timer) {
++        var metaNode = document.createElement('div');
++        metaNode.className = 'recipe-instruction-meta';
++
++        if (timer) {
++          var timerBadge = document.createElement('span');
++          timerBadge.className = 'recipe-instruction-badge recipe-instruction-badge--timer';
++          timerBadge.textContent = 'Timer ' + formatStepTimerDuration(timer.durationSeconds);
++          metaNode.appendChild(timerBadge);
++        }
++
++        ingredientRefs.forEach(function (itemId) {
++          var ingredientBadge = document.createElement('span');
++          ingredientBadge.className = 'recipe-instruction-badge';
++          ingredientBadge.textContent = ingredientNameById[itemId] || 'Linked ingredient';
++          metaNode.appendChild(ingredientBadge);
++        });
++
++        contentNode.appendChild(metaNode);
++      }
+ 
+       row.appendChild(numberNode);
+-      row.appendChild(textNode);
++      row.appendChild(contentNode);
+ 
+       if (isViewingLatestVersion) {
+         var menuWrap = document.createElement('div');
+@@ -3468,7 +3704,7 @@
+         var menuActions = [
+           { label: 'Move Up', onClick: async function () { var changed = await moveInstruction(recipeRecord, instruction, 'up'); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
+           { label: 'Move Down', onClick: async function () { var changed = await moveInstruction(recipeRecord, instruction, 'down'); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
+-          { label: 'Edit', onClick: async function () { var changed = await editInstructionWithPrompt(recipeRecord, instruction); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
++          { label: 'Edit', onClick: async function () { var changed = await editInstructionWithPrompt(recipeRecord, instruction, detailItems, instructions); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } },
+           { label: 'Remove', isDanger: true, onClick: async function () { var changed = await removeInstructionWithConfirm(recipeRecord, instruction); if (changed) { await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber); } } }
+         ];
+ 
+@@ -3552,7 +3788,7 @@
+           {
+             label: 'Edit',
+             onClick: async function () {
+-              var changed = await editInstructionWithPrompt(recipeRecord, instruction, selectedVersionNumber, false);
++              var changed = await editInstructionWithPrompt(recipeRecord, instruction, detailItems, instructions, selectedVersionNumber, false);
+               if (changed) {
+                 await renderDetailInto(container, recipeRecord, hooks, selectedVersionNumber);
+               }
+@@ -3824,6 +4060,7 @@
+     await appendInstructionsSection(
+       container,
+       record,
++      detailItems,
+       instructions,
+       isViewingLatestVersion,
+       hooks,
+diff --git a/src/features/recipes/recipes-service.js b/src/features/recipes/recipes-service.js
+index 6b24485..6dae804 100644
+--- a/src/features/recipes/recipes-service.js
++++ b/src/features/recipes/recipes-service.js
+@@ -33,6 +33,73 @@
+     return trimmed;
+   }
+ 
++  function normalizeInstructionIngredientRefs(ingredientRefs) {
++    var seen = {};
++    return (Array.isArray(ingredientRefs) ? ingredientRefs : []).map(function (itemId) {
++      return String(itemId || '').trim();
++    }).filter(function (itemId) {
++      if (!itemId || seen[itemId]) {
++        return false;
++      }
++
++      seen[itemId] = true;
++      return true;
++    });
++  }
++
++  function normalizeInstructionTimer(timer) {
++    if (!timer || typeof timer !== 'object') {
++      return null;
++    }
++
++    var rawDuration = timer.durationSeconds;
++    if (rawDuration == null || String(rawDuration).trim() === '') {
++      return null;
++    }
++
++    var durationSeconds = Number(rawDuration);
++    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
++      throw new Error('Timer duration must be greater than zero.');
++    }
++
++    return {
++      durationSeconds: Math.floor(durationSeconds),
++      label: String(timer.label || '').trim()
++    };
++  }
++
++  function normalizeStoredInstructionTimer(timer) {
++    if (!timer || typeof timer !== 'object') {
++      return null;
++    }
++
++    var durationSeconds = Number(timer.durationSeconds);
++    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
++      return null;
++    }
++
++    return {
++      durationSeconds: Math.floor(durationSeconds),
++      label: String(timer.label || '').trim()
++    };
++  }
++
++  function normalizeInstructionInput(input) {
++    if (input && typeof input === 'object' && !Array.isArray(input)) {
++      return {
++        text: ensureValidInstructionText(input.text),
++        ingredientRefs: normalizeInstructionIngredientRefs(input.ingredientRefs),
++        timer: normalizeInstructionTimer(input.timer)
++      };
++    }
++
++    return {
++      text: ensureValidInstructionText(input),
++      ingredientRefs: [],
++      timer: null
++    };
++  }
++
+   function normalizeRecipeDescription(description) {
+     return window.KaPItemEntryRules.normalizeDescription(description);
+   }
+@@ -182,7 +249,9 @@
+       return {
+         instructionId: String((entry && entry.instructionId) || ''),
+         stepNumber: Number((entry && entry.stepNumber) || 0),
+-        text: String((entry && entry.text) || '').trim()
++        text: String((entry && entry.text) || '').trim(),
++        ingredientRefs: normalizeInstructionIngredientRefs(entry && entry.ingredientRefs),
++        timer: normalizeStoredInstructionTimer(entry && entry.timer)
+       };
+     }));
+   }
+@@ -329,6 +398,8 @@
+         recipeId: instruction.recipeId,
+         stepNumber: index + 1,
+         text: ensureValidInstructionText(instruction.text),
++        ingredientRefs: normalizeInstructionIngredientRefs(instruction.ingredientRefs),
++        timer: normalizeStoredInstructionTimer(instruction.timer),
+         createdDate: instruction.createdDate || nowIso(),
+         updatedDate: nowIso()
+       };
+@@ -495,6 +566,8 @@
+         recipeId: instruction.recipeId,
+         stepNumber: Number(instruction.stepNumber || 0),
+         text: String(instruction.text || ''),
++        ingredientRefs: normalizeInstructionIngredientRefs(instruction.ingredientRefs),
++        timer: normalizeStoredInstructionTimer(instruction.timer),
+         createdDate: String(instruction.createdDate || ''),
+         updatedDate: String(instruction.updatedDate || '')
+       };
+@@ -560,7 +633,9 @@
+       return {
+         instructionId: instruction.id,
+         stepNumber: Number(instruction.stepNumber || 0),
+-        text: instruction.text || ''
++        text: instruction.text || '',
++        ingredientRefs: normalizeInstructionIngredientRefs(instruction.ingredientRefs),
++        timer: normalizeStoredInstructionTimer(instruction.timer)
+       };
+     });
+ 
+@@ -834,9 +909,9 @@
+     return existing;
+   }
+ 
+-  async function addInstructionToRecipe(recipeId, text) {
++  async function addInstructionToRecipe(recipeId, instructionInput) {
+     await requireRecipeById(recipeId);
+-    var safeText = ensureValidInstructionText(text);
++    var normalizedInput = normalizeInstructionInput(instructionInput);
+     var instructions = await getRecipeInstructions(recipeId);
+     var nextStepNumber = instructions.length + 1;
+ 
+@@ -844,7 +919,9 @@
+       id: window.KaPIds.NewId(),
+       recipeId: recipeId,
+       stepNumber: nextStepNumber,
+-      text: safeText,
++      text: normalizedInput.text,
++      ingredientRefs: normalizedInput.ingredientRefs,
++      timer: normalizedInput.timer,
+       createdDate: nowIso(),
+       updatedDate: nowIso()
+     };
+@@ -854,14 +931,17 @@
+     return instruction;
+   }
+ 
+-  async function updateRecipeInstruction(recipeId, instructionId, text) {
++  async function updateRecipeInstruction(recipeId, instructionId, instructionInput) {
+     await requireRecipeById(recipeId);
+     var existing = await findInstructionById(recipeId, instructionId);
+     if (!existing) {
+       throw new Error('Instruction not found.');
+     }
+ 
+-    existing.text = ensureValidInstructionText(text);
++    var normalizedInput = normalizeInstructionInput(instructionInput);
++    existing.text = normalizedInput.text;
++    existing.ingredientRefs = normalizedInput.ingredientRefs;
++    existing.timer = normalizedInput.timer;
+     existing.updatedDate = nowIso();
+     await window.KaPDB.upsert(window.KaPStores.STORE_NAMES.RECIPE_INSTRUCTIONS, existing);
+     await syncLatestVersionSnapshot(recipeId);
+@@ -966,6 +1046,8 @@
+         recipeId: recipeId,
+         stepNumber: Number(snapshotInstruction.stepNumber || i + 1),
+         text: ensureValidInstructionText(snapshotInstruction.text),
++        ingredientRefs: normalizeInstructionIngredientRefs(snapshotInstruction.ingredientRefs),
++        timer: normalizeStoredInstructionTimer(snapshotInstruction.timer),
+         createdDate: nowIso(),
+         updatedDate: nowIso()
+       };
+@@ -1038,6 +1120,8 @@
+         recipeId: '',
+         stepNumber: Number(snapshotInstruction.stepNumber || index + 1),
+         text: snapshotInstruction.text || '',
++        ingredientRefs: normalizeInstructionIngredientRefs(snapshotInstruction.ingredientRefs),
++        timer: normalizeStoredInstructionTimer(snapshotInstruction.timer),
+         createdDate: '',
+         updatedDate: ''
+       };
+@@ -1216,29 +1300,33 @@
+     return getVersionItems(recipeId, versionId);
+   }
+ 
+-  async function addInstructionToVersion(recipeId, versionId, text) {
++  async function addInstructionToVersion(recipeId, versionId, instructionInput) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+     }
+ 
++    var normalizedInput = normalizeInstructionInput(instructionInput);
+     var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
+     snapshotInstructions.push({
+       instructionId: window.KaPIds.NewId(),
+       stepNumber: snapshotInstructions.length + 1,
+-      text: ensureValidInstructionText(text)
++      text: normalizedInput.text,
++      ingredientRefs: normalizedInput.ingredientRefs,
++      timer: normalizedInput.timer
+     });
+ 
+     await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
+     return getVersionInstructions(recipeId, versionId);
+   }
+ 
+-  async function updateVersionInstruction(recipeId, versionId, instructionId, text) {
++  async function updateVersionInstruction(recipeId, versionId, instructionId, instructionInput) {
+     var version = await getRecipeVersionById(recipeId, versionId);
+     if (!version) {
+       throw new Error('Recipe version not found.');
+     }
+ 
++    var normalizedInput = normalizeInstructionInput(instructionInput);
+     var snapshotInstructions = cloneSnapshotInstructions(version.snapshotInstructions);
+     var existing = snapshotInstructions.find(function (instruction) {
+       return instruction.instructionId === instructionId;
+@@ -1247,7 +1335,9 @@
+       throw new Error('Instruction not found.');
+     }
+ 
+-    existing.text = ensureValidInstructionText(text);
++    existing.text = normalizedInput.text;
++    existing.ingredientRefs = normalizedInput.ingredientRefs;
++    existing.timer = normalizedInput.timer;
+     await updateVersionSnapshot(recipeId, versionId, version.snapshotItems, snapshotInstructions);
+     return getVersionInstructions(recipeId, versionId);
+   }
+diff --git a/src/shared/item-discovery.js b/src/shared/item-discovery.js
+index adae6b4..af8d02c 100644
+--- a/src/shared/item-discovery.js
++++ b/src/shared/item-discovery.js
+@@ -18,10 +18,25 @@
+       return { ok: true, value: null };
+     }
+ 
+-    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(trimmed)) {
++    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+|\d+\s+\d+\/\d+)$/.test(trimmed)) {
+       return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
+     }
+ 
++    if (/^-?\d+\s+\d+\/\d+$/.test(trimmed)) {
++      var wholeAndFraction = trimmed.split(/\s+/);
++      var wholePart = Number(wholeAndFraction[0]);
++      var fractionParts = wholeAndFraction[1].split('/');
++      var mixedNumerator = Number(fractionParts[0]);
++      var mixedDenominator = Number(fractionParts[1]);
++
++      if (!Number.isFinite(wholePart) || !Number.isFinite(mixedNumerator) || !Number.isFinite(mixedDenominator) || mixedDenominator === 0) {
++        return { ok: false, message: 'Quantity must be a decimal number or fraction.' };
++      }
++
++      var sign = wholePart < 0 ? -1 : 1;
++      return { ok: true, value: wholePart + sign * (mixedNumerator / mixedDenominator) };
++    }
++
+     if (trimmed.indexOf('/') >= 0) {
+       var parts = trimmed.split('/');
+       var numerator = Number(parts[0]);
+@@ -62,6 +77,7 @@
+       confirmLabel: 'Add Item',
+       itemNamePlaceholder: 'Search or type item name',
+       quantityPlaceholder: config.quantityPlaceholder || 'e.g. 2',
++      quantityHelpText: config.quantityHelpText || '',
+       initialQuantity: config.initialQuantity != null ? config.initialQuantity : 1,
+       descriptionPlaceholder: 'Item notes',
+       currentContextItemIds: currentContextItemIds,
+diff --git a/src/shared/item-entry-rules.js b/src/shared/item-entry-rules.js
+index f80af87..89ae393 100644
+--- a/src/shared/item-entry-rules.js
++++ b/src/shared/item-entry-rules.js
+@@ -31,10 +31,25 @@
+       return null;
+     }
+ 
+-    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+)$/.test(raw)) {
++    if (!/^-?(?:\d+|\d*\.\d+|\d+\/\d+|\d+\s+\d+\/\d+)$/.test(raw)) {
+       throw new Error('Quantity must be a decimal number or fraction.');
+     }
+ 
++    if (/^-?\d+\s+\d+\/\d+$/.test(raw)) {
++      var wholeAndFraction = raw.split(/\s+/);
++      var wholePart = Number(wholeAndFraction[0]);
++      var fractionParts = wholeAndFraction[1].split('/');
++      var mixedNumerator = Number(fractionParts[0]);
++      var mixedDenominator = Number(fractionParts[1]);
++
++      if (!Number.isFinite(wholePart) || !Number.isFinite(mixedNumerator) || !Number.isFinite(mixedDenominator) || mixedDenominator === 0) {
++        throw new Error('Quantity must be a decimal number or fraction.');
++      }
++
++      var sign = wholePart < 0 ? -1 : 1;
++      return wholePart + sign * (mixedNumerator / mixedDenominator);
++    }
++
+     if (raw.indexOf('/') >= 0) {
+       var parts = raw.split('/');
+       var numerator = Number(parts[0]);
+diff --git a/src/styles.css b/src/styles.css
+index 3e58b31..7b5e062 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -1082,6 +1082,9 @@ body {
+   text-align: right;
+   border: none;
+   background: transparent;
++  color: var(--color-text);
++  caret-color: var(--color-text);
++  font: inherit;
+   border-radius: 0;
+   padding: 0.42rem 0.5rem;
+ }
+@@ -1239,6 +1242,122 @@ body {
+   white-space: nowrap;
+ }
+ 
++.modal-checklist-status {
++  flex-shrink: 0;
++  font-size: 0.78rem;
++  color: var(--color-muted);
++  border: 1px solid var(--color-border);
++  border-radius: 999px;
++  padding: 0.18rem 0.45rem;
++}
++
++.modal-step-textarea {
++  resize: vertical;
++  min-height: 6.5rem;
++}
++
++.modal-step-checklist {
++  max-height: 14rem;
++}
++
++.modal-step-checklist-row {
++  align-items: flex-start;
++}
++
++.modal-step-checklist-row--used {
++  background: var(--color-surface-light);
++}
++
++.modal-step-checklist-row--selected {
++  background: var(--color-surface-light-hover);
++}
++
++.modal-step-checklist-content {
++  flex: 1;
++  display: grid;
++  gap: 0.2rem;
++  min-width: 0;
++}
++
++.modal-step-checklist-meta {
++  color: var(--color-muted);
++  font-size: 0.8rem;
++  line-height: 1.3;
++}
++
++.modal-step-timer-fields {
++  display: grid;
++  gap: 0.35rem;
++}
++
++.modal-step-timer-fields[hidden] {
++  display: none;
++}
++
++.modal-step-duration-grid {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.25rem;
++  width: auto;
++}
++
++.modal-step-duration-part {
++  display: inline-flex;
++  align-items: center;
++  gap: 0.2rem;
++}
++
++.modal-step-duration-input {
++  text-align: right;
++}
++
++.modal-step-duration-suffix {
++  color: var(--color-muted);
++  font-size: 0.82rem;
++}
++
++.modal-step-warning {
++  display: grid;
++  gap: 0.625rem;
++  border: 1px solid var(--color-border);
++  border-radius: 0.5rem;
++  padding: 0.75rem;
++  background: var(--color-surface-light);
++}
++
++.modal-step-warning[hidden] {
++  display: none;
++}
++
++.modal-step-warning-text {
++  margin: 0;
++}
++
++.modal-step-warning-actions {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.5rem;
++}
++
++.modal-step-warning-button {
++  border-radius: 0.5rem;
++  padding: 0.5rem 0.75rem;
++  font: inherit;
++  cursor: pointer;
++}
++
++.modal-step-warning-button--primary {
++  border: 1px solid var(--color-brand);
++  background: var(--color-brand);
++  color: #000;
++}
++
++.modal-step-warning-button--secondary {
++  border: 1px solid var(--color-border);
++  background: var(--color-bg);
++  color: var(--color-text);
++}
++
+ .modal-toggle-group {
+   display: flex;
+   border: 1px solid var(--color-border);
+@@ -1326,6 +1445,35 @@ body {
+   line-height: 1.35;
+ }
+ 
++.recipe-instruction-content {
++  min-width: 0;
++  display: grid;
++  gap: 0.4rem;
++}
++
++.recipe-instruction-meta {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 0.375rem;
++}
++
++.recipe-instruction-badge {
++  display: inline-flex;
++  align-items: center;
++  border: 1px solid var(--color-border);
++  border-radius: 999px;
++  padding: 0.2rem 0.5rem;
++  background: var(--color-surface-light);
++  color: var(--color-muted);
++  font-size: 0.76rem;
++  line-height: 1.2;
++}
++
++.recipe-instruction-badge--timer {
++  color: var(--color-brand);
++  border-color: var(--color-brand);
++}
++
+ 
+ 
+ .category-group {
+diff --git a/src/ui/ui.js b/src/ui/ui.js
+index 99af049..c01d748 100644
+--- a/src/ui/ui.js
++++ b/src/ui/ui.js
+@@ -936,6 +936,13 @@
+ 
+         quantityRow.appendChild(uomSelect);
+         form.appendChild(quantityRow);
++
++        if (options.quantityHelpText) {
++          var quantityHelp = document.createElement('p');
++          quantityHelp.className = 'modal-hint';
++          quantityHelp.textContent = String(options.quantityHelpText);
++          form.appendChild(quantityHelp);
++        }
+       }
+ 
+       if (options.showOptionalField === true) {
+@@ -2254,6 +2261,427 @@
+     });
+   }
+ 
++  function ShowStepEditorModal(config) {
++    return new Promise(function (resolve) {
++      var node = newFromTemplate('modal-template');
++      var overlay = node;
++      var card = node.querySelector('.modal-card');
++      var titleNode = node.querySelector('.modal-title');
++      var bodyNode = node.querySelector('.modal-body');
++      var cancelButton = node.querySelector('.modal-cancel-button');
++      var confirmButton = node.querySelector('.modal-confirm-button');
++
++      var initialStep = config.initialStep && typeof config.initialStep === 'object' ? config.initialStep : {};
++      var ingredients = Array.isArray(config.ingredients) ? config.ingredients.slice() : [];
++      var initialIngredientRefs = Array.isArray(initialStep.ingredientRefs) ? initialStep.ingredientRefs : [];
++      var initialTimer = initialStep.timer && typeof initialStep.timer === 'object' ? initialStep.timer : null;
++      var initialDurationSeconds = initialTimer && Number.isFinite(Number(initialTimer.durationSeconds))
++        ? Math.max(0, Math.floor(Number(initialTimer.durationSeconds)))
++        : 0;
++
++      titleNode.textContent = config.title || 'Step Editor';
++      confirmButton.textContent = config.confirmLabel || 'Save';
++      card.setAttribute('aria-label', titleNode.textContent);
++      cancelButton.classList.add('modal-button--secondary');
++      confirmButton.classList.add('modal-button--primary');
++
++      var form = document.createElement('div');
++      form.className = 'modal-item-form';
++
++      var textLabel = document.createElement('label');
++      textLabel.className = 'modal-field-label';
++      textLabel.textContent = 'Step Text';
++      form.appendChild(textLabel);
++
++      var textInput = document.createElement('textarea');
++      textInput.className = 'modal-input modal-step-textarea';
++      textInput.rows = 4;
++      textInput.placeholder = config.placeholder || 'Describe this cooking step';
++      textInput.value = String(initialStep.text || '');
++      form.appendChild(textInput);
++
++      var ingredientsLabel = document.createElement('span');
++      ingredientsLabel.className = 'modal-field-label';
++      ingredientsLabel.textContent = 'Ingredients Used';
++      form.appendChild(ingredientsLabel);
++
++      var ingredientList = document.createElement('div');
++      ingredientList.className = 'modal-checklist modal-step-checklist';
++      var ingredientCheckboxes = [];
++
++      function isInitiallySelected(itemId) {
++        return initialIngredientRefs.indexOf(String(itemId || '')) >= 0;
++      }
++
++      if (ingredients.length === 0) {
++        var emptyIngredients = document.createElement('p');
++        emptyIngredients.className = 'modal-hint';
++        emptyIngredients.textContent = 'No recipe ingredients available yet.';
++        form.appendChild(emptyIngredients);
++      } else {
++        ingredients.forEach(function (ingredient) {
++          var row = document.createElement('label');
++          row.className = 'modal-checklist-row modal-step-checklist-row';
++
++          var checkbox = document.createElement('input');
++          checkbox.type = 'checkbox';
++          checkbox.className = 'modal-checklist-checkbox';
++          checkbox.checked = isInitiallySelected(ingredient.itemId);
++          row.appendChild(checkbox);
++
++          var content = document.createElement('div');
++          content.className = 'modal-step-checklist-content';
++
++          var nameNode = document.createElement('span');
++          nameNode.className = 'modal-checklist-name';
++          nameNode.textContent = ingredient.name;
++          content.appendChild(nameNode);
++
++          if (ingredient.meta) {
++            var metaNode = document.createElement('span');
++            metaNode.className = 'modal-step-checklist-meta';
++            metaNode.textContent = ingredient.meta;
++            content.appendChild(metaNode);
++          }
++
++          row.appendChild(content);
++
++          if (ingredient.isUsedElsewhere) {
++            var statusNode = document.createElement('span');
++            statusNode.className = 'modal-checklist-status';
++            statusNode.textContent = 'Already used';
++            row.appendChild(statusNode);
++          }
++
++          ingredientList.appendChild(row);
++          ingredientCheckboxes.push({
++            checkbox: checkbox,
++            ingredient: ingredient,
++            row: row
++          });
++        });
++
++        form.appendChild(ingredientList);
++      }
++
++      var timerRow = document.createElement('label');
++      timerRow.className = 'modal-checklist-row modal-step-timer-toggle';
++
++      var timerEnabledInput = document.createElement('input');
++      timerEnabledInput.type = 'checkbox';
++      timerEnabledInput.className = 'modal-checklist-checkbox';
++      timerEnabledInput.checked = !!initialTimer;
++      timerRow.appendChild(timerEnabledInput);
++
++      var timerText = document.createElement('span');
++      timerText.className = 'modal-checklist-name';
++      timerText.textContent = 'Add timer';
++      timerRow.appendChild(timerText);
++      form.appendChild(timerRow);
++
++      var timerFields = document.createElement('div');
++      timerFields.className = 'modal-step-timer-fields';
++
++      var timerDurationLabel = document.createElement('label');
++      timerDurationLabel.className = 'modal-field-label';
++      timerDurationLabel.textContent = 'Timer Duration';
++      timerFields.appendChild(timerDurationLabel);
++
++      var durationGrid = document.createElement('div');
++      durationGrid.className = 'modal-step-duration-grid';
++
++      function createDurationInput(labelText, value) {
++        var wrap = document.createElement('div');
++        wrap.className = 'modal-step-duration-part';
++
++        var inputShell = document.createElement('div');
++        inputShell.className = 'recipe-info-duration-shell';
++
++        var input = document.createElement('input');
++        input.type = 'number';
++        input.min = '0';
++        input.step = '1';
++        input.className = 'modal-step-duration-input recipe-info-duration-input';
++        input.value = value > 0 ? String(value) : '';
++
++        var stepper = document.createElement('div');
++        stepper.className = 'recipe-info-stepper';
++
++        var incrementButton = document.createElement('button');
++        incrementButton.type = 'button';
++        incrementButton.className = 'recipe-info-stepper-button';
++        incrementButton.textContent = '+';
++        incrementButton.setAttribute('aria-label', 'Increase ' + labelText);
++
++        var decrementButton = document.createElement('button');
++        decrementButton.type = 'button';
++        decrementButton.className = 'recipe-info-stepper-button';
++        decrementButton.textContent = '-';
++        decrementButton.setAttribute('aria-label', 'Decrease ' + labelText);
++
++        function adjust(delta) {
++          var raw = String(input.value || '').trim();
++          var current = raw === '' ? 0 : Number(raw);
++          if (!Number.isFinite(current) || current < 0) {
++            current = 0;
++          }
++
++          var next = Math.max(0, Math.floor(current) + delta);
++          input.value = String(next);
++        }
++
++        function bindStepper(buttonNode, delta) {
++          buttonNode.addEventListener('mousedown', function (event) {
++            event.preventDefault();
++          });
++          buttonNode.addEventListener('click', function (event) {
++            event.preventDefault();
++            adjust(delta);
++          });
++        }
++
++        bindStepper(incrementButton, 1);
++        bindStepper(decrementButton, -1);
++
++        stepper.appendChild(incrementButton);
++        stepper.appendChild(decrementButton);
++
++        inputShell.appendChild(input);
++        inputShell.appendChild(stepper);
++        wrap.appendChild(inputShell);
++
++        var suffix = document.createElement('span');
++        suffix.className = 'modal-step-duration-suffix';
++        suffix.textContent = labelText;
++        wrap.appendChild(suffix);
++
++        durationGrid.appendChild(wrap);
++        return input;
++      }
++
++      var hoursInput = createDurationInput('h', Math.floor(initialDurationSeconds / 3600));
++      var minutesInput = createDurationInput('m', Math.floor((initialDurationSeconds % 3600) / 60));
++      var secondsInput = createDurationInput('s', initialDurationSeconds % 60);
++      timerFields.appendChild(durationGrid);
++
++      var timerLabel = document.createElement('label');
++      timerLabel.className = 'modal-field-label';
++      timerLabel.textContent = 'Timer Label (Optional)';
++      timerFields.appendChild(timerLabel);
++
++      var timerLabelInput = document.createElement('input');
++      timerLabelInput.type = 'text';
++      timerLabelInput.className = 'modal-input';
++      timerLabelInput.placeholder = 'e.g. Simmer';
++      timerLabelInput.value = initialTimer && initialTimer.label ? String(initialTimer.label) : '';
++      timerFields.appendChild(timerLabelInput);
++      form.appendChild(timerFields);
++
++      var errorNode = document.createElement('p');
++      errorNode.className = 'modal-error';
++      form.appendChild(errorNode);
++
++      var overlapWarning = document.createElement('div');
++      overlapWarning.className = 'modal-step-warning';
++      overlapWarning.hidden = true;
++
++      var overlapMessage = document.createElement('p');
++      overlapMessage.className = 'modal-message modal-step-warning-text';
++      overlapMessage.textContent = config.overlapWarningMessage || 'Some selected ingredients are already used in other steps.';
++      overlapWarning.appendChild(overlapMessage);
++
++      var overlapActions = document.createElement('div');
++      overlapActions.className = 'modal-step-warning-actions';
++
++      var continueButton = document.createElement('button');
++      continueButton.type = 'button';
++      continueButton.className = 'modal-step-warning-button modal-step-warning-button--primary';
++      continueButton.textContent = 'Continue and Save';
++
++      var reviewButton = document.createElement('button');
++      reviewButton.type = 'button';
++      reviewButton.className = 'modal-step-warning-button modal-step-warning-button--secondary';
++      reviewButton.textContent = 'Review Selection';
++
++      overlapActions.appendChild(continueButton);
++      overlapActions.appendChild(reviewButton);
++      overlapWarning.appendChild(overlapActions);
++      form.appendChild(overlapWarning);
++
++      bodyNode.appendChild(form);
++
++      function close(result) {
++        document.removeEventListener('keydown', onKeyDown);
++        document.body.removeChild(node);
++        resolve(result);
++      }
++
++      function getSelectedIngredientRefs() {
++        return ingredientCheckboxes.filter(function (entry) {
++          return entry.checkbox.checked;
++        }).map(function (entry) {
++          return String(entry.ingredient.itemId || '');
++        }).filter(function (itemId, index, arr) {
++          return itemId && arr.indexOf(itemId) === index;
++        });
++      }
++
++      function refreshIngredientRows() {
++        ingredientCheckboxes.forEach(function (entry) {
++          entry.row.classList.toggle('modal-step-checklist-row--used', entry.ingredient.isUsedElsewhere === true);
++          entry.row.classList.toggle('modal-step-checklist-row--selected', entry.checkbox.checked === true);
++        });
++      }
++
++      function setTimerFieldsVisible(isVisible) {
++        timerFields.hidden = !isVisible;
++      }
++
++      function setOverlapWarningVisible(isVisible) {
++        overlapWarning.hidden = !isVisible;
++        confirmButton.disabled = !!isVisible;
++      }
++
++      function parseDurationInput(inputNode) {
++        var raw = String(inputNode.value || '').trim();
++        if (!raw) {
++          return 0;
++        }
++
++        var numeric = Number(raw);
++        if (!Number.isFinite(numeric) || numeric < 0 || Math.floor(numeric) !== numeric) {
++          return NaN;
++        }
++
++        return numeric;
++      }
++
++      function buildStepResult() {
++        var text = String(textInput.value || '').trim();
++        if (!text) {
++          throw new Error('Step text is required.');
++        }
++
++        var timer = null;
++        if (timerEnabledInput.checked) {
++          var hours = parseDurationInput(hoursInput);
++          var minutes = parseDurationInput(minutesInput);
++          var seconds = parseDurationInput(secondsInput);
++
++          if (Number.isNaN(hours) || Number.isNaN(minutes) || Number.isNaN(seconds)) {
++            throw new Error('Timer values must be zero or greater whole numbers.');
++          }
++
++          var durationSeconds = (hours * 3600) + (minutes * 60) + seconds;
++          if (durationSeconds <= 0) {
++            throw new Error('Timer duration must be greater than zero.');
++          }
++
++          timer = {
++            durationSeconds: durationSeconds,
++            label: String(timerLabelInput.value || '').trim()
++          };
++        }
++
++        return {
++          text: text,
++          ingredientRefs: getSelectedIngredientRefs(),
++          timer: timer
++        };
++      }
++
++      function hasOverlap(selectedIngredientRefs) {
++        return ingredientCheckboxes.some(function (entry) {
++          return entry.ingredient.isUsedElsewhere === true
++            && selectedIngredientRefs.indexOf(String(entry.ingredient.itemId || '')) >= 0;
++        });
++      }
++
++      function handleSubmit(forceSave) {
++        errorNode.textContent = '';
++
++        var result = null;
++        try {
++          result = buildStepResult();
++        } catch (error) {
++          setOverlapWarningVisible(false);
++          errorNode.textContent = error.message || 'Unable to save step.';
++          return;
++        }
++
++        if (!forceSave && hasOverlap(result.ingredientRefs)) {
++          setOverlapWarningVisible(true);
++          reviewButton.focus();
++          return;
++        }
++
++        close(result);
++      }
++
++      ingredientCheckboxes.forEach(function (entry) {
++        entry.checkbox.addEventListener('change', function () {
++          refreshIngredientRows();
++          setOverlapWarningVisible(false);
++        });
++      });
++
++      timerEnabledInput.addEventListener('change', function () {
++        setTimerFieldsVisible(timerEnabledInput.checked);
++        setOverlapWarningVisible(false);
++      });
++
++      continueButton.addEventListener('click', function () {
++        handleSubmit(true);
++      });
++
++      reviewButton.addEventListener('click', function () {
++        setOverlapWarningVisible(false);
++        if (ingredientCheckboxes.length > 0) {
++          ingredientCheckboxes[0].checkbox.focus();
++        } else {
++          textInput.focus();
++        }
++      });
++
++      function onKeyDown(event) {
++        if (event.key === 'Escape') {
++          close(null);
++          return;
++        }
++
++        if (event.key === 'Enter' && event.target !== textInput && event.target !== continueButton && event.target !== reviewButton) {
++          event.preventDefault();
++          handleSubmit(false);
++        }
++      }
++
++      overlay.addEventListener('click', function (event) {
++        if (event.target === overlay) {
++          close(null);
++        }
++      });
++
++      cancelButton.addEventListener('click', function () {
++        close(null);
++      });
++
++      confirmButton.addEventListener('click', function () {
++        handleSubmit(false);
++      });
++
++      refreshIngredientRows();
++      setTimerFieldsVisible(timerEnabledInput.checked);
++      setOverlapWarningVisible(false);
++      document.addEventListener('keydown', onKeyDown);
++      document.body.appendChild(node);
++
++      requestAnimationFrame(function () {
++        textInput.focus();
++        textInput.setSelectionRange(textInput.value.length, textInput.value.length);
++      });
++    });
++  }
++
+   function normalizeBatchSizeValue(value) {
+     var numeric = Number(value);
+     if (!Number.isFinite(numeric) || numeric <= 0) {
+@@ -3454,6 +3882,7 @@
+     ShowTemplateConfigModal: ShowTemplateConfigModal,
+     ShowTemplateTargetListModal: ShowTemplateTargetListModal,
+     ShowPrompt: ShowPrompt,
++    ShowStepEditorModal: ShowStepEditorModal,
+     ShowBatchSizeModal: ShowBatchSizeModal,
+     FormatBatchSize: formatBatchSizeFraction,
+     ShowAddToListModal: ShowAddToListModal,

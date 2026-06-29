@@ -1,27 +1,30 @@
-# Release v2026-06-28-19-13
+# Release v2026-06-29-22-08
 
 ## Overview
-This release updates the recipe detail experience with a consolidated tabbed-accordion layout and adds editable recipe Information fields. It also adds a direct recipe rename action in the recipe detail menu.
+This release expands recipe step editing so each step can include linked ingredients and an optional timer, and it improves quantity entry and display for fractional values. It also updates recipe detail labels and step presentation to make recipe workflows easier to scan.
 
 ## New Features
-- **Recipe Information Section**: Recipe details now include an Information section with Prep Time, Cook Time, Additional Time, Total Time, Servings, and Yield.
-- **Recipe Rename Action**: Recipe detail overflow menu now includes `Edit Recipe Name` for quickly renaming a recipe.
+- **Step Editor Modal**: Adds a dedicated Add Step and Edit Step modal with step text, ingredient multi-select, optional timer toggle, hour/minute/second duration inputs, and optional timer label.
+- **Step Ingredient Linking**: Lets each recipe step link to one or more recipe ingredients so step context can stay tied to ingredient usage.
+- **Step Timer Support**: Lets each step store one optional timer with second-level precision and a custom label.
+- **Step Metadata Badges**: Shows timer duration and linked ingredient badges directly in the instruction list.
 
 ## Improvements
-- **Recipe Detail Layout**: Versions, Description, and Tags now render in a unified tabbed-accordion block with one active section at a time.
-- **Detail Section Navigation**: Section selection and collapsed state are now remembered globally across recipe views.
-- **Duration Input Controls**: Time fields now use split hours/minutes inputs with integrated stepper controls for faster edits.
-- **Version Controls Placement**: Version selector and add-version actions now appear inside the Versions section body.
-- **Expander Affordance**: Recipe detail block collapse/expand control now uses a chevron-style button.
+- **Instruction Workflows**: Uses the new step editor for both latest recipe and version snapshot step add/edit flows.
+- **Quantity Display Readability**: Displays numeric ingredient quantities as fractions or mixed fractions where possible (for example, `1/2` and `1 1/2`).
+- **Quantity Input Guidance**: Adds inline quantity format help in recipe ingredient entry (examples include decimal, fraction, and mixed fraction formats).
+- **Recipe Detail Tabs**: Renames the `Information` tab label to `Info` in recipe details.
+- **Timer Input Visibility**: Improves timer duration input styling so typed values and caret remain visible.
 
 ## Bug Fixes
-- **No User-Reported Bug Fixes**: This release focuses on recipe detail UX and metadata capabilities.
+- **Mixed Fraction Validation**: Fixes quantity validation so mixed fractions like `1 1/2` are accepted.
+- **Timer Label Layout**: Fixes timer field layout so `Timer Label (Optional)` remains on its own line below duration controls.
 
 ## Technical Changes
-- Added recipe-level Information persistence fields (`prep`, `cook`, `additional`, `servings`, `yield`) and normalization in recipe service paths.
-- Added recipe Information update API and record retrieval helper for refreshed detail rendering.
-- Updated recipe export/import flows to include recipe-level Information fields in payloads and text export output.
-- Updated clone behavior to carry recipe-level Information to cloned recipes.
+- Extended recipe instruction persistence and version snapshots to include `ingredientRefs` and `timer` data with normalization and comparison support.
+- Updated recipe import/export handling to round-trip enriched instruction fields and validate timer duration values.
+- Added shared normalization helpers for instruction ingredient references and timer payloads in recipe page and recipe service paths.
+- Added two new requirements documents for step editor and future prepare-mode planning.
 
 ## Installation
 1. Clone or pull the latest code from the repository.
@@ -35,261 +38,5 @@ This release updates the recipe detail experience with a consolidated tabbed-acc
 - Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
 - For feature documentation and usage guides, see `application-structure.md`.
 - For recipe feature planning notes, see `recipe-feature-definition.md`.
-
----
-
-# Release v2026-06-28-14-51
-
-## Overview
-This release improves Pantry Entry item adds to target lists so repeated clicks are applied reliably. It also ensures first-time adds start with a clear default quantity when template quantity is empty.
-
-## New Features
-- **No New Features**: This release focuses on reliability and behavior fixes for existing Pantry Entry item add interactions.
-
-## Improvements
-- **Pantry Entry Click Handling**: Repeated clicks on a Pantry Entry item now queue and apply consistently while an add is already in progress.
-- **Rapid Add Reliability**: Additional clicks that happen during processing are now picked up and processed instead of being dropped.
-
-## Bug Fixes
-- **Target List Incrementing**: Fixes a case where the second click could appear to do nothing before the next click incremented quantity.
-- **Default Add Quantity**: First-time adds from Pantry Entry items now default to quantity `1` when the template item has no quantity set.
-
-## Technical Changes
-- Replaced boolean pending-click state with counted pending-click tracking for template item target-list adds.
-- Added a dedicated pending-add processor that drains queued clicks and re-checks for late-arriving clicks.
-- Updated template add flow to pass normalized quantity to list add operations.
-
-## Installation
-1. Clone or pull the latest code from the repository.
-2. Open `src/index.html` or `docs/index.html` in a web browser.
-
-## Requirements
-- Modern web browser with ES5 JavaScript support.
-- LocalStorage and IndexedDB support for data persistence.
-
-## Documentation
-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
-- For feature documentation and usage guides, see `application-structure.md`.
-- For recipe feature planning notes, see `recipe-feature-definition.md`.
-
----
-
-# Release v2026-06-28-13-58
-
-## Overview
-This release adds recipe import/export workflows and improves recipe-to-grocery-list batching. You can now export and import individual recipe versions, review import impact before applying, and manage batch sizing directly from the recipe view.
-
-## New Features
-- **Recipe Export**: Recipe details now include an Export action with three options: PDF, clipboard text, and `.kap` file download.
-- **Recipe Import**: Recipes now support `.kap` import from the Recipes section, including preflight validation before changes are applied.
-- **Import Review Dialog**: Import now shows a structured review modal with change counts, warnings, and clear Apply/Cancel decisions.
-- **Ingredient Conflict Resolution**: Import now prompts for ingredient name conflicts (same id, different name) with options to use incoming name, keep existing name, or cancel, including apply-to-all support.
-- **Recipe View Batch Control**: Recipe details now include an inline batch size control between tags and ingredients to preview scaled ingredient quantities.
-
-## Improvements
-- **Recipe Import Safety**: Import now detects duplicate payloads, flags older-version imports, and requires explicit confirmation before destructive apply.
-- **Import Feedback**: Import and export outcomes now use non-blocking timed notices with auto-dismiss and manual close.
-- **Recipe-to-List Reuse**: Adding a recipe to groceries now reuses one active recipe-derived list per recipe/version instead of creating duplicates.
-- **Add-to-List Batch Defaults**: Add to Grocery List now defaults batch size to the value selected for the current recipe version.
-- **Additive Recipe Updates**: Re-adding a recipe now supports additive batch behavior for selected items while leaving unselected existing recipe-derived items unchanged.
-
-## Bug Fixes
-- **List Item Quantity Consistency**: Quantity increment/decrement now keep numeric quantity and displayed quantity text synchronized.
-- **Manual Item Merge Safety**: Manual list item adds no longer merge against recipe-derived join records when matching by name.
-
-## Technical Changes
-- Added recipe import/export helpers in the recipe feature, including `.kap` parse/validate, scope resolution, preflight analysis, and upsert logic.
-- Added UI components for export selection, import review, ingredient conflict prompts, timed notices, and reusable batch-size steppers.
-- Extended list service APIs for recipe-derived list lookup/create/update and batch recomputation.
-- Added implementation checklists for recipe import/export and recipe batch-size behavior under `requirements/`.
-
-## Installation
-1. Clone or pull the latest code from the repository.
-2. Open `src/index.html` or `docs/index.html` in a web browser.
-
-## Requirements
-- Modern web browser with ES5 JavaScript support.
-- LocalStorage and IndexedDB support for data persistence.
-- File access permission for `.kap` import/export workflows.
-
-## Documentation
-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
-- For feature documentation and usage guides, see `application-structure.md`.
-- For recipe feature planning notes, see `recipe-feature-definition.md`.
-- Recipe import/export implementation checklist: `requirements/recipe-import-export-implementation-checklist.md`
-- Recipe batch size implementation checklist: `requirements/recipe-batch-size-implementation-checklist.md`
-
----
-
-# Release v2026-06-23-00-56
-
-## Overview
-This release improves recipe entry, grocery list cleanup, and database reliability. You can now enter fractional ingredient quantities, mark ingredients as optional, and confirm destructive list cleanup actions before they run.
-
-## New Features
-- **Optional Ingredients**: Recipe ingredient entry and editing now support an optional flag, and optional items are labeled in recipe details.
-- **Fractional Quantities**: Ingredient quantity fields now accept fractions like `1/2`, and recipe detail views preserve the quantity text you entered.
-- **New Recipe Flow**: Creating a recipe now prompts for the recipe name and opens the new recipe immediately after it is created.
-
-## Improvements
-- **Ingredient Display**: Recipe rows now show the entered quantity text in the quantity pill, making fractions easier to read.
-- **Template Item Adds**: Adding a template item now uses the latest template detail record, which helps avoid stale item data when clicking repeatedly.
-- **Database Resilience**: IndexedDB access now retries through reopening when a connection is closing, reducing failures during normal navigation and data updates.
-
-## Bug Fixes
-- **Clear Crossed-Off Items**: Clearing crossed-off grocery list items now asks for confirmation before deleting them.
-- **Recipe Editing**: Recipe ingredient add and edit flows now preserve quantity text and optional state when saving changes.
-
-## Technical Changes
-- Added `quantityText` and `isOptional` fields to recipe item records and version snapshots.
-- Added fractional quantity validation helpers for item entry.
-- Added `withDatabase()` connection handling and open-state recovery in the DB layer.
-- Added `db-change-deployment-gate-checklist.md` and `recipe-scaling-requirements.md` to document deployment and recipe scaling follow-up work.
-
-## Installation
-1. Clone or pull the latest code from the repository.
-2. Open `src/index.html` or `docs/index.html` in a web browser.
-
-## Requirements
-- Modern web browser with ES5 JavaScript support.
-- LocalStorage and IndexedDB support for data persistence.
-
-## Documentation
-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
-- For feature documentation and usage guides, see `application-structure.md`.
-- For recipe feature planning notes, see `recipe-feature-definition.md`.
-- Deployment checklist: `requirements/db-change-deployment-gate-checklist.md`
-- Recipe scaling requirements: `requirements/recipe-scaling-requirements.md`
-
----
-
-# Release v2026-06-23-00-25
-
-## Overview
-This release introduces comprehensive data import and export capabilities with intelligent sync support. You can now backup and restore your data, or merge imported data with existing records to keep both local and imported changes.
-
-## New Features
-- **Data Export**: Export all your app data (lists, recipes, categories, units, and more) to a JSON file with a single click from Settings > Data > Export.
-- **Data Import with Merge Mode**: Import previously exported data and merge it with your current local data. Records are intelligently synced based on update timestamps—newer records always win.
-- **Data Import with Replace Mode**: Restore a complete backup by replacing all local data with imported data. Available as a secondary option with explicit confirmation to prevent accidents.
-- **Import Mode Selection Modal**: Single, clear modal showing both Merge and Replace options with descriptions so you understand the choice before proceeding. Merge is selected by default.
-- **Delete Synchronization**: Deletions are now tracked and propagated during import so that records deleted on one device can be deleted on another during a merge.
-
-## Improvements
-- **Data Persistence**: Settings now includes a dedicated Data section with Export and Import controls in one place.
-- **Import Summary**: After a successful import, a detailed summary shows how many records were inserted, updated, and skipped, plus how many deletions were applied.
-- **Automatic Cleanup**: Tombstones (deletion records) older than 365 days are automatically purged during export and import to keep storage lean.
-- **Responsive Import Controls**: Export and Import buttons stack vertically on mobile while remaining inline on larger screens.
-
-## Technical Changes
-- Upgraded IndexedDB schema version to 8.
-- Added `syncTombstones` store to track deleted records with timestamps for deletion propagation.
-- Added `KaPImportExportService` module handling export, import, and merge logic.
-- Implemented Last-Write-Wins collision resolution: newer record timestamps override older ones during merge.
-- Added `removeHard` and `replaceStores` database helpers to support import operations.
-- Added `ShowImportModeModal` UI helper for the single-screen import mode choice.
-- Export files are versioned (schema version 2) to support future format changes.
-- Added README.md with getting-started documentation for new users.
-
-## Installation
-1. Clone or pull the latest code from the repository.
-2. Open `src/index.html` or `docs/index.html` in a web browser.
-
-## Requirements
-- Modern web browser with ES5 JavaScript support.
-- LocalStorage and IndexedDB support for data persistence.
-- File system access to import/export JSON files.
-
-## Documentation
-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
-- For feature documentation and usage guides, see `application-structure.md`.
-- For recipe feature planning notes, see `recipe-feature-definition.md`.
-- Getting started guide: see `README.md`.
-
----
-
-# Release v2026-05-17-00-59
-
-## Overview
-This release introduces a dedicated Units of Measure page with full group and unit management, replacing the limited UoM section that was previously embedded in Settings.
-
-## New Features
-- **Units of Measure Page**: A new top-level page accessible from the main navigation menu. Displays all units organized by group and supports adding, editing, and removing units and groups.
-- **Group Management**: Each group now has a `…` action menu with Move Up, Move Down, Rename, and Remove options. Remove is disabled when the group still contains units.
-- **Add Group**: A new "+ Add Group" button on the Units of Measure page allows creating empty groups before populating them with units.
-- **Edit Any Unit**: All units, including seeded ones, can now be fully edited from the Units of Measure page.
-- **Remove Unit**: Units can be removed individually via a confirmation prompt from the unit's action menu.
-
-## Improvements
-- **Edit Unit Modal**: Now includes a Group field so users can move a unit to a different group while editing.
-- **Create Unit Modal**: Group selector now uses the current list of known groups rather than a fixed hardcoded set.
-- **Group Display Order**: The order of groups on the Units of Measure page is saved per-device and persists across sessions.
-- **Empty Group Placeholder**: Groups with no units display a placeholder row so the card layout renders correctly.
-
-## Bug Fixes
-- **Recipe Tags Dropdown on Mobile**: The tags dropdown no longer opens off-screen to the left on small displays.
-
-## Technical Changes
-- Added `deleteUnitOfMeasure` and `renameGroup` APIs to the recipe service.
-- Added `/uom` route to the app router.
-- Added `UOM_GROUP_ORDER` setting key (`uomGroupOrder`, default `[]`) for persisting group display order.
-- Removed the Units of Measure section from the Settings page.
-- Added `uom-page.js` to both `src/` and `docs/` and registered it in `index.html`.
-- Removed the `isSeeded` edit restriction from `updateUnitOfMeasure`.
-
-## Installation
-1. Clone or pull the latest code from the repository.
-2. Open `src/index.html` or `docs/index.html` in a web browser.
-
-## Requirements
-- Modern web browser with ES5 JavaScript support.
-- LocalStorage and IndexedDB support for data persistence.
-
-## Documentation
-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
-- For feature documentation and usage guides, see `application-structure.md`.
-- For recipe feature planning notes, see `recipe-feature-definition.md`.
-
----
-
-# Release v2026-05-03-20-40
-
-## Overview
-This release adds complete quantity and unit-of-measure support to recipe ingredients, including seeded units, add/edit flows, and ingredient display updates.
-
-## New Features
-- **Ingredient Unit Selection**: Add and edit ingredient flows now include a Unit selector next to Quantity.
-- **Custom Units in Ingredient Modal**: Unit selection now supports inline `+ Add Unit...` creation without leaving the ingredient modal.
-- **Units Management in Settings**: Settings now includes a Units of Measure section to view grouped units, add custom units, and edit non-seeded units.
-- **Seeded Unit Catalog**: Recipes now include seeded Imperial, Metric, Unit, and Size units with behavior metadata.
-
-## Improvements
-- **Decimal Quantity Support**: Ingredient quantities now store decimal values for recipe and version items.
-- **Ingredient Row Quantity Badge**: Recipe ingredient rows now display quantity with unit abbreviation in a compact badge.
-- **Add to Grocery List Context**: Ingredient selection in Add to Grocery List now shows quantity and unit badges for clearer review before adding.
-- **Quantity Input Layout**: Quantity and Unit controls now share a single row for faster entry and editing.
-
-## Bug Fixes
-- **Unit Dropdown Loading**: Unit lists now load reliably by reading all units and filtering active records in code.
-- **Version Ingredient Editing**: Non-latest version ingredient edits now correctly save updated quantity and unit values.
-
-## Technical Changes
-- Bumped IndexedDB schema version to 7.
-- Added `unitOfMeasures` store, indexes, and idempotent seed migration.
-- Added recipe service APIs for unit retrieval, creation, and updates.
-- Extended recipe/version item snapshots and detail records with `quantityValue` and `unitOfMeasureId`.
-- Removed recipe ingredient `More/Less` quantity actions from the row action menu.
-- Removed the completed quantity/UOM planning doc (`QUANTITY_UOM.md`).
-
-## Installation
-1. Clone or pull the latest code from the repository.
-2. Open `src/index.html` or `docs/index.html` in a web browser.
-
-## Requirements
-- Modern web browser with ES5 JavaScript support.
-- LocalStorage and IndexedDB support for data persistence.
-
-## Documentation
-- Release history is available on GitHub Releases: https://github.com/Ignyos/KAP/releases
-- For feature documentation and usage guides, see `application-structure.md`.
-- For recipe feature planning notes, see `recipe-feature-definition.md`.
+- Step editor requirements: `requirements/recipe-step-editor-requirements.md`.
+- Prepare mode requirements draft: `requirements/prepare-recipe-mode-requirements.md`.
